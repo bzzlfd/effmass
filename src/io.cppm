@@ -24,25 +24,25 @@ public:
     explicit GKK(const std::string& filename);  // open file and read metadata
     ~GKK();
     GKK(const GKK&) = delete;                   // disable copy
-    GKK& operator=(const GKK&) = delete;
+    auto operator=(const GKK&) -> GKK& = delete;
     GKK(GKK&& other) noexcept;                  // enable move
-    GKK& operator=(GKK&& other) noexcept;
+    auto operator=(GKK&& other) noexcept -> GKK&;
 
-    const GKKMetadata& metadata() const { return meta_; }  // get metadata
-    const KPointGVecs& loadKPoint(int ikpt);    // load k-point data (with cache)
-    int currentKPoint() const { return current_kpt_; }     // current k-point index
-    const KPointGVecs& currentData() const { return current_data_; }  // current data
+    auto metadata() const -> const GKKMetadata& { return meta_; }  // get metadata
+    auto loadKPoint(int ikpt) -> const KPointGVecs&;    // load k-point data (with cache)
+    auto currentKPoint() const -> int { return current_kpt_; }     // current k-point index
+    auto currentData() const -> const KPointGVecs& { return current_data_; }  // current data
 
 private:
-    int readRecordLength();                     // read record length marker
-    void checkRecordLength(int expected);       // verify record length marker
-    void readRecord(void* dst, std::size_t nbytes, const char* context); // read full record data
+    auto readRecordLength() -> int;                     // read record length marker
+    auto checkRecordLength(int expected) -> void;       // verify record length marker
+    auto readRecord(void* dst, std::size_t nbytes, const char* context) -> void; // read full record data
 
-    void readMetadata();                        // read file metadata
-    void readNgtotnod(int record_len);          // read ngtotnod array
-    void skipRecord();                            // skip one Fortran record by reading its length markers
-    void computeOffsets();                        // compute file offset per k-point
-    void seekToKPoint(int ikpt);                // seek to k-point data
+    auto readMetadata() -> void;                        // read file metadata
+    auto readNgtotnod(int record_len) -> void;          // read ngtotnod array
+    auto skipRecord() -> void;                            // skip one Fortran record by reading its length markers
+    auto computeOffsets() -> void;                        // compute file offset per k-point
+    auto seekToKPoint(int ikpt) -> void;                // seek to k-point data
 
     std::string filename_;                      // file name
     std::FILE* fp_;                             // file handle
@@ -114,7 +114,7 @@ GKK::GKK(GKK&& other) noexcept
     }
 }
 
-GKK& GKK::operator=(GKK&& other) noexcept {
+auto GKK::operator=(GKK&& other) noexcept -> GKK& {
     if (this != &other) {
         if (fp_) std::fclose(fp_);
 
@@ -144,7 +144,7 @@ GKK& GKK::operator=(GKK&& other) noexcept {
     return *this;
 }
 
-int GKK::readRecordLength() {
+auto GKK::readRecordLength() -> int {
     int length;
     if (std::fread(&length, sizeof(int), 1, fp_) != 1) {
         throw std::runtime_error("Failed to read record length marker");
@@ -152,7 +152,7 @@ int GKK::readRecordLength() {
     return length;
 }
 
-void GKK::checkRecordLength(int expected_length) {
+auto GKK::checkRecordLength(int expected_length) -> void {
     int length;
     if (std::fread(&length, sizeof(int), 1, fp_) != 1) {
         throw std::runtime_error("Failed to read record length marker");
@@ -162,7 +162,7 @@ void GKK::checkRecordLength(int expected_length) {
     }
 }
 
-void GKK::readRecord(void* dst, std::size_t nbytes, const char* context) {
+auto GKK::readRecord(void* dst, std::size_t nbytes, const char* context) -> void {
     int len = readRecordLength();
     if (len != static_cast<int>(nbytes)) {
         throw std::runtime_error(std::string(context) + ": record size mismatch");
@@ -173,7 +173,7 @@ void GKK::readRecord(void* dst, std::size_t nbytes, const char* context) {
     checkRecordLength(len);
 }
 
-void GKK::readMetadata() {
+auto GKK::readMetadata() -> void {
     // Record 1: n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda
     int header[8];
     readRecord(header, sizeof(header), "header");
@@ -211,7 +211,7 @@ void GKK::readMetadata() {
     checkRecordLength(len);
 }
 
-void GKK::readNgtotnod(int record_len) {
+auto GKK::readNgtotnod(int record_len) -> void {
     int nnodes_check;
     if (std::fread(&nnodes_check, sizeof(int), 1, fp_) != 1) {
         throw std::runtime_error("Failed to read nnodes");
@@ -241,7 +241,7 @@ void GKK::readNgtotnod(int record_len) {
     }
 }
 
-void GKK::skipRecord() {
+auto GKK::skipRecord() -> void {
     int len = readRecordLength();
     if (std::fseek(fp_, len, SEEK_CUR) != 0) {
         throw std::runtime_error("Failed to skip record data");
@@ -249,7 +249,7 @@ void GKK::skipRecord() {
     checkRecordLength(len);
 }
 
-void GKK::computeOffsets() {
+auto GKK::computeOffsets() -> void {
     // record the starting file offset for each k-point's data
     kpt_data_offsets_.resize(meta_.nkpt);
 
@@ -269,7 +269,7 @@ void GKK::computeOffsets() {
     }
 }
 
-void GKK::seekToKPoint(int ikpt) {
+auto GKK::seekToKPoint(int ikpt) -> void {
     if (ikpt < 0 || ikpt >= meta_.nkpt) {
         throw std::out_of_range("Invalid k-point index");
     }
@@ -279,7 +279,7 @@ void GKK::seekToKPoint(int ikpt) {
     }
 }
 
-const KPointGVecs& GKK::loadKPoint(int ikpt) {
+auto GKK::loadKPoint(int ikpt) -> const KPointGVecs& {
     // check if already in buffer
     if (ikpt == current_kpt_) {
         return current_data_;

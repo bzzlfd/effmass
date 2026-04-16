@@ -16,4 +16,4 @@
 - `design/lattice_vectors_indexConvention.md`：**[约定-001]** 晶格矢量采用向量紧密安排（`AL[n][c]`）的索引约定
 - `design/physical_constants.md`：物理常量命名规范与 `constexpr` 使用约定
 - `design/io_cppm_design.md`：`io.cppm` 中 `GKK` 类的接口设计与实现细节
-- `design/cpp_naming_conventions.md`：C++ 命名规范（常量、类、成员变量、函数等）
+- `design/cpp_conventions.md`：C++ 编码约定（命名规范、函数返回类型写法等）
