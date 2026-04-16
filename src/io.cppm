@@ -12,10 +12,9 @@ export struct GKKMetadata {
     std::vector<int> ng_tot_per_kpt;  // total G-vectors per k-point
 };
 
-// k-point G-vector data view - pointers to contiguous memory
+// k-point G-vector data view - non-owning spans to contiguous memory
 export struct KPointGVecs {
-    std::size_t ng;           // number of G-vectors
-    const double *g, *gx, *gy, *gz;  // |G+k|²/2, Gx, Gy, Gz
+    std::span<const double> g, gx, gy, gz;  // |G+k|²/2, Gx, Gy, Gz
 };
 
 // GKK class - abstraction for OUT.GKK file
@@ -53,7 +52,7 @@ private:
 
     // buffers: working arrays (contiguous) + file read buffer (reused)
     std::vector<double> g_buf_, gx_buf_, gy_buf_, gz_buf_;
-    KPointGVecs current_data_{0, nullptr, nullptr, nullptr, nullptr};  // data view
+    KPointGVecs current_data_;  // data view
 };
 
 // Implementation
@@ -77,8 +76,8 @@ GKK::GKK(const std::string& filename)
     gy_buf_.resize(max_ng);
     gz_buf_.resize(max_ng);
 
-    // initialize data view pointers
-    current_data_ = {0, nullptr, nullptr, nullptr, nullptr};
+    // initialize empty data view
+    current_data_ = {};
 
     // compute file offset for each k-point
     computeOffsets();
@@ -105,12 +104,13 @@ GKK::GKK(GKK&& other) noexcept
 {
     other.fp_ = nullptr;
     other.current_kpt_ = -1;
-    // update current_data_ pointers to point to our own buffers
-    if (current_data_.ng > 0) {
-        current_data_.g = g_buf_.data();
-        current_data_.gx = gx_buf_.data();
-        current_data_.gy = gy_buf_.data();
-        current_data_.gz = gz_buf_.data();
+    // update current_data_ spans to point to our own buffers
+    if (!current_data_.g.empty()) {
+        const auto ng = current_data_.g.size();
+        current_data_.g  = std::span<const double>(g_buf_.data(), ng);
+        current_data_.gx = std::span<const double>(gx_buf_.data(), ng);
+        current_data_.gy = std::span<const double>(gy_buf_.data(), ng);
+        current_data_.gz = std::span<const double>(gz_buf_.data(), ng);
     }
 }
 
@@ -133,12 +133,13 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
         other.fp_ = nullptr;
         other.current_kpt_ = -1;
 
-        // update pointers
-        if (current_data_.ng > 0) {
-            current_data_.g = g_buf_.data();
-            current_data_.gx = gx_buf_.data();
-            current_data_.gy = gy_buf_.data();
-            current_data_.gz = gz_buf_.data();
+        // update spans
+        if (!current_data_.g.empty()) {
+            const auto ng = current_data_.g.size();
+            current_data_.g  = std::span<const double>(g_buf_.data(), ng);
+            current_data_.gx = std::span<const double>(gx_buf_.data(), ng);
+            current_data_.gy = std::span<const double>(gy_buf_.data(), ng);
+            current_data_.gz = std::span<const double>(gz_buf_.data(), ng);
         }
     }
     return *this;
@@ -307,11 +308,10 @@ auto GKK::loadKPoint(int ikpt) -> const KPointGVecs& {
     }
 
     // update current data view
-    current_data_.ng = total_pos;
-    current_data_.g = g_buf_.data();
-    current_data_.gx = gx_buf_.data();
-    current_data_.gy = gy_buf_.data();
-    current_data_.gz = gz_buf_.data();
+    current_data_.g  = std::span<const double>(g_buf_.data(), total_pos);
+    current_data_.gx = std::span<const double>(gx_buf_.data(), total_pos);
+    current_data_.gy = std::span<const double>(gy_buf_.data(), total_pos);
+    current_data_.gz = std::span<const double>(gz_buf_.data(), total_pos);
 
     current_kpt_ = ikpt;
     return current_data_;
