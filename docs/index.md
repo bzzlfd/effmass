@@ -11,6 +11,7 @@
 - `note/atomic_units.md`：Hartree 原子单位制的约定与单位转换
 - `note/fortran_record_format.md`：Fortran unformatted binary 的 record 格式
 - `note/file_formats.md`：OUT.GKK、OUT.WG、OUT.EIGEN、OUT.KPT 的文件格式解析
+- `note/clangd_cpp23_modules.md`：clangd 如何通过 `compile_commands.json` 自动解析 `import std`，无需硬编码 `std.pcm` 路径
 
 ## 设计决策（design/）
 
