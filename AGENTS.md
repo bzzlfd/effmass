@@ -8,6 +8,7 @@
 ## 技术栈
 
 - **主要语言**: C++
+- **编译工具**：clang++, cmake, ninja
 - **文档**: Markdown
 - **文件格式**: Fortran unformatted binary（OUT.GKK, OUT.WG, OUT.EIGEN）、 text（OUT.KPT）
 
@@ -18,7 +19,8 @@
 ├── AGENTS.md           # 本文件 - AI 编码代理指南
 ├── src                 # 源代码地址
 ├── docs                # 开发路线、目前正在开发的进程、编码规范、设计细节和关键决定、公式笔记、参考资料
-└── test                # 测试
+├── test                # 测试
+└── .tree               # 多开发目标时，使用 git worktree 同时工作，在此目录下创建新的 worktree
 ```
 
 ### src 目录

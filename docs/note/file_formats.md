@@ -4,7 +4,7 @@
 
 ## OUT.GKK
 
-`OUT.GKK` 文件存储每个 k 点对应的平面波 G 向量信息。该文件为 Fortran unformatted binary 格式，采用 [Fortran Record 格式](fortran_record_format.md)。
+`OUT.GKK` 文件存储每个 k 点对应的平面波波矢信息。该文件为 Fortran unformatted binary 格式，采用 [Fortran Record 格式](fortran_record_format.md)。
 
 ### 文件结构（按读取顺序）
 
@@ -91,9 +91,85 @@ close(11)
 
 ## OUT.WG
 
-`OUT.WG` 文件存储波函数系数（复数）。
+`OUT.WG` 文件存储平面波基组下的波函数展开系数。该文件同样为 Fortran unformatted binary 格式。
 
-> TODO: 待补充详细的 record 结构和读取方法。
+### 文件结构（按读取顺序）
+
+以下是从 `docs/reference/plot_wg.f90` 中提取的 `OUT.WG` 读取逻辑：
+
+```fortran
+open(11, file=filename, form="unformatted")
+rewind(11)
+
+! Record 1: 元数据头（与 OUT.GKK 类似，但多了一个 mx）
+read(11) n1_t, n2_t, n3_t, mx, mg_nx, nnodes, nkpt, is_SO, islda
+
+! Record 2: 截断能
+read(11) Ecut_t
+
+! Record 3: 晶格矢量 AL(3,3)，文件中单位为 Å
+read(11) AL_t
+AL_t = AL_t / A_AU_1   ! 转换为原子单位（Bohr）
+
+! Record 4: 每个 k 点、每个节点上的 G 向量数量
+read(11) nnodes, ((ngtotnod_9_t(inode, kpt), inode=1, nnodes), kpt=1, nkpt)
+
+if (is_SO .eq. 1) then
+    ngtotnod_9_t = ngtotnod_9_t / 2
+endif
+
+! 后续：按 k 点 → 节点 → 能带 顺序存储波函数系数
+do kpt = 1, nkpt
+    do inode = 1, nnodes
+        do im = 1, mx
+            read(11) ug_n_tmp
+            do ig = 1, ngtotnod_9_t(inode, kpt)
+                ug_one(num+ig) = ug_n_tmp(ig)
+            enddo
+            if (is_SO .eq. 1) then
+                do ig = 1, ngtotnod_9_t(inode, kpt)
+                    ug_two(num+ig) = ug_n_tmp(ngtotnod_9_t(inode, kpt) + ig)
+                enddo
+            endif
+            num = num + ngtotnod_9_t(inode, kpt)
+        enddo
+    enddo
+enddo
+close(11)
+```
+
+### 数据存储方式总结
+
+| Record | 内容 | 数据类型 | 说明 |
+|--------|------|----------|------|
+| 1 | `n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda` | 8 × `int` | FFT 网格、**能带数**、单节点最大 G 数、节点数、k 点数、自旋轨道耦合标志、自旋极化标志 |
+| 2 | `Ecut` | 1 × `double` | 平面波截断能 |
+| 3 | `AL(3,3)` | 9 × `double` | 晶格矢量，文件中为 **Å**，读取后应转为 **Bohr** |
+| 4 | `nnodes`, `ngtotnod(inode, kpt)` | `int` + `nnodes × nkpt` × `int` | 每个节点在每个 k 点上的 G 向量数量 |
+| 5+ | k 点 → 节点 → 能带 循环数据 | 每个 `(inode, im)` 一个 record | 波函数系数 `ug` |
+
+#### 波函数数据布局
+
+对于每个 k 点 `kpt = 1, ..., nkpt`：
+- 遍历每个计算节点 `inode = 1, ..., nnodes`
+- 每个节点内遍历每个能带 `im = 1, ..., mx`
+- 每个 `(inode, im)` 对应 **一个独立的 Fortran record**：
+  - `ug(ngtotnod)` — `complex*16` 数组，存储该节点上该能带的波函数系数
+
+### 自旋轨道耦合处理
+
+当 `is_SO == 1` 时：
+
+1. **`ngtotnod`** 需要除以 2（同 OUT.GKK）
+2. 每个波函数 record 包含 **两个连续存储的 `complex*16` 数组**，长度各为 `ngtotnod`：
+   - 前半部分：`ug_up` — 自旋向上分量
+   - 后半部分：`ug_down` — 自旋向下分量
+
+> 因此读取一个 band 数据时，若 `is_SO == 1`，record 的总长度为 `2 × ngtotnod × sizeof(complex*16)`；否则为 `ngtotnod × sizeof(complex*16)`。
+
+### 与 OUT.GKK 的关系
+
+`OUT.WG` 的元数据头部（`n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda, Ecut, AL, ngtotnod`）**必须与 `OUT.GKK` 保持一致**（仅额外多出 `mx` 字段）。实际使用时应验证两者元数据的一致性。
 
 ## OUT.EIGEN
 

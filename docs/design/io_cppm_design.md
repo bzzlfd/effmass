@@ -1,6 +1,6 @@
 # `io.cppm` 设计细节与接口
 
-本文档介绍 `src/io.cppm` 中 `GKK` 类的设计思想与对外接口。关于 `OUT.GKK` 等文件的二进制格式定义，请参阅 [`note/file_formats.md`](../note/file_formats.md)。
+本文档介绍 `src/io.cppm` 中 `GKK` 与 `WG` 类的设计思想与对外接口。关于文件二进制格式定义，请参阅 [`note/file_formats.md`](../note/file_formats.md)。
 
 ## 模块导出
 
@@ -97,3 +97,58 @@ const KPointGVecs& currentData() const;        // 当前缓存的数据视图
 - **元数据不一致**：`nnodes mismatch` 等异常
 
 所有异常信息都包含上下文描述（如 `header`、`Ecut`、`gkk` 等），便于定位出错的 record。
+
+## `WG` 类
+
+`WG` 类封装了对 `OUT.WG` 波函数系数文件的读取操作。其设计思想与 `GKK` 类基本一致，重复部分不再赘述，仅记录差异点。
+
+### 数据结构
+
+#### `WGMetadata`
+
+与 `GKKMetadata` 结构相同，但多一个 `mx` 字段表示能带数：
+
+```cpp
+export struct WGMetadata {
+    int n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda;
+    double Ecut;
+    double AL[3][3];
+    std::vector<int> ng_tot_per_kpt;
+};
+```
+
+#### `WGCoeffs`
+
+存储单个 k 点、单个能带的波函数系数视图：
+
+```cpp
+export struct WGCoeffs {
+    std::span<const std::complex<double>> up;     // 自旋向上分量
+    std::span<const std::complex<double>> down;   // 仅在 is_SO == 1 时有效
+};
+```
+
+### 公共接口
+
+```cpp
+const WGMetadata& metadata() const;
+const WGCoeffs& loadBand(int ikpt, int iband);  // 加载指定 k 点、指定能带（带缓存）
+int currentKPoint() const;
+int currentBand() const;
+const WGCoeffs& currentData() const;
+```
+
+### 与 `GKK` 的差异
+
+1. **偏移预计算维度不同**：
+   `OUT.WG` 的数据按 **k 点 → 节点 → 能带** 的三层嵌套顺序存储。因此 `computeOffsets()` 预计算的是每个 `(ikpt, iband)` 组合的文件偏移，而非仅每个 k 点。
+
+2. **自旋轨道耦合的数据布局**：
+   当 `is_SO == 1` 时，一个 Fortran record 中连续存放了向上和向下两个 `complex*16` 数组。`loadBand` 读取后将其拆分到内部缓冲区 `up_buf_` 和 `down_buf_` 中。
+
+3. **缓存粒度**：
+   `WG` 的缓存以 **(k-point, band)** 为最小粒度。这样当用户需要遍历同一 k 点的不同能带时，每次都会发生文件 seek。若后续发现这种访问模式很常见，可以考虑扩展为单 k 点全波段缓存。
+
+### 元数据一致性
+
+`OUT.WG` 的头部元数据（`n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda, Ecut, AL, ngtotnod`）必须与 `OUT.GKK` 保持一致（仅多出 `mx`）。当前类内部**暂不做交叉校验**，由调用方负责验证。
