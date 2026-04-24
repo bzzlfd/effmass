@@ -1,3 +1,6 @@
+module;
+#include <cstdio>
+
 export module io;
 
 import std;

@@ -41,4 +41,9 @@
 *.dwo
 
 /reference/
-*.immature 
+*.immature
+
+# Build directories
+build/
+Build/
+build-*/ 
