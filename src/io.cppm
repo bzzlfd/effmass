@@ -75,7 +75,7 @@ export struct WGCoeffs {
 // WG class - abstraction for OUT.WG file
 export class WG {
 public:
-    explicit WG(const std::string& filename);  // open file and read metadata
+    explicit WG(const std::string& filename, std::size_t cache_capacity = 4);  // open file and read metadata
     ~WG();
     WG(const WG&) = delete;                    // disable copy
     auto operator=(const WG&) -> WG& = delete;
@@ -86,9 +86,17 @@ public:
     auto loadBand(int ikpt, int iband) -> const WGCoeffs&;        // load band data (with cache)
     auto currentKPoint() const -> int { return current_kpt_; }     // current k-point index
     auto currentBand() const -> int { return current_band_; }      // current band index
-    auto currentData() const -> const WGCoeffs& { return current_data_; }  // current data
+    auto currentData() const -> const WGCoeffs& { return current_data_view_; }  // current data
 
 private:
+    struct CacheEntry {
+        int ikpt = -1;
+        int iband = -1;
+        std::vector<std::complex<double>> up;
+        std::vector<std::complex<double>> down;
+        WGCoeffs view;
+    };
+
     auto readRecordLength() -> int;                     // read record length marker
     auto checkRecordLength(int expected) -> void;       // verify record length marker
     auto readRecord(void* dst, std::size_t nbytes, const char* context) -> void; // read full record data
@@ -104,11 +112,18 @@ private:
     WGMetadata meta_;                           // metadata
     std::vector<std::vector<int>> ngtotnod_;    // G-vector count per k-point per node
     std::vector<long> band_offsets_;            // file offset per band per k-point
-    int current_kpt_ = -1;                      // currently cached k-point
-    int current_band_ = -1;                     // currently cached band
 
-    std::vector<std::complex<double>> up_buf_, down_buf_;
-    WGCoeffs current_data_;
+    // multi-band cache
+    std::vector<std::unique_ptr<CacheEntry>> cache_;  // cache entries (stable addresses via unique_ptr)
+    std::size_t cache_capacity_;                      // max cached bands
+    std::size_t cache_next_slot_ = 0;                 // next slot to replace in FIFO order
+
+    // track most recent loadBand
+    int current_kpt_ = -1;
+    int current_band_ = -1;
+    WGCoeffs current_data_view_;
+
+    std::vector<std::complex<double>> tmp_buf_;  // temporary buffer for is_SO record splitting
 };
 
 // Implementation of GKK
@@ -375,9 +390,11 @@ auto GKK::loadKPoint(int ikpt) -> const KPointGVecs& {
 
 // Implementation of WG
 
-WG::WG(const std::string& filename)
+WG::WG(const std::string& filename, std::size_t cache_capacity)
     : filename_(filename)
     , fp_(nullptr)
+    , cache_capacity_(cache_capacity)
+    , cache_next_slot_(0)
     , current_kpt_(-1)
     , current_band_(-1)
 {
@@ -388,14 +405,7 @@ WG::WG(const std::string& filename)
 
     readMetadata();
 
-    // preallocate working buffers
-    std::size_t max_ng = static_cast<std::size_t>(meta_.mg_nx) * meta_.nnodes;
-    up_buf_.resize(max_ng);
-    if (meta_.is_SO == 1) {
-        down_buf_.resize(max_ng);
-    }
-
-    current_data_ = {};
+    current_data_view_ = {};
 
     computeOffsets();
 }
@@ -412,22 +422,18 @@ WG::WG(WG&& other) noexcept
     , meta_(std::move(other.meta_))
     , ngtotnod_(std::move(other.ngtotnod_))
     , band_offsets_(std::move(other.band_offsets_))
+    , cache_(std::move(other.cache_))
+    , cache_capacity_(other.cache_capacity_)
+    , cache_next_slot_(other.cache_next_slot_)
     , current_kpt_(other.current_kpt_)
     , current_band_(other.current_band_)
-    , up_buf_(std::move(other.up_buf_))
-    , down_buf_(std::move(other.down_buf_))
-    , current_data_(other.current_data_)
+    , current_data_view_(other.current_data_view_)
+    , tmp_buf_(std::move(other.tmp_buf_))
 {
     other.fp_ = nullptr;
     other.current_kpt_ = -1;
     other.current_band_ = -1;
-    if (!current_data_.up.empty()) {
-        const auto ng = current_data_.up.size();
-        current_data_.up = std::span<const std::complex<double>>(up_buf_.data(), ng);
-        if (meta_.is_SO == 1) {
-            current_data_.down = std::span<const std::complex<double>>(down_buf_.data(), ng);
-        }
-    }
+    other.current_data_view_ = {};
 }
 
 auto WG::operator=(WG&& other) noexcept -> WG& {
@@ -439,23 +445,18 @@ auto WG::operator=(WG&& other) noexcept -> WG& {
         meta_ = std::move(other.meta_);
         ngtotnod_ = std::move(other.ngtotnod_);
         band_offsets_ = std::move(other.band_offsets_);
+        cache_ = std::move(other.cache_);
+        cache_capacity_ = other.cache_capacity_;
+        cache_next_slot_ = other.cache_next_slot_;
         current_kpt_ = other.current_kpt_;
         current_band_ = other.current_band_;
-        up_buf_ = std::move(other.up_buf_);
-        down_buf_ = std::move(other.down_buf_);
-        current_data_ = other.current_data_;
+        current_data_view_ = other.current_data_view_;
+        tmp_buf_ = std::move(other.tmp_buf_);
 
         other.fp_ = nullptr;
         other.current_kpt_ = -1;
         other.current_band_ = -1;
-
-        if (!current_data_.up.empty()) {
-            const auto ng = current_data_.up.size();
-            current_data_.up = std::span<const std::complex<double>>(up_buf_.data(), ng);
-            if (meta_.is_SO == 1) {
-                current_data_.down = std::span<const std::complex<double>>(down_buf_.data(), ng);
-            }
-        }
+        other.current_data_view_ = {};
     }
     return *this;
 }
@@ -591,10 +592,6 @@ auto WG::seekToBand(int ikpt, int iband) -> void {
 }
 
 auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
-    if (ikpt == current_kpt_ && iband == current_band_) {
-        return current_data_;
-    }
-
     if (ikpt < 0 || ikpt >= meta_.nkpt) {
         throw std::out_of_range("Invalid k-point index: " + std::to_string(ikpt));
     }
@@ -602,37 +599,64 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
         throw std::out_of_range("Invalid band index: " + std::to_string(iband));
     }
 
+    // check cache
+    for (const auto& entry : cache_) {
+        if (entry->ikpt == ikpt && entry->iband == iband) {
+            current_kpt_ = ikpt;
+            current_band_ = iband;
+            current_data_view_ = entry->view;
+            return current_data_view_;
+        }
+    }
+
+    // cache miss: read from file
     seekToBand(ikpt, iband);
 
-    std::size_t total_pos = 0;
+    CacheEntry* entry = nullptr;
+    if (cache_.size() < cache_capacity_) {
+        cache_.emplace_back(std::make_unique<CacheEntry>());
+        entry = cache_.back().get();
+    } else {
+        entry = cache_[cache_next_slot_].get();
+        cache_next_slot_ = (cache_next_slot_ + 1) % cache_capacity_;
+    }
 
+    entry->ikpt = ikpt;
+    entry->iband = iband;
+
+    const std::size_t total_ng = meta_.ng_tot_per_kpt[ikpt];
+    entry->up.resize(total_ng);
+    if (meta_.is_SO == 1) {
+        entry->down.resize(total_ng);
+    }
+
+    std::size_t pos = 0;
     for (int inode = 0; inode < meta_.nnodes; ++inode) {
         int ng = ngtotnod_[ikpt][inode];
         if (ng == 0) continue;
 
         if (meta_.is_SO == 1) {
-            // record contains both spin-up and spin-down components
-            std::vector<std::complex<double>> tmp(static_cast<std::size_t>(ng) * 2);
-            readRecord(tmp.data(), tmp.size() * sizeof(std::complex<double>), "wg");
+            tmp_buf_.resize(static_cast<std::size_t>(ng) * 2);
+            readRecord(tmp_buf_.data(), tmp_buf_.size() * sizeof(std::complex<double>), "wg");
             for (int ig = 0; ig < ng; ++ig) {
-                up_buf_[total_pos + ig] = tmp[ig];
-                down_buf_[total_pos + ig] = tmp[ng + ig];
+                entry->up[pos + ig] = tmp_buf_[ig];
+                entry->down[pos + ig] = tmp_buf_[ng + ig];
             }
         } else {
-            readRecord(up_buf_.data() + total_pos, ng * sizeof(std::complex<double>), "wg");
+            readRecord(entry->up.data() + pos, ng * sizeof(std::complex<double>), "wg");
         }
-
-        total_pos += static_cast<std::size_t>(ng);
+        pos += static_cast<std::size_t>(ng);
     }
 
-    current_data_.up = std::span<const std::complex<double>>(up_buf_.data(), total_pos);
+    entry->view.up = std::span<const std::complex<double>>(entry->up.data(), entry->up.size());
     if (meta_.is_SO == 1) {
-        current_data_.down = std::span<const std::complex<double>>(down_buf_.data(), total_pos);
+        entry->view.down = std::span<const std::complex<double>>(entry->down.data(), entry->down.size());
     } else {
-        current_data_.down = {};
+        entry->view.down = {};
     }
 
     current_kpt_ = ikpt;
     current_band_ = iband;
-    return current_data_;
+    current_data_view_ = entry->view;
+    return current_data_view_;
 }

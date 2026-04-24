@@ -144,10 +144,21 @@ const WGCoeffs& currentData() const;
    `OUT.WG` 的数据按 **k 点 → 节点 → 能带** 的三层嵌套顺序存储。因此 `computeOffsets()` 预计算的是每个 `(ikpt, iband)` 组合的文件偏移，而非仅每个 k 点。
 
 2. **自旋轨道耦合的数据布局**：
-   当 `is_SO == 1` 时，一个 Fortran record 中连续存放了向上和向下两个 `complex*16` 数组。`loadBand` 读取后将其拆分到内部缓冲区 `up_buf_` 和 `down_buf_` 中。
+   当 `is_SO == 1` 时，一个 Fortran record 中连续存放了向上和向下两个 `complex*16` 数组。`loadBand` 读取后将其拆分：用成员 `tmp_buf_` 作为临时缓冲区读入完整 record，再分别拷贝到缓存条目的 `up` 和 `down` 向量中。
 
-3. **缓存粒度**：
-   `WG` 的缓存以 **(k-point, band)** 为最小粒度。这样当用户需要遍历同一 k 点的不同能带时，每次都会发生文件 seek。若后续发现这种访问模式很常见，可以考虑扩展为单 k 点全波段缓存。
+3. **多 band 缓存**：
+   `WG` 支持缓存**多个** `(k-point, band)` 组合，数量由构造函数参数 `cache_capacity` 控制（默认 `4`）。
+
+   缓存实现要点：
+   - **独立存储**：每个缓存条目（`CacheEntry`）拥有独立的 `std::vector<std::complex<double>>`，存储该 band 完整的 up/down 系数数据，以及一个 `WGCoeffs` 视图（`std::span`）指向自身数据。
+   - **地址稳定**：使用 `std::vector<std::unique_ptr<CacheEntry>>` 管理条目。`unique_ptr` 保证 `CacheEntry` 对象地址在容器重新分配时不发生变化，因此 `WGCoeffs` 内部的 `std::span` 始终有效。
+   - **替换策略**：采用 **FIFO 环形替换**。当缓存已满且未命中时，复用 `cache_next_slot_` 指向的旧槽位，然后该索引循环前进。
+   - **缓存命中**：`loadBand` 先在缓存中线性查找；命中后直接返回对应条目的视图，避免文件 IO。
+
+   这意味着遍历同一 k 点的多个能带时，只要在缓存容量范围内，就不会重复读取磁盘。返回的 `const WGCoeffs&` 只要该 band 未被逐出缓存就保持有效。
+
+4. **移动语义简化**：
+   由于每个 `CacheEntry` 通过 `unique_ptr` 拥有独立堆内存，移动 `WG` 时各条目地址不变，内部 `std::span` 无需像 `GKK` 那样手动修复指针。移动构造/赋值只需直接转移 `unique_ptr` 所有权即可。
 
 ### 元数据一致性
 
