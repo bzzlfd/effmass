@@ -9,21 +9,10 @@ description: >
 
 ## 1. 定位系统上的 std.cppm
 
-先确定系统安装的 LLVM 版本：
-
 ```bash
-llvm-config --version
-# 或
-clang++ --version | head -1
+clang++ -print-resource-dir
 ```
-
-然后到对应版本目录下寻找 `std.cppm`：
-
-```bash
-ls /usr/lib/llvm-20/share/libc++/v1/std.cppm
-```
-
-将 `20` 替换为实际的 LLVM 主版本号。
+会输出类似 `/usr/lib/llvm-20/lib/clang/20` 的路径，`std.cppm` 就在这个路径下的 `share/libc++/v1/std.cppm`。 
 
 ## 2. 预编译 std.pcm
 
