@@ -12,6 +12,15 @@
 - **文档**: Markdown
 - **文件格式**: Fortran unformatted binary（OUT.GKK, OUT.WG, OUT.EIGEN）、 text（OUT.KPT）
 
+## 构建步骤
+
+```bash
+cmake -B build -G Ninja
+cmake --build build
+```
+
+C++23 modules + `import std` 实验性支持，依赖 libc++。构建失败时删除 `build/` 目录重新配置。
+
 ## 项目结构
 
 ```
