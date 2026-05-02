@@ -13,9 +13,13 @@ project(effmass LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# pugixml (used by UPF reader)
+add_subdirectory(vendor/pugixml)
+
 # Library target for the io module
 add_library(io)
 target_sources(io
     PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES src/io.cppm
 )
+target_link_libraries(io PRIVATE pugixml::pugixml)
