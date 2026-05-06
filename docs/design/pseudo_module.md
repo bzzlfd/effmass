@@ -47,13 +47,14 @@ NCPPUPF
 │   └── rab[]        ← PP_RAB
 ├── vloc_            ← PP_LOCAL
 ├── NCPPUPFNonlocal  ← PP_NONLOCAL
-│   ├── beta[][]     ← PP_BETA.1 ... PP_BETA.nbeta
+│   ├── beta[][]     ← PP_BETA.1 ... PP_BETA.nbeta（截断至 kbeta）
 │   ├── lll[]        ← PP_BETA.* / angular_momentum
 │   ├── kbeta[]      ← PP_BETA.* / cutoff_radius_index
 │   ├── rcut[]       ← PP_BETA.* / cutoff_radius
 │   └── dion         ← PP_DIJ (Matrix 类型)
 ├── NCPPUPFWavefunction  ← PP_PSWFC
-│   ├── chi[][]      ← PP_CHI.1 ... PP_CHI.nwfc
+│   ├── chi[][]      ← PP_CHI.1 ... PP_CHI.nwfc（截断尾部零）
+│   ├── kchi[]       ← 有效长度（最后一个非零元素位置）
 │   ├── lchi[]       ← PP_CHI.* / l
 │   ├── oc[]         ← PP_CHI.* / occupation
 │   └── labels[]     ← PP_CHI.* / label
@@ -62,9 +63,27 @@ NCPPUPF
 
 #### 扁平存储 vs. 嵌套容器
 
-- **`beta`** 与 **`chi`**：使用 `std::vector<std::vector<double>>`。每一行长度固定为 `mesh_size`，该尺度（mesh ~ 10³，nbeta ~ 10）下的间接寻址开销可忽略。
+- **`beta`** 与 **`chi`**：使用 `std::vector<std::vector<double>>`。读取后按实际有效长度截断尾部零，因此每行长度 ≤ `mesh_size`，该尺度（mesh ~ 10³，nbeta ~ 10）下的间接寻址开销可忽略。
 - **`dion`**：使用自定义的 `Matrix` 值类型。$D_{ij}$ 是 $n_{\beta} \times n_{\beta}$ 对称矩阵，扁平连续存储更适合矩阵运算，且 C++23 多维 `operator[](i, j)` 提供了自然访问语法。
 - **`vloc_`** 与 **`rho_at_`**：使用 `std::vector<double>` 并通过 `std::span<const double>` 暴露，方便调用方直接遍历而无需深拷贝。
+
+### 数据截断策略
+
+UPF 文件中的 `beta` 与 `chi` 数组在 `cutoff_radius_index`（`kbeta`）之后通常全部为零。若保留完整的 `mesh_size`（~10³）长度，会造成大量无效内存占用，并增加后续数值积分的循环开销。
+
+**`beta` 的截断**：
+- 依据 XML 属性 `cutoff_radius_index`（UPF 中为 1-based 索引）。
+- 读取完整数组后执行 `resize(kbeta)`，vector 长度变为 `kbeta`（0 ~ kbeta-1）。
+- `kbeta` 由文件作者设定，通常略大于实际最后一个非零值的位置，属于安全的保守截断。
+
+**`chi` 的截断**：
+- `chi` 没有现成的 cutoff 属性，因此从末尾向前扫描，去掉精确为 `0.0` 的尾部元素。
+- 截断后的有效长度存入 `kchi[]`，与 `beta` 的 `kbeta[]` 形成对称设计。
+- 扫描使用 `== 0.0` 比较；UPF v.2 中的尾部零是格式化输出产生的精确零值（如 `0.0000000000E+00`），不存在浮点噪声问题。
+
+**截断后的索引一致性**：
+- `mesh.r` 与 `mesh.rab` 仍保持完整 `mesh_size` 长度。
+- 截断后的 `beta[i][ir]` 与 `chi[i][ir]` 的索引 `ir` 仍与 `mesh.r[ir]`、 `mesh.rab[ir]` 一一对应，只是循环上限从 `mesh_size` 变为 `beta[i].size()` 或 `chi[i].size()`。
 
 ### 解析流程
 

@@ -68,7 +68,8 @@ export struct NCPPUPFNonlocal {
 
 // === Wavefunction data (pseudo atomic orbitals) ===
 export struct NCPPUPFWavefunction {
-    std::vector<std::vector<double>> chi;   // [nwfc][mesh]
+    std::vector<std::vector<double>> chi;   // [nwfc][effective_mesh]
+    std::vector<int> kchi;                   // [nwfc] effective length (truncated trailing zeros)
     std::vector<int> lchi;                   // [nwfc] angular momentum
     std::vector<double> oc;                  // [nwfc] occupation
     std::vector<std::string> labels;         // [nwfc] label
@@ -285,6 +286,12 @@ auto NCPPUPF::readNonlocal(const pugi::xml_node& root) -> void {
         if (data.size() != static_cast<std::size_t>(mesh)) {
             throw std::runtime_error("UPF: <" + tag + "> size mismatch");
         }
+        // Truncate trailing zeros using cutoff_radius_index (1-based in UPF)
+        int cutoff = nonlocal_.kbeta[i];
+        if (cutoff < 0 || cutoff > mesh) {
+            throw std::runtime_error("UPF: <" + tag + "> invalid cutoff_radius_index");
+        }
+        data.resize(static_cast<std::size_t>(cutoff));
         nonlocal_.beta[i] = std::move(data);
     }
 
@@ -308,6 +315,7 @@ auto NCPPUPF::readWavefunctions(const pugi::xml_node& root) -> void {
     const int mesh = header_.mesh_size;
 
     wfc_.chi.resize(nw, std::vector<double>(mesh));
+    wfc_.kchi.resize(nw);
     wfc_.lchi.resize(nw);
     wfc_.oc.resize(nw);
     wfc_.labels.resize(nw);
@@ -327,6 +335,13 @@ auto NCPPUPF::readWavefunctions(const pugi::xml_node& root) -> void {
         if (data.size() != static_cast<std::size_t>(mesh)) {
             throw std::runtime_error("UPF: <" + tag + "> size mismatch");
         }
+        // Truncate trailing zeros
+        int cutoff = mesh;
+        while (cutoff > 0 && data[static_cast<std::size_t>(cutoff) - 1] == 0.0) {
+            --cutoff;
+        }
+        data.resize(static_cast<std::size_t>(cutoff));
+        wfc_.kchi[i] = cutoff;
         wfc_.chi[i] = std::move(data);
     }
 }
