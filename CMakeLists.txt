@@ -16,10 +16,27 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # pugixml (used by UPF reader)
 add_subdirectory(vendor/pugixml)
 
-# Library target for the io module
+# Library target for io module
 add_library(io)
 target_sources(io
     PUBLIC
-        FILE_SET cxx_modules TYPE CXX_MODULES FILES src/io.cppm
+        FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            src/io.cppm
 )
-target_link_libraries(io PRIVATE pugixml::pugixml)
+
+# Library target for pseudo-potential module
+add_library(pseudo)
+target_sources(pseudo
+    PUBLIC
+        FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            src/pseudo.cppm
+            src/pseudo/ncpp-upf.cppm
+            src/pseudo/uspp-upf.cppm
+            src/pseudo/paw-upf.cppm
+)
+target_link_libraries(pseudo PRIVATE pugixml::pugixml)
+
+# Tests
+enable_testing()
+add_subdirectory(test)
+

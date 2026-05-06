@@ -1,0 +1,162 @@
+# Pseudo-Potential IO Modules
+
+本文档描述 `src/pseudo/` 下赝势文件读取模块的设计与接口。
+
+## 模块结构
+
+```
+src/pseudo.cppm          # 总集成模块: export module pseudo;
+src/pseudo/
+  ├── ncpp-upf.cppm      # NCPP UPF v.2 读取 (pseudo.ncpp_upf)
+  ├── uspp-upf.cppm      # USPP 骨架 (pseudo.uspp_upf) — 未实现
+  └── paw-upf.cppm       # PAW 骨架 (pseudo.paw_upf) — 未实现
+```
+
+`pseudo.cppm` 仅负责重新导出子模块，本身不含实现。
+
+## NCPPUPF — Norm-Conserving Pseudo-Potential (UPF v.2)
+
+### 参考资料
+
+- [Quantum ESPRESSO: Unified Pseudopotential Format](https://pseudopotentials.quantum-espresso.org/home/unified-pseudopotential-format)
+- Vanderbilt, D. (1990). *Soft self-consistent pseudopotentials in a generalized eigenvalue formalism*. Phys. Rev. B, 41, 7892. DOI: [10.1103/PhysRevB.41.7892](https://doi.org/10.1103/PhysRevB.41.7892)
+
+### 公共接口
+
+```cpp
+export class NCPPUPF {
+public:
+    explicit NCPPUPF(const std::string& filename);
+
+    auto header() const -> const NCPPUPFHeader&;
+    auto mesh() const -> const NCPPUPFMesh&;
+    auto localPotential() const -> std::span<const double>;
+    auto nonlocal() const -> const NCPPUPFNonlocal&;
+    auto wavefunctions() const -> const NCPPUPFWavefunction&;
+    auto rhoAtom() const -> std::span<const double>;
+};
+```
+
+### 数据结构与 UPF 文件 tag 的对应关系
+
+```
+NCPPUPF
+├── NCPPUPFHeader    ← PP_HEADER (全部属性)
+├── NCPPUPFMesh      ← PP_MESH
+│   ├── r[]          ← PP_R
+│   └── rab[]        ← PP_RAB
+├── vloc_            ← PP_LOCAL
+├── NCPPUPFNonlocal  ← PP_NONLOCAL
+│   ├── beta[][]     ← PP_BETA.1 ... PP_BETA.nbeta
+│   ├── lll[]        ← PP_BETA.* / angular_momentum
+│   ├── kbeta[]      ← PP_BETA.* / cutoff_radius_index
+│   ├── rcut[]       ← PP_BETA.* / cutoff_radius
+│   └── dion         ← PP_DIJ (Matrix 类型)
+├── NCPPUPFWavefunction  ← PP_PSWFC
+│   ├── chi[][]      ← PP_CHI.1 ... PP_CHI.nwfc
+│   ├── lchi[]       ← PP_CHI.* / l
+│   ├── oc[]         ← PP_CHI.* / occupation
+│   └── labels[]     ← PP_CHI.* / label
+└── rho_at_          ← PP_RHOATOM
+```
+
+#### 扁平存储 vs. 嵌套容器
+
+- **`beta`** 与 **`chi`**：使用 `std::vector<std::vector<double>>`。每一行长度固定为 `mesh_size`，该尺度（mesh ~ 10³，nbeta ~ 10）下的间接寻址开销可忽略。
+- **`dion`**：使用自定义的 `Matrix` 值类型。$D_{ij}$ 是 $n_{\beta} \times n_{\beta}$ 对称矩阵，扁平连续存储更适合矩阵运算，且 C++23 多维 `operator[](i, j)` 提供了自然访问语法。
+- **`vloc_`** 与 **`rho_at_`**：使用 `std::vector<double>` 并通过 `std::span<const double>` 暴露，方便调用方直接遍历而无需深拷贝。
+
+### 解析流程
+
+构造函数按以下顺序解析 XML 节点（UPF v.2 格式）：
+
+```
+<UPF>
+  ├── <PP_HEADER/>          → 读取全部属性 → NCPPUPFHeader
+  ├── <PP_MESH>
+  │     ├── <PP_R>          → 解析文本为 vector<double>
+  │     └── <PP_RAB>        → 解析文本为 vector<double>
+  ├── <PP_LOCAL>            → 解析文本 → vloc_[mesh]
+  ├── <PP_NONLOCAL>
+  │     ├── <PP_BETA.1>     → 属性 + 文本 → beta[0]
+  │     ├── ...             → (循环 nbeta 次)
+  │     └── <PP_DIJ>        → 解析文本 → dion[nbeta*nbeta]
+  ├── <PP_PSWFC>
+  │     ├── <PP_CHI.1>      → 属性 + 文本 → chi[0]
+  │     └── ...             → (循环 nwfc 次)
+  └── <PP_RHOATOM>          → 解析文本 → rho_at_[mesh]
+```
+
+**文本解析**：pugixml 加载 DOM 后，通过 `node.child_value()` 获取标签体内的文本，再用 `std::istringstream` 逐个读取 `double`。非数值词（如示例文件中的 `...`）被自动跳过。
+
+**UPF v.2 特性**：
+- 标签全大写（`PP_HEADER`, `PP_BETA.1`）
+- 数组元素标签带索引后缀（`PP_BETA.1` ~ `PP_BETA.nbeta`）
+- Header 数据全部存储在 XML 属性中（自闭合标签）
+
+### 构造函数一次性全加载
+
+UPF 文件通常只有几百 KB，pugixml 的 DOM 解析完全无压力。构造函数一次性读取全部数据到内存后即关闭文件句柄，类内部只持有 `std::vector`、`std::string` 等标准值类型成员。
+
+因此 `NCPPUPF` 遵循 **Rule of Zero**——不显式声明析构函数、拷贝/移动构造函数或赋值运算符，编译器自动生成的语义完全正确。这也意味着该类可以自然地放入 `std::vector` 等标准容器中。
+
+### 程序中不读取 `columns` 的原因
+
+UPF v.2 的部分数据节点带有 `columns` 属性，例如：
+
+```xml
+<PP_R columns="4">
+   1.0  2.0  3.0  4.0
+   5.0  6.0  7.0  8.0
+   ...
+</PP_R>
+```
+
+在 `NCPPUPF` 的实现中，`parseTextToVector` 通过 `std::istringstream` 逐 token 读取，按空白字符（空格、制表符、换行）分割。因此无论每行有多少列，所有数值都会被正确提取。
+
+**不读取 `columns` 的设计理由**：
+
+1. **该属性是输出格式提示，不是语义约束**：`columns` 仅影响人类可读性和 Fortran `write` 语句的格式化输出，不改变数据本身的顺序和数量。
+
+2. **pugixml 的文本节点已抹除格式信息**：`pugi::xml_node::child_value()` 返回的是节点内所有文本内容的拼接字符串，行边界信息已经丢失。即使想验证 `columns`，也无法从纯文本中可靠还原原始行结构。
+
+3. **数值校验已足够**：每个数组读取后都会与 `mesh_size`（或 `nbeta`、`nwfc`）进行长度校验。如果格式化错误导致数据缺失或多余，`size mismatch` 异常会立即暴露问题。
+
+
+
+### 错误处理
+
+| 场景 | 异常类型 | 消息 |
+|------|---------|------|
+| XML 解析失败 | `std::runtime_error` | `UPF: failed to parse file: ...` |
+| 缺少根节点 `<UPF>` | `std::runtime_error` | `UPF: missing root element <UPF>` |
+| 缺少属性 | `std::runtime_error` | `UPF: missing attribute '...'` |
+| 属性类型转换失败 | `std::runtime_error` | `UPF: invalid double/int/bool attribute ...` |
+| 数组大小不匹配 | `std::runtime_error` | `UPF: <tag> size mismatch` |
+
+## USPP 与 PAW（骨架）
+
+`USPP` 和 `PAW` 类已创建但尚未实现。构造函数直接抛出：
+
+```cpp
+throw std::runtime_error("USPP/PAW reader not yet implemented");
+```
+
+两者与 `NCPPUPF` 保持相同的接口风格（纯值类型、Rule of Zero、提供 `header()` 接口），为后续扩展预留统一的入口。
+
+## 测试
+
+```
+test/
+├── CMakeLists.txt
+test/test_ncpp_upf/
+    ├── test_ncpp_upf.cpp
+    └── Ge-spd-high.PD04.PBE.UPF
+```
+
+`test_ncpp_upf` 验证内容：
+1. **Header 字段校验**：element, pseudo_type, z_valence, mesh_size, l_max 等
+2. **数据结构尺寸校验**：mesh.r/rab, beta, chi, dion, rhoAtom 长度与 header 一致
+3. **波函数归一化校验**：对每个束缚态验证 `∑ chi[i]² · rab[i] ≈ 1.0`（容差 1e-5）
+
+测试数据 `Ge-spd-high.PD04.PBE.UPF`（ONCVPSP 生成）包含 5 个波函数（3S, 3P, 3D, 4S, 4P）和 6 个 beta 投影，全部通过校验。
