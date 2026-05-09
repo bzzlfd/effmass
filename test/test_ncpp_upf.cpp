@@ -175,6 +175,87 @@ auto main() -> int {
             throw std::runtime_error("rhoAtom size mismatch");
         }
 
+        // Mesh type inference
+        auto mt = upf.meshType();
+        if (mt == MeshType::Unknown) {
+            throw std::runtime_error("meshType should not be Unknown for Ge-spd-high");
+        }
+
+        // nonlocalByL tests
+        // Ge-spd-high has lll = {0, 0, 1, 1, 2, 2}
+        auto nl0 = upf.nonlocalByL(0);
+        if (nl0.beta.size() != 2) {
+            throw std::runtime_error("nonlocalByL(0) beta count mismatch: expected 2, got " +
+                std::to_string(nl0.beta.size()));
+        }
+        if (nl0.dion.rows != 2 || nl0.dion.cols != 2) {
+            throw std::runtime_error("nonlocalByL(0) dion size mismatch: expected 2x2");
+        }
+        if (nl0.dion.size() != 4) {
+            throw std::runtime_error("nonlocalByL(0) dion data size mismatch");
+        }
+
+        auto nl1 = upf.nonlocalByL(1);
+        if (nl1.beta.size() != 2) {
+            throw std::runtime_error("nonlocalByL(1) beta count mismatch: expected 2, got " +
+                std::to_string(nl1.beta.size()));
+        }
+        if (nl1.dion.rows != 2 || nl1.dion.cols != 2) {
+            throw std::runtime_error("nonlocalByL(1) dion size mismatch: expected 2x2");
+        }
+
+        auto nl2 = upf.nonlocalByL(2);
+        if (nl2.beta.size() != 2) {
+            throw std::runtime_error("nonlocalByL(2) beta count mismatch: expected 2, got " +
+                std::to_string(nl2.beta.size()));
+        }
+        if (nl2.dion.rows != 2 || nl2.dion.cols != 2) {
+            throw std::runtime_error("nonlocalByL(2) dion size mismatch: expected 2x2");
+        }
+
+        auto nl3 = upf.nonlocalByL(3);
+        if (nl3.beta.size() != 0) {
+            throw std::runtime_error("nonlocalByL(3) beta count mismatch: expected 0, got " +
+                std::to_string(nl3.beta.size()));
+        }
+        if (nl3.dion.rows != 0 || nl3.dion.cols != 0) {
+            throw std::runtime_error("nonlocalByL(3) dion size mismatch: expected 0x0");
+        }
+
+        // Consistency check: values in nonlocalByL must match original
+        for (int i = 0; i < 2; ++i) {
+            if (nl0.beta[i] != nl.beta[i]) {
+                throw std::runtime_error("nonlocalByL(0) beta[" + std::to_string(i) +
+                    "] value mismatch");
+            }
+        }
+        for (int i = 0; i < 2; ++i) {
+            if (nl1.beta[i] != nl.beta[i + 2]) {
+                throw std::runtime_error("nonlocalByL(1) beta[" + std::to_string(i) +
+                    "] value mismatch");
+            }
+        }
+        for (int i = 0; i < 2; ++i) {
+            if (nl2.beta[i] != nl.beta[i + 4]) {
+                throw std::runtime_error("nonlocalByL(2) beta[" + std::to_string(i) +
+                    "] value mismatch");
+            }
+        }
+
+        // Spot-check dion submatrix values
+        if (std::abs(nl0.dion[0, 0] - nl.dion[0, 0]) > 1e-20) {
+            throw std::runtime_error("nonlocalByL(0) dion[0,0] mismatch");
+        }
+        if (std::abs(nl0.dion[1, 1] - nl.dion[1, 1]) > 1e-20) {
+            throw std::runtime_error("nonlocalByL(0) dion[1,1] mismatch");
+        }
+        if (std::abs(nl1.dion[0, 0] - nl.dion[2, 2]) > 1e-20) {
+            throw std::runtime_error("nonlocalByL(1) dion[0,0] mismatch");
+        }
+        if (std::abs(nl2.dion[1, 1] - nl.dion[5, 5]) > 1e-20) {
+            throw std::runtime_error("nonlocalByL(2) dion[1,1] mismatch");
+        }
+
         std::println("All NCPPUPF tests passed!");
         return 0;
     } catch (const std::exception& e) {

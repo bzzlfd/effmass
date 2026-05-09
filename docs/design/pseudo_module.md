@@ -24,6 +24,13 @@ src/pseudo/
 ### 公共接口
 
 ```cpp
+export enum class MeshType { Uniform, Exponential, Unknown };
+
+export struct NCPPUPFNonlocalByL {
+    std::vector<std::vector<double>> beta;  // [n_beta_l][mesh]
+    Matrix dion;                             // D_ij submatrix for this l
+};
+
 export class NCPPUPF {
 public:
     explicit NCPPUPF(const std::string& filename);
@@ -34,6 +41,9 @@ public:
     auto nonlocal() const -> const NCPPUPFNonlocal&;
     auto wavefunctions() const -> const NCPPUPFWavefunction&;
     auto rhoAtom() const -> std::span<const double>;
+
+    auto meshType() const -> MeshType;
+    auto nonlocalByL(int l) const -> NCPPUPFNonlocalByL;
 };
 ```
 
@@ -41,24 +51,26 @@ public:
 
 ```
 NCPPUPF
-├── NCPPUPFHeader    ← PP_HEADER (全部属性)
-├── NCPPUPFMesh      ← PP_MESH
-│   ├── r[]          ← PP_R
-│   └── rab[]        ← PP_RAB
-├── vloc_            ← PP_LOCAL
-├── NCPPUPFNonlocal  ← PP_NONLOCAL
-│   ├── beta[][]     ← PP_BETA.1 ... PP_BETA.nbeta（截断至 kbeta）
-│   ├── lll[]        ← PP_BETA.* / angular_momentum
-│   ├── kbeta[]      ← PP_BETA.* / cutoff_radius_index
-│   ├── rcut[]       ← PP_BETA.* / cutoff_radius
-│   └── dion         ← PP_DIJ (Matrix 类型)
-├── NCPPUPFWavefunction  ← PP_PSWFC
-│   ├── chi[][]      ← PP_CHI.1 ... PP_CHI.nwfc（截断尾部零）
-│   ├── kchi[]       ← 有效长度（最后一个非零元素位置）
-│   ├── lchi[]       ← PP_CHI.* / l
-│   ├── oc[]         ← PP_CHI.* / occupation
-│   └── labels[]     ← PP_CHI.* / label
-└── rho_at_          ← PP_RHOATOM
+├── NCPPUPFHeader         ← PP_HEADER (全部属性)
+├── NCPPUPFMesh           ← PP_MESH
+│   ├── r[]               ← PP_R
+│   └── rab[]             ← PP_RAB
+├── MeshType              ← 由 r/rab 推断（Uniform / Exponential / Unknown）
+├── vloc_                 ← PP_LOCAL
+├── NCPPUPFNonlocal       ← PP_NONLOCAL
+│   ├── beta[][]          ← PP_BETA.1 ... PP_BETA.nbeta（截断至 kbeta）
+│   ├── lll[]             ← PP_BETA.* / angular_momentum
+│   ├── kbeta[]           ← PP_BETA.* / cutoff_radius_index
+│   ├── rcut[]            ← PP_BETA.* / cutoff_radius
+│   └── dion              ← PP_DIJ (Matrix 类型)
+├── NCPPUPFNonlocalByL    ← 按角动量 l 筛选的 beta + dion 子矩阵
+├── NCPPUPFWavefunction   ← PP_PSWFC
+│   ├── chi[][]           ← PP_CHI.1 ... PP_CHI.nwfc（截断尾部零）
+│   ├── kchi[]            ← 有效长度（最后一个非零元素位置）
+│   ├── lchi[]            ← PP_CHI.* / l
+│   ├── oc[]              ← PP_CHI.* / occupation
+│   └── labels[]          ← PP_CHI.* / label
+└── rho_at_               ← PP_RHOATOM
 ```
 
 #### 扁平存储 vs. 嵌套容器
@@ -142,6 +154,24 @@ UPF v.2 的部分数据节点带有 `columns` 属性，例如：
 3. **数值校验已足够**：每个数组读取后都会与 `mesh_size`（或 `nbeta`、`nwfc`）进行长度校验。如果格式化错误导致数据缺失或多余，`size mismatch` 异常会立即暴露问题。
 
 
+
+### Mesh 类型推断 (`meshType()`)
+
+`meshType()` 通过分析 `mesh.r` 和 `mesh.rab` 的数值关系推断网格类型：
+
+- **Uniform（均匀）**：`r[i] - r[i-1]` 在所有网格点上的偏差不超过均值的 `1e-6`（相对容差）。
+- **Exponential（指数/对数）**：`rab[i] / r[i]` 在所有非零 `r[i]` 上的偏差不超过均值的 `1e-6`。对于标准的对数网格 `r[i] = r_0 * exp((i-1) * dx)`，积分权重 `rab[i] = r[i] * dx`，因此该比值严格为常数。
+- **Unknown**：不满足以上两种模式，或网格点少于 2 个。
+
+推断基于数值容差，不依赖 UPF 文件中的任何额外属性。
+
+### 按角动量筛选非局域项 (`nonlocalByL(int l)`)
+
+`nonlocalByL(l)` 根据 `NCPPUPFNonlocal::lll` 筛选出角动量等于 `l` 的所有 beta 投影，并提取对应的 `D_ij` 子矩阵。
+
+- 返回类型为 `NCPPUPFNonlocalByL`，仅包含 `beta`（`std::vector<std::vector<double>>`）和 `dion`（`Matrix`）。
+- 若不存在该 `l` 的 beta，返回空 `beta` 列表和 0×0 的 `dion`。
+- `beta` 行按原始 `nonlocal.beta` 中出现的顺序排列，`dion` 的 `[i, j]` 对应原始矩阵中 `[global_i, global_j]` 的值。
 
 ### 错误处理
 

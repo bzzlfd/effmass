@@ -65,6 +65,19 @@ export struct NCPPUPFNonlocal {
     Matrix dion;                             // D_ij matrix
 };
 
+// === Mesh type enumeration ===
+export enum class MeshType {
+    Uniform,
+    Exponential,
+    Unknown
+};
+
+// === Nonlocal data filtered by angular momentum l ===
+export struct NCPPUPFNonlocalByL {
+    std::vector<std::vector<double>> beta;  // [n_beta_l][mesh]
+    Matrix dion;                             // D_ij submatrix for this l
+};
+
 
 // === Wavefunction data (pseudo atomic orbitals) ===
 export struct NCPPUPFWavefunction {
@@ -86,6 +99,9 @@ public:
     auto nonlocal() const -> const NCPPUPFNonlocal& { return nonlocal_; }
     auto wavefunctions() const -> const NCPPUPFWavefunction& { return wfc_; }
     auto rhoAtom() const -> std::span<const double> { return rho_at_; }
+
+    auto meshType() const -> MeshType;
+    auto nonlocalByL(int l) const -> NCPPUPFNonlocalByL;
 
 private:
     NCPPUPFHeader header_;
@@ -353,4 +369,83 @@ auto NCPPUPF::readRhoAtom(const pugi::xml_node& root) -> void {
     if (rho_at_.size() != static_cast<std::size_t>(header_.mesh_size)) {
         throw std::runtime_error("UPF: <PP_RHOATOM> size mismatch");
     }
+}
+
+auto NCPPUPF::meshType() const -> MeshType {
+    const auto& r = mesh_.r;
+    const auto& rab = mesh_.rab;
+    const int n = static_cast<int>(r.size());
+    if (n < 2) return MeshType::Unknown;
+
+    // Check uniform: r[i] - r[i-1] ≈ constant
+    double drSum = 0.0;
+    for (int i = 1; i < n; ++i) {
+        drSum += r[i] - r[i - 1];
+    }
+    double drMean = drSum / (n - 1);
+    bool isUniform = true;
+    for (int i = 1; i < n; ++i) {
+        if (std::abs((r[i] - r[i - 1]) - drMean) > 1e-6 * std::max(std::abs(drMean), 1e-10)) {
+            isUniform = false;
+            break;
+        }
+    }
+    if (isUniform) return MeshType::Uniform;
+
+    // Check exponential: rab[i] / r[i] ≈ constant (skip r == 0)
+    int firstNonZero = 0;
+    while (firstNonZero < n && r[firstNonZero] == 0.0) ++firstNonZero;
+    if (firstNonZero >= n - 1) return MeshType::Unknown;
+
+    double ratioSum = 0.0;
+    int ratioCount = 0;
+    for (int i = firstNonZero; i < n; ++i) {
+        if (r[i] != 0.0) {
+            ratioSum += rab[i] / r[i];
+            ++ratioCount;
+        }
+    }
+    if (ratioCount < 2) return MeshType::Unknown;
+    double ratioMean = ratioSum / ratioCount;
+
+    bool isExponential = true;
+    for (int i = firstNonZero; i < n; ++i) {
+        if (r[i] != 0.0) {
+            if (std::abs(rab[i] / r[i] - ratioMean) > 1e-6 * std::max(std::abs(ratioMean), 1e-10)) {
+                isExponential = false;
+                break;
+            }
+        }
+    }
+    if (isExponential) return MeshType::Exponential;
+
+    return MeshType::Unknown;
+}
+
+auto NCPPUPF::nonlocalByL(int l) const -> NCPPUPFNonlocalByL {
+    std::vector<int> indices;
+    const int nb = header_.number_of_proj;
+    for (int i = 0; i < nb; ++i) {
+        if (nonlocal_.lll[i] == l) {
+            indices.push_back(i);
+        }
+    }
+
+    NCPPUPFNonlocalByL result;
+    const int nbl = static_cast<int>(indices.size());
+    result.beta.resize(nbl);
+    for (int i = 0; i < nbl; ++i) {
+        result.beta[i] = nonlocal_.beta[indices[i]];
+    }
+
+    result.dion.rows = nbl;
+    result.dion.cols = nbl;
+    result.dion.data.resize(static_cast<std::size_t>(nbl * nbl));
+    for (int i = 0; i < nbl; ++i) {
+        for (int j = 0; j < nbl; ++j) {
+            result.dion[i, j] = nonlocal_.dion[indices[i], indices[j]];
+        }
+    }
+
+    return result;
 }
