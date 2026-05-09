@@ -74,7 +74,7 @@ ctest --test-dir build
 | 常量 | 全大写，下划线分隔 | `BOHR_RADIUS_ANGSTROM` |
 | 类 | 大驼峰（PascalCase） | `GKK`, `NCPPUPF` |
 | 结构体 | 大驼峰（PascalCase） | `GKKMetadata`, `KPointGVecs` |
-| 成员变量 | 后缀下划线 | `meta_`, `fp_`, `current_kpt_` |
+| 成员变量 | 后缀下划线 | `meta_`, `fp_`, `current_ikpt_` |
 | 函数 | 小驼峰（camelCase） | `loadKPoint()`, `readMetadata()` |
 | 局部变量 | 小驼峰 | `record_len`, `ikpt` |
 
@@ -93,11 +93,12 @@ auto function_name(args...) -> ReturnType;
 - 禁止使用 Magic Number。所有物理量和单位转换系数必须使用 `constexpr` 定义，全大写下划线分隔命名。
 - 内部计算统一使用 Hartree 原子单位制。
 
-### 晶格矢量索引约定（约定-001）
+### Convention-001/002
 
-从 Fortran 文件读取的晶格矢量 `AL[3][3]` 采用**向量紧密安排**：
-- `AL[n][c]` 中 `n` 为晶格矢量编号（0=a1, 1=a2, 2=a3），`c` 为分量（0=x, 1=y, 2=z）。
-- `AL[n]` 在内存中连续，可直接作为 `double[3]` 使用。
+详见 `docs/design/conventions.md`：
+
+- **晶格矢量索引（Convention-001）**：`AL[n][c]` 中 `n` 为晶格矢量编号，`c` 为分量，`AL[n]` 内存连续。
+- **倒空间物理量命名（Convention-002）**：`k`（分数坐标）、`G`（倒格子矢量）、`K = G - k`（`Kx/Ky/Kz`）、`kinetic`（`|G+k|²/2`）；整数索引前缀 `ikpt`/`iband`/`inode`/`ig`。
 
 ## 模块级设计约定
 

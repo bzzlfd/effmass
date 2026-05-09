@@ -17,7 +17,7 @@ export struct GKKMetadata {
 
 // k-point G-vector data view - non-owning spans to contiguous memory
 export struct KPointGVecs {
-    std::span<const double> g, gx, gy, gz;  // |G+k|²/2, Gx, Gy, Gz
+    std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, G_x-k_x, G_y-k_y, G_z-k_z
 };
 
 // GKK class - abstraction for OUT.GKK file
@@ -32,8 +32,9 @@ public:
 
     auto metadata() const -> const GKKMetadata& { return meta_; }  // get metadata
     auto loadKPoint(int ikpt) -> const KPointGVecs&;    // load k-point data (with cache)
-    auto currentKPoint() const -> int { return current_kpt_; }     // current k-point index
+    auto current_ikpt() const -> int { return current_ikpt_; }     // current k-point index
     auto currentData() const -> const KPointGVecs& { return current_data_; }  // current data
+    auto inferCurrent_k() const -> std::array<double, 3>;  // infer k fractional coord from G-k data
 
 private:
     auto readRecordLength() -> int;                     // read record length marker
@@ -51,10 +52,10 @@ private:
     GKKMetadata meta_;                          // metadata
     std::vector<std::vector<int>> ngtotnod_;    // G-vector count per k-point per node
     std::vector<long> kpt_data_offsets_;        // file offset per k-point
-    int current_kpt_ = -1;                      // currently cached k-point
+    int current_ikpt_ = -1;                      // currently cached k-point
 
     // buffers: working arrays (contiguous) + file read buffer (reused)
-    std::vector<double> g_buf_, gx_buf_, gy_buf_, gz_buf_;
+    std::vector<double> kinetic_buf_, Kx_buf_, Ky_buf_, Kz_buf_;
     KPointGVecs current_data_;  // data view
 };
 
@@ -84,8 +85,8 @@ public:
 
     auto metadata() const -> const WGMetadata& { return meta_; }   // get metadata
     auto loadBand(int ikpt, int iband) -> const WGCoeffs&;        // load band data (with cache)
-    auto currentKPoint() const -> int { return current_kpt_; }     // current k-point index
-    auto currentBand() const -> int { return current_band_; }      // current band index
+    auto current_ikpt() const -> int { return current_ikpt_; }     // current k-point index
+    auto current_iband() const -> int { return current_iband_; }      // current band index
     auto currentData() const -> const WGCoeffs& { return current_data_view_; }  // current data
 
 private:
@@ -119,8 +120,8 @@ private:
     std::size_t cache_next_slot_ = 0;                 // next slot to replace in FIFO order
 
     // track most recent loadBand
-    int current_kpt_ = -1;
-    int current_band_ = -1;
+    int current_ikpt_ = -1;
+    int current_iband_ = -1;
     WGCoeffs current_data_view_;
 
     std::vector<std::complex<double>> tmp_buf_;  // temporary buffer for is_SO record splitting
@@ -131,7 +132,7 @@ private:
 GKK::GKK(const std::string& filename)
     : filename_(filename)
     , fp_(nullptr)
-    , current_kpt_(-1)
+    , current_ikpt_(-1)
 {
     fp_ = std::fopen(filename.c_str(), "rb");
     if (!fp_) {
@@ -142,10 +143,10 @@ GKK::GKK(const std::string& filename)
 
     // preallocate working buffers (maximum possible size)
     std::size_t max_ng = static_cast<std::size_t>(meta_.mg_nx) * meta_.nnodes;
-    g_buf_.resize(max_ng);
-    gx_buf_.resize(max_ng);
-    gy_buf_.resize(max_ng);
-    gz_buf_.resize(max_ng);
+    kinetic_buf_.resize(max_ng);
+    Kx_buf_.resize(max_ng);
+    Ky_buf_.resize(max_ng);
+    Kz_buf_.resize(max_ng);
 
     // initialize empty data view
     current_data_ = {};
@@ -166,22 +167,22 @@ GKK::GKK(GKK&& other) noexcept
     , meta_(std::move(other.meta_))
     , ngtotnod_(std::move(other.ngtotnod_))
     , kpt_data_offsets_(std::move(other.kpt_data_offsets_))
-    , current_kpt_(other.current_kpt_)
-    , g_buf_(std::move(other.g_buf_))
-    , gx_buf_(std::move(other.gx_buf_))
-    , gy_buf_(std::move(other.gy_buf_))
-    , gz_buf_(std::move(other.gz_buf_))
+    , current_ikpt_(other.current_ikpt_)
+    , kinetic_buf_(std::move(other.kinetic_buf_))
+    , Kx_buf_(std::move(other.Kx_buf_))
+    , Ky_buf_(std::move(other.Ky_buf_))
+    , Kz_buf_(std::move(other.Kz_buf_))
     , current_data_(other.current_data_)
 {
     other.fp_ = nullptr;
-    other.current_kpt_ = -1;
+    other.current_ikpt_ = -1;
     // update current_data_ spans to point to our own buffers
-    if (!current_data_.g.empty()) {
-        const auto ng = current_data_.g.size();
-        current_data_.g  = std::span<const double>(g_buf_.data(), ng);
-        current_data_.gx = std::span<const double>(gx_buf_.data(), ng);
-        current_data_.gy = std::span<const double>(gy_buf_.data(), ng);
-        current_data_.gz = std::span<const double>(gz_buf_.data(), ng);
+    if (!current_data_.kinetic.empty()) {
+        const auto ng = current_data_.kinetic.size();
+        current_data_.kinetic = std::span<const double>(kinetic_buf_.data(), ng);
+        current_data_.Kx      = std::span<const double>(Kx_buf_.data(), ng);
+        current_data_.Ky      = std::span<const double>(Ky_buf_.data(), ng);
+        current_data_.Kz      = std::span<const double>(Kz_buf_.data(), ng);
     }
 }
 
@@ -194,23 +195,23 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
         meta_ = std::move(other.meta_);
         ngtotnod_ = std::move(other.ngtotnod_);
         kpt_data_offsets_ = std::move(other.kpt_data_offsets_);
-        current_kpt_ = other.current_kpt_;
-        g_buf_ = std::move(other.g_buf_);
-        gx_buf_ = std::move(other.gx_buf_);
-        gy_buf_ = std::move(other.gy_buf_);
-        gz_buf_ = std::move(other.gz_buf_);
+        current_ikpt_ = other.current_ikpt_;
+        kinetic_buf_ = std::move(other.kinetic_buf_);
+        Kx_buf_ = std::move(other.Kx_buf_);
+        Ky_buf_ = std::move(other.Ky_buf_);
+        Kz_buf_ = std::move(other.Kz_buf_);
         current_data_ = other.current_data_;
 
         other.fp_ = nullptr;
-        other.current_kpt_ = -1;
+        other.current_ikpt_ = -1;
 
         // update spans
-        if (!current_data_.g.empty()) {
-            const auto ng = current_data_.g.size();
-            current_data_.g  = std::span<const double>(g_buf_.data(), ng);
-            current_data_.gx = std::span<const double>(gx_buf_.data(), ng);
-            current_data_.gy = std::span<const double>(gy_buf_.data(), ng);
-            current_data_.gz = std::span<const double>(gz_buf_.data(), ng);
+        if (!current_data_.kinetic.empty()) {
+            const auto ng = current_data_.kinetic.size();
+            current_data_.kinetic = std::span<const double>(kinetic_buf_.data(), ng);
+            current_data_.Kx      = std::span<const double>(Kx_buf_.data(), ng);
+            current_data_.Ky      = std::span<const double>(Ky_buf_.data(), ng);
+            current_data_.Kz      = std::span<const double>(Kz_buf_.data(), ng);
         }
     }
     return *this;
@@ -296,7 +297,7 @@ auto GKK::readNgtotnod(int record_len) -> void {
     ngtotnod_.resize(meta_.nkpt, std::vector<int>(meta_.nnodes));
     meta_.ng_tot_per_kpt.resize(meta_.nkpt, 0);
 
-    for (int k = 0; k < meta_.nkpt; ++k) {
+    for (int ikpt = 0; ikpt < meta_.nkpt; ++ikpt) {
         int ng_total = 0;
         for (int n = 0; n < meta_.nnodes; ++n) {
             int ng;
@@ -306,10 +307,10 @@ auto GKK::readNgtotnod(int record_len) -> void {
             if (meta_.is_SO == 1) {
                 ng /= 2;
             }
-            ngtotnod_[k][n] = ng;
+            ngtotnod_[ikpt][n] = ng;
             ng_total += ng;
         }
-        meta_.ng_tot_per_kpt[k] = ng_total;
+        meta_.ng_tot_per_kpt[ikpt] = ng_total;
     }
 }
 
@@ -325,8 +326,8 @@ auto GKK::computeOffsets() -> void {
     // record the starting file offset for each k-point's data
     kpt_data_offsets_.resize(meta_.nkpt);
 
-    for (int k = 0; k < meta_.nkpt; ++k) {
-        kpt_data_offsets_[k] = std::ftell(fp_);
+    for (int ikpt = 0; ikpt < meta_.nkpt; ++ikpt) {
+        kpt_data_offsets_[ikpt] = std::ftell(fp_);
 
         // skip all data for this k-point by walking through records
         // This correctly handles compiler-dependent record padding (alignment),
@@ -353,7 +354,7 @@ auto GKK::seekToKPoint(int ikpt) -> void {
 
 auto GKK::loadKPoint(int ikpt) -> const KPointGVecs& {
     // check if already in buffer
-    if (ikpt == current_kpt_) {
+    if (ikpt == current_ikpt_) {
         return current_data_;
     }
 
@@ -370,22 +371,75 @@ auto GKK::loadKPoint(int ikpt) -> const KPointGVecs& {
         int ng = ngtotnod_[ikpt][inode];
         if (ng == 0) continue;
 
-        readRecord(g_buf_.data() + total_pos, ng * sizeof(double), "gkk");
-        readRecord(gx_buf_.data() + total_pos, ng * sizeof(double), "gkk_x");
-        readRecord(gy_buf_.data() + total_pos, ng * sizeof(double), "gkk_y");
-        readRecord(gz_buf_.data() + total_pos, ng * sizeof(double), "gkk_z");
+        readRecord(kinetic_buf_.data() + total_pos, ng * sizeof(double), "gkk");
+        readRecord(Kx_buf_.data() + total_pos, ng * sizeof(double), "gkk_x");
+        readRecord(Ky_buf_.data() + total_pos, ng * sizeof(double), "gkk_y");
+        readRecord(Kz_buf_.data() + total_pos, ng * sizeof(double), "gkk_z");
 
         total_pos += static_cast<std::size_t>(ng);
     }
 
     // update current data view
-    current_data_.g  = std::span<const double>(g_buf_.data(), total_pos);
-    current_data_.gx = std::span<const double>(gx_buf_.data(), total_pos);
-    current_data_.gy = std::span<const double>(gy_buf_.data(), total_pos);
-    current_data_.gz = std::span<const double>(gz_buf_.data(), total_pos);
+    current_data_.kinetic = std::span<const double>(kinetic_buf_.data(), total_pos);
+    current_data_.Kx      = std::span<const double>(Kx_buf_.data(), total_pos);
+    current_data_.Ky      = std::span<const double>(Ky_buf_.data(), total_pos);
+    current_data_.Kz      = std::span<const double>(Kz_buf_.data(), total_pos);
 
-    current_kpt_ = ikpt;
+    current_ikpt_ = ikpt;
     return current_data_;
+}
+
+auto GKK::inferCurrent_k() const -> std::array<double, 3> {
+    if (current_ikpt_ < 0) {
+        throw std::runtime_error("inferCurrent_k: no k-point loaded");
+    }
+
+    const auto& data = current_data_;
+    if (data.Kx.empty()) {
+        throw std::runtime_error("inferCurrent_k: current k-point has no G-vectors");
+    }
+
+    constexpr double TWO_PI = 2.0 * std::numbers::pi;
+    const std::size_t ng = data.Kx.size();
+
+    std::array<double, 3> k_frac = {0.0, 0.0, 0.0};
+
+    for (int dim = 0; dim < 3; ++dim) {
+        double sum_cos = 0.0;
+        double sum_sin = 0.0;
+
+        for (std::size_t ig = 0; ig < ng; ++ig) {
+            // v = G - k (Cartesian, in Bohr^-1, consistent with AL in Bohr)
+            const double Kx = data.Kx[ig];
+            const double Ky = data.Ky[ig];
+            const double Kz = data.Kz[ig];
+
+            // c = a_dim · v / (2π), fractional coordinate in reciprocal basis
+            const double c = (meta_.AL[dim][0] * Kx + meta_.AL[dim][1] * Ky + meta_.AL[dim][2] * Kz) / TWO_PI;
+
+            // c = n - k_frac, thus c mod 1 = (-k_frac) mod 1
+            // Use circular mean on [0,1) to robustly handle wrap-around at 0/1 boundary
+            const double d = c - std::floor(c);   // [0, 1)
+            const double theta = d * TWO_PI;
+            sum_cos += std::cos(theta);
+            sum_sin += std::sin(theta);
+        }
+
+        double avg_theta = std::atan2(sum_sin, sum_cos);
+        if (avg_theta < 0.0) {
+            avg_theta += TWO_PI;
+        }
+        const double d_avg = avg_theta / TWO_PI;   // [0, 1)
+
+        // k = wrap(-d_avg) into (-0.5, 0.5]
+        double k = -d_avg;
+        k = std::fmod(k, 1.0);
+        if (k <= -0.5) k += 1.0;
+        if (k > 0.5)   k -= 1.0;
+        k_frac[dim] = k;
+    }
+
+    return k_frac;
 }
 
 // Implementation of WG
@@ -395,8 +449,8 @@ WG::WG(const std::string& filename, std::size_t cache_capacity)
     , fp_(nullptr)
     , cache_capacity_(cache_capacity)
     , cache_next_slot_(0)
-    , current_kpt_(-1)
-    , current_band_(-1)
+    , current_ikpt_(-1)
+    , current_iband_(-1)
 {
     fp_ = std::fopen(filename.c_str(), "rb");
     if (!fp_) {
@@ -425,14 +479,14 @@ WG::WG(WG&& other) noexcept
     , cache_(std::move(other.cache_))
     , cache_capacity_(other.cache_capacity_)
     , cache_next_slot_(other.cache_next_slot_)
-    , current_kpt_(other.current_kpt_)
-    , current_band_(other.current_band_)
+    , current_ikpt_(other.current_ikpt_)
+    , current_iband_(other.current_iband_)
     , current_data_view_(other.current_data_view_)
     , tmp_buf_(std::move(other.tmp_buf_))
 {
     other.fp_ = nullptr;
-    other.current_kpt_ = -1;
-    other.current_band_ = -1;
+    other.current_ikpt_ = -1;
+    other.current_iband_ = -1;
     other.current_data_view_ = {};
 }
 
@@ -448,14 +502,14 @@ auto WG::operator=(WG&& other) noexcept -> WG& {
         cache_ = std::move(other.cache_);
         cache_capacity_ = other.cache_capacity_;
         cache_next_slot_ = other.cache_next_slot_;
-        current_kpt_ = other.current_kpt_;
-        current_band_ = other.current_band_;
+        current_ikpt_ = other.current_ikpt_;
+        current_iband_ = other.current_iband_;
         current_data_view_ = other.current_data_view_;
         tmp_buf_ = std::move(other.tmp_buf_);
 
         other.fp_ = nullptr;
-        other.current_kpt_ = -1;
-        other.current_band_ = -1;
+        other.current_ikpt_ = -1;
+        other.current_iband_ = -1;
         other.current_data_view_ = {};
     }
     return *this;
@@ -538,7 +592,7 @@ auto WG::readNgtotnod(int record_len) -> void {
     ngtotnod_.resize(meta_.nkpt, std::vector<int>(meta_.nnodes));
     meta_.ng_tot_per_kpt.resize(meta_.nkpt, 0);
 
-    for (int k = 0; k < meta_.nkpt; ++k) {
+    for (int ikpt = 0; ikpt < meta_.nkpt; ++ikpt) {
         int ng_total = 0;
         for (int n = 0; n < meta_.nnodes; ++n) {
             int ng;
@@ -548,10 +602,10 @@ auto WG::readNgtotnod(int record_len) -> void {
             if (meta_.is_SO == 1) {
                 ng /= 2;
             }
-            ngtotnod_[k][n] = ng;
+            ngtotnod_[ikpt][n] = ng;
             ng_total += ng;
         }
-        meta_.ng_tot_per_kpt[k] = ng_total;
+        meta_.ng_tot_per_kpt[ikpt] = ng_total;
     }
 }
 
@@ -567,9 +621,9 @@ auto WG::computeOffsets() -> void {
     // record the starting file offset for each (k-point, band) pair
     band_offsets_.resize(static_cast<std::size_t>(meta_.nkpt) * meta_.mx);
 
-    for (int k = 0; k < meta_.nkpt; ++k) {
+    for (int ikpt = 0; ikpt < meta_.nkpt; ++ikpt) {
         for (int b = 0; b < meta_.mx; ++b) {
-            band_offsets_[static_cast<std::size_t>(k) * meta_.mx + b] = std::ftell(fp_);
+            band_offsets_[static_cast<std::size_t>(ikpt) * meta_.mx + b] = std::ftell(fp_);
             for (int n = 0; n < meta_.nnodes; ++n) {
                 skipRecord();
             }
@@ -602,8 +656,8 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
     // check cache
     for (const auto& entry : cache_) {
         if (entry->ikpt == ikpt && entry->iband == iband) {
-            current_kpt_ = ikpt;
-            current_band_ = iband;
+            current_ikpt_ = ikpt;
+            current_iband_ = iband;
             current_data_view_ = entry->view;
             return current_data_view_;
         }
@@ -655,8 +709,8 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
         entry->view.down = {};
     }
 
-    current_kpt_ = ikpt;
-    current_band_ = iband;
+    current_ikpt_ = ikpt;
+    current_iband_ = iband;
     current_data_view_ = entry->view;
     return current_data_view_;
 }

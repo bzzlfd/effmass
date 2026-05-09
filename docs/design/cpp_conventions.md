@@ -36,7 +36,7 @@ public:
     auto operator=(GKK&& other) noexcept -> GKK&;
     auto metadata() const -> const GKKMetadata& { return meta_; }
     auto loadKPoint(int ikpt) -> const KPointGVecs&;
-    auto currentKPoint() const -> int { return current_kpt_; }
+    auto current_ikpt() const -> int { return current_ikpt_; }
     auto currentData() const -> const KPointGVecs& { return current_data_; }
 
 private:
@@ -48,7 +48,7 @@ private:
 
     std::FILE* fp_;
     GKKMetadata meta_;
-    int current_kpt_ = -1;
+    int current_ikpt_ = -1;
 };
 ```
 

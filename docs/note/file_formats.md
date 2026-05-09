@@ -37,9 +37,9 @@ do kpt = 1, nkpt
     num = 0
     do inode = 1, nnodes
         read(11) gkk_n_tmp      ! |G+k|^2 / 2
-        read(11) gkk_n_xtmp     ! G_x - k_x
-        read(11) gkk_n_ytmp     ! G_y - k_y
-        read(11) gkk_n_ztmp     ! G_z - k_z
+        read(11) gkk_n_xtmp     ! K_x = G_x - k_x
+        read(11) gkk_n_ytmp     ! K_y = G_y - k_y
+        read(11) gkk_n_ztmp     ! K_z = G_z - k_z
         do ig = 1, ngtotnod_9(inode, kpt)
             gkk(num+ig)   = gkk_n_tmp(ig)
             gkk_x(num+ig) = gkk_n_xtmp(ig) + akx(kpt)
@@ -69,9 +69,9 @@ close(11)
 - 遍历每个计算节点 `inode = 1, ..., nnodes`
 - 每个节点包含 **4 个独立的 Fortran record**：
   1. `gkk(ngtotnod)` — `double` 数组，存储 `|G+k|^2 / 2`
-  2. `gkk_x(ngtotnod)` — `double` 数组，存储 `G_x - k_x`
-  3. `gkk_y(ngtotnod)` — `double` 数组，存储 `G_y - k_y`
-  4. `gkk_z(ngtotnod)` — `double` 数组，存储 `G_z - k_z`
+  2. `gkk_x(ngtotnod)` — `double` 数组，存储 $K_x = G_x - k_x$
+  3. `gkk_y(ngtotnod)` — `double` 数组，存储 $K_y = G_y - k_y$
+  4. `gkk_z(ngtotnod)` — `double` 数组，存储 $K_z = G_z - k_z$
 
 > **注意**：尽管分量存储的是 `G - k`，但动能项 `gkk` 仍按 `|G+k|^2 / 2` 计算。
 

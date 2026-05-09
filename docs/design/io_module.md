@@ -31,8 +31,7 @@ export struct GKKMetadata {
 
 ```cpp
 export struct KPointGVecs {
-    std::size_t ng;           // number of G-vectors
-    const double *g, *gx, *gy, *gz;  // |G+k|²/2, Gx, Gy, Gz
+    std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, G_x-k_x, G_y-k_y, G_z-k_z
 };
 ```
 
@@ -64,10 +63,11 @@ GKK& operator=(GKK&& other) noexcept;
 ### 公共接口
 
 ```cpp
-const GKKMetadata& metadata() const;           // 获取元数据
-const KPointGVecs& loadKPoint(int ikpt);       // 加载指定 k 点数据（带缓存）
-int currentKPoint() const;                     // 当前缓存的 k 点索引
-const KPointGVecs& currentData() const;        // 当前缓存的数据视图
+const GKKMetadata& metadata() const;                          // 获取元数据
+const KPointGVecs& loadKPoint(int ikpt);                      // 加载指定 k 点数据（带缓存）
+int current_ikpt() const;                                     // 当前缓存的 k 点索引
+const KPointGVecs& currentData() const;                       // 当前缓存的数据视图
+std::array<double, 3> inferCurrent_k() const;                 // 从 K=G-k 数据推断 k 点分数坐标 (fractional coordinate)
 ```
 
 - `loadKPoint` 会自动管理一个单 k 点缓存：如果请求的是当前已缓存的 k 点，直接返回已有视图，避免重复文件 IO。
@@ -133,8 +133,8 @@ export struct WGCoeffs {
 ```cpp
 const WGMetadata& metadata() const;
 const WGCoeffs& loadBand(int ikpt, int iband);  // 加载指定 k 点、指定能带（带缓存）
-int currentKPoint() const;
-int currentBand() const;
+int current_ikpt() const;
+int current_iband() const;
 const WGCoeffs& currentData() const;
 ```
 
