@@ -1,7 +1,7 @@
 module;
 #include "pugixml.hpp"
 
-export module pseudo.ncpp_upf;
+export module pseudo.io.ncpp_upf;
 
 import std;
 

@@ -47,10 +47,11 @@ ctest --test-dir build
 | 文件/目录 | 说明 |
 |-----------|------|
 | `io.cppm` | IO 模块：导出 `GKK`（`OUT.GKK` 读取器）、`WG`（`OUT.WG` 读取器） |
-| `pseudo.cppm` | 赝势总模块：重新导出 `pseudo.ncpp_upf`、`pseudo.uspp_upf`、`pseudo.paw_upf` |
-| `pseudo/ncpp-upf.cppm` | `NCPPUPF` 类：完整实现 UPF v.2 模守恒赝势解析 |
-| `pseudo/uspp-upf.cppm` | `USPP` 类：骨架，构造函数抛出未实现异常 |
-| `pseudo/paw-upf.cppm` | `PAW` 类：骨架，构造函数抛出未实现异常 |
+| `pseudo.cppm` | 赝势总模块：重新导出 `pseudo.io.*`、`pseudo.ncpp` |
+| `pseudo/io/ncpp.upf.cppm` | `NCPPUPF` 类：UPF v.2 模守恒赝势文件解析 |
+| `pseudo/io/uspp.upf.cppm` | `USPPUPF` 类：USPP 赝势文件解析（骨架） |
+| `pseudo/io/paw.upf.cppm` | `PAWUPF` 类：PAW 赝势文件解析（骨架） |
+| `pseudo/ncpp.cppm` | `NCPP` 类：模守恒赝势算符抽象（骨架） |
 
 ### `docs/` 目录
 
@@ -113,7 +114,7 @@ auto function_name(args...) -> ReturnType;
 
 - 测试框架：不使用第三方测试框架，采用 `main()` 函数 + `try/catch` + `std::runtime_error` 的方式编写断言式测试。
 - 测试运行：通过 CTest 调用（`ctest --test-dir build`）。
-- 测试工作目录：`${CMAKE_SOURCE_DIR}`（即项目根目录），因此测试代码中使用相对路径 `"test/test_ncpp_upf/..."` 访问数据文件。
+- 测试工作目录：`${CMAKE_SOURCE_DIR}`（即项目根目录），因此测试代码中使用相对路径 `"test/test_io_ncpp/..."` 访问数据文件。
 
 ## 文档维护约定
 

@@ -1,5 +1,9 @@
-# Test executable for NCPP UPF reader
-add_executable(test_ncpp_upf test_ncpp_upf.cpp)
-target_link_libraries(test_ncpp_upf PRIVATE pseudo)
+# IO reader tests
+add_executable(test_io_ncpp test_io_ncpp.cpp)
+target_link_libraries(test_io_ncpp PRIVATE pseudo)
+add_test(NAME test_io_ncpp COMMAND test_io_ncpp WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-add_test(NAME test_ncpp_upf COMMAND test_ncpp_upf WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# Potential operator tests
+add_executable(test_ncpp test_ncpp.cpp)
+target_link_libraries(test_ncpp PRIVATE pseudo)
+add_test(NAME test_ncpp COMMAND test_ncpp WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

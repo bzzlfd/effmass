@@ -18,6 +18,23 @@
 - `test/test_ncpp_upf.cpp`：新增 `meshType()` 和 `nonlocalByL()` 的测试用例，包括 beta 数量、dion 尺寸、数值一致性校验。
 - `docs/design/pseudo_module.md`：更新公共接口与数据结构说明，补充 mesh 类型推断和 `nonlocalByL` 的设计文档。
 
+## 已完成
+
+### 赝势模块重构 — IO 层与算符层分离
+
+- `src/pseudo/io/`：新建 IO 层目录，存放 UPF 文件读取器
+  - `ncpp.upf.cppm`：原 `ncpp-upf.cppm` 迁移，模块名 `pseudo.ncpp_upf` → `pseudo.io.ncpp_upf`
+  - `uspp.upf.cppm`：原 `uspp-upf.cppm` 迁移，类名 `USPP` → `USPPUPF`，模块名 `pseudo.uspp_upf` → `pseudo.io.uspp_upf`
+  - `paw.upf.cppm`：原 `paw-upf.cppm` 迁移，类名 `PAW` → `PAWUPF`，模块名 `pseudo.paw_upf` → `pseudo.io.paw_upf`
+- `src/pseudo/ncpp.cppm`：**新增** `NCPP` 算符骨架，模块 `pseudo.ncpp`，持有 `NCPPUPF` 数据副本
+- `src/pseudo.cppm`：更新重新导出的子模块列表
+- `CMakeLists.txt`：更新 `pseudo` 目标的模块文件路径
+- 测试重构：
+  - `test/test_io_ncpp.cpp`：原 `test_ncpp_upf.cpp` 迁移，数据路径更新
+  - `test/test_ncpp.cpp`：**新增** `NCPP` 算符骨架测试
+  - `test/CMakeLists.txt`：更新测试目标
+- 文档同步更新：`AGENTS.md`、`docs/design/pseudo_module.md`
+
 ## 进行中
 
 1. GKK

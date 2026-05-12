@@ -1,20 +1,24 @@
-# Pseudo-Potential IO Modules
+# Pseudo-Potential Modules
 
-本文档描述 `src/pseudo/` 下赝势文件读取模块的设计与接口。
+本文档描述 `src/pseudo/` 下赝势模块的设计与接口，包含 **IO 层**（UPF 文件读取）与 **算符层**（计算中使用的赝势算符抽象）。
 
 ## 模块结构
 
 ```
 src/pseudo.cppm          # 总集成模块: export module pseudo;
 src/pseudo/
-  ├── ncpp-upf.cppm      # NCPP UPF v.2 读取 (pseudo.ncpp_upf)
-  ├── uspp-upf.cppm      # USPP 骨架 (pseudo.uspp_upf) — 未实现
-  └── paw-upf.cppm       # PAW 骨架 (pseudo.paw_upf) — 未实现
+  ├── io/
+  │   ├── ncpp.upf.cppm  # NCPP UPF v.2 读取 (pseudo.io.ncpp_upf)
+  │   ├── uspp.upf.cppm  # USPP UPF 读取 (pseudo.io.uspp_upf) — 骨架
+  │   └── paw.upf.cppm   # PAW UPF 读取 (pseudo.io.paw_upf) — 骨架
+  └── ncpp.cppm          # NCPP 算符抽象 (pseudo.ncpp) — 骨架
 ```
 
 `pseudo.cppm` 仅负责重新导出子模块，本身不含实现。
 
-## NCPPUPF — Norm-Conserving Pseudo-Potential (UPF v.2)
+## IO 层 — UPF 文件读取
+
+### NCPPUPF — Norm-Conserving Pseudo-Potential (UPF v.2)
 
 ### 参考资料
 
@@ -183,27 +187,46 @@ UPF v.2 的部分数据节点带有 `columns` 属性，例如：
 | 属性类型转换失败 | `std::runtime_error` | `UPF: invalid double/int/bool attribute ...` |
 | 数组大小不匹配 | `std::runtime_error` | `UPF: <tag> size mismatch` |
 
-## USPP 与 PAW（骨架）
+### USPPUPF 与 PAWUPF（骨架）
 
-`USPP` 和 `PAW` 类已创建但尚未实现。构造函数直接抛出：
+`USPPUPF` 和 `PAWUPF` 类已创建但尚未实现。构造函数直接抛出：
 
 ```cpp
-throw std::runtime_error("USPP/PAW reader not yet implemented");
+throw std::runtime_error("USPPUPF/PAWUPF reader not yet implemented");
 ```
 
 两者与 `NCPPUPF` 保持相同的接口风格（纯值类型、Rule of Zero、提供 `header()` 接口），为后续扩展预留统一的入口。
+
+## 算符层 — 赝势算符抽象
+
+### NCPP — Norm-Conserving Pseudo-Potential Operator
+
+`NCPP` 是计算过程中使用的模守恒赝势算符抽象，与 `NCPPUPF`（文件读取器）分离。
+
+当前为骨架实现，仅持有 `NCPPUPF` 数据副本：
+
+```cpp
+export class NCPP {
+public:
+    explicit NCPP(const NCPPUPF& upf);
+    auto upfData() const -> const NCPPUPF&;
+};
+```
+
+未来将逐步添加物理接口，如局域势傅里叶变换、非局域 beta 投影在平面波基组下的矩阵元等。
 
 ## 测试
 
 ```
 test/
 ├── CMakeLists.txt
-test/test_ncpp_upf/
-    ├── test_ncpp_upf.cpp
+test/test_io_ncpp/
+    ├── test_io_ncpp.cpp
     └── Ge-spd-high.PD04.PBE.UPF
+test/test_ncpp.cpp
 ```
 
-`test_ncpp_upf` 验证内容：
+`test_io_ncpp` 验证内容：
 1. **Header 字段校验**：element, pseudo_type, z_valence, mesh_size, l_max 等
 2. **数据结构尺寸校验**：mesh.r/rab, beta, chi, dion, rhoAtom 长度与 header 一致
 3. **波函数归一化校验**：对每个束缚态验证 `∑ chi[i]² · rab[i] ≈ 1.0`（容差 1e-5）

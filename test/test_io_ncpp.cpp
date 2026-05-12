@@ -3,7 +3,7 @@ import std;
 
 auto main() -> int {
     try {
-        NCPPUPF upf("test/test_ncpp_upf/Ge-spd-high.PD04.PBE.UPF");
+        NCPPUPF upf("test/test_io_ncpp/Ge-spd-high.PD04.PBE.UPF");
 
         const auto& h = upf.header();
 
