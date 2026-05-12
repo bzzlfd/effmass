@@ -46,6 +46,7 @@
 .tree
 .vscode
 .cache 
+*.tar.gz
 
 # Build directories
 build/
@@ -54,5 +55,3 @@ build-*/
 
 # zipped Skill
 *.skill
-
-*.tar.gz
