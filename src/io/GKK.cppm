@@ -15,7 +15,7 @@ export struct GKKMetadata {
 };
 
 // k-point G-vector data view - non-owning spans to contiguous memory
-export struct KPointGVecs {
+export struct KVecs {
     std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, G_x-k_x, G_y-k_y, G_z-k_z
 };
 
@@ -30,9 +30,9 @@ public:
     auto operator=(GKK&& other) noexcept -> GKK&;
 
     auto metadata() const -> const GKKMetadata& { return meta_; }  // get metadata
-    auto loadKPoint(int ikpt) -> const KPointGVecs&;    // load k-point data (with cache)
+    auto loadKPoint(int ikpt) -> const KVecs&;    // load k-point data (with cache)
     auto current_ikpt() const -> int { return current_ikpt_; }     // current k-point index
-    auto currentData() const -> const KPointGVecs& { return current_data_; }  // current data
+    auto currentData() const -> const KVecs& { return current_data_; }  // current data
     auto inferCurrent_k() const -> std::array<double, 3>;  // infer k fractional coord from G-k data
 
 private:
@@ -55,7 +55,7 @@ private:
 
     // buffers: working arrays (contiguous) + file read buffer (reused)
     std::vector<double> kinetic_buf_, Kx_buf_, Ky_buf_, Kz_buf_;
-    KPointGVecs current_data_;  // data view
+    KVecs current_data_;  // data view
 };
 
 GKK::GKK(const std::string& filename)
@@ -281,7 +281,7 @@ auto GKK::seekToKPoint(int ikpt) -> void {
     }
 }
 
-auto GKK::loadKPoint(int ikpt) -> const KPointGVecs& {
+auto GKK::loadKPoint(int ikpt) -> const KVecs& {
     // check if already in buffer
     if (ikpt == current_ikpt_) {
         return current_data_;

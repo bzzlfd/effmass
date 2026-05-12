@@ -4,7 +4,7 @@
 
 ### IO 模块重构 — 拆分 `io.cppm` 为子模块
 
-- `src/io/GKK.cppm`：新建 `io.GKK` 子模块，包含 `GKKMetadata`、`KPointGVecs`、`GKK` 类及全部实现
+- `src/io/GKK.cppm`：新建 `io.GKK` 子模块，包含 `GKKMetadata`、`KVecs`、`GKK` 类及全部实现
 - `src/io/WG.cppm`：新建 `io.WG` 子模块，包含 `WGMetadata`、`WGCoeffs`、`WG` 类及全部实现
 - `src/io.cppm`：重写为聚合模块，通过 `export import io.GKK; export import io.WG;` 重新导出
 - `src/physical_constants.hpp`：新增共享物理常量头文件（`BOHR_RADIUS_ANGSTROM`），供 GKK/WG 共同包含

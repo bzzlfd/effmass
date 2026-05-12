@@ -6,7 +6,7 @@
 |------|----------|------|
 | 常量 | 全大写，下划线分隔 | `BOHR_RADIUS_ANGSTROM` |
 | 类 | 大驼峰（PascalCase） | `GKK`, `GKKBufferIterator` |
-| 结构体 | 大驼峰（PascalCase） | `GKKMetadata`, `KPointGVecs` |
+| 结构体 | 大驼峰（PascalCase） | `GKKMetadata`, `KVecs` |
 | 成员变量 | 后缀下划线 | `meta_`, `fp_`, `current_kpt_` |
 | 函数 | 小驼峰（camelCase） | `loadKPoint()`, `readMetadata()` |
 | 局部变量 | 小驼峰 | `record_len`, `ikpt` |
@@ -35,9 +35,9 @@ public:
 
     auto operator=(GKK&& other) noexcept -> GKK&;
     auto metadata() const -> const GKKMetadata& { return meta_; }
-    auto loadKPoint(int ikpt) -> const KPointGVecs&;
+    auto loadKPoint(int ikpt) -> const KVecs&;
     auto current_ikpt() const -> int { return current_ikpt_; }
-    auto currentData() const -> const KPointGVecs& { return current_data_; }
+    auto currentData() const -> const KVecs& { return current_data_; }
 
 private:
     auto readRecordLength() -> int;

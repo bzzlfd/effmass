@@ -76,7 +76,7 @@ ctest --test-dir build
 |------|----------|------|
 | 常量 | 全大写，下划线分隔 | `BOHR_RADIUS_ANGSTROM` |
 | 类 | 大驼峰（PascalCase） | `GKK`, `NCPPUPF` |
-| 结构体 | 大驼峰（PascalCase） | `GKKMetadata`, `KPointGVecs` |
+| 结构体 | 大驼峰（PascalCase） | `GKKMetadata`, `KVecs` |
 | 成员变量 | 后缀下划线 | `meta_`, `fp_`, `current_ikpt_` |
 | 函数 | 小驼峰（camelCase） | `loadKPoint()`, `readMetadata()` |
 | 局部变量 | 小驼峰 | `record_len`, `ikpt` |

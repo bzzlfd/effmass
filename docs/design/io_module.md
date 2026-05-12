@@ -27,12 +27,12 @@ export struct GKKMetadata {
 };
 ```
 
-### `KPointGVecs`
+### `KVecs`
 
 某个 k 点的 G 向量数据视图，通过指针指向类内部预分配的连续缓冲区：
 
 ```cpp
-export struct KPointGVecs {
+export struct KVecs {
     std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, G_x-k_x, G_y-k_y, G_z-k_z
 };
 ```
@@ -58,7 +58,7 @@ GKK(GKK&& other) noexcept;
 GKK& operator=(GKK&& other) noexcept;
 ```
 
-支持移动构造和移动赋值。移动后会自动更新 `KPointGVecs` 内部的指针，使其指向新的缓冲区。
+支持移动构造和移动赋值。移动后会自动更新 `KVecs` 内部的指针，使其指向新的缓冲区。
 
 > 拷贝被显式删除，因为类持有 `FILE*` 句柄和大量缓冲区。
 
@@ -66,9 +66,9 @@ GKK& operator=(GKK&& other) noexcept;
 
 ```cpp
 const GKKMetadata& metadata() const;                          // 获取元数据
-const KPointGVecs& loadKPoint(int ikpt);                      // 加载指定 k 点数据（带缓存）
+const KVecs& loadKPoint(int ikpt);                      // 加载指定 k 点数据（带缓存）
 int current_ikpt() const;                                     // 当前缓存的 k 点索引
-const KPointGVecs& currentData() const;                       // 当前缓存的数据视图
+const KVecs& currentData() const;                       // 当前缓存的数据视图
 std::array<double, 3> inferCurrent_k() const;                 // 从 K=G-k 数据推断 k 点分数坐标 (fractional coordinate)
 ```
 
