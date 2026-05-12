@@ -1,14 +1,16 @@
-# `io.cppm` 设计细节与接口
+# IO 模块设计细节与接口
 
-本文档介绍 `src/io.cppm` 中 `GKK` 与 `WG` 类的设计思想与对外接口。关于文件二进制格式定义，请参阅 [`note/file_formats.md`](../note/file_formats.md)。
+本文档介绍 `io` 模块及其子模块 `io.GKK`、`io.WG` 的设计思想与对外接口。关于文件二进制格式定义，请参阅 [`note/file_formats.md`](../note/file_formats.md)。
 
-## 模块导出
+## 模块结构
 
-```cpp
-export module io;
+```
+io (aggregate)
+├── io.GKK  →  src/io/GKK.cppm
+└── io.WG   →  src/io/WG.cppm
 ```
 
-`io.cppm` 是一个 C++23 模块接口文件，导出与文件 IO 相关的结构和类。
+`io.cppm` 是聚合模块（aggregate module），通过 `export import io.GKK; export import io.WG;` 重新导出两个子模块的所有公开接口。外部代码只需 `import io;` 即可使用全部 IO 功能。
 
 ## 数据结构
 

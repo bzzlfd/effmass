@@ -46,7 +46,9 @@ ctest --test-dir build
 
 | 文件/目录 | 说明 |
 |-----------|------|
-| `io.cppm` | IO 模块：导出 `GKK`（`OUT.GKK` 读取器）、`WG`（`OUT.WG` 读取器） |
+| `io.cppm` | IO 总模块：重新导出 `io.GKK`、`io.WG` |
+| `io/GKK.cppm` | `io.GKK` 子模块：`GKK` 类与 `OUT.GKK` 读取实现 |
+| `io/WG.cppm` | `io.WG` 子模块：`WG` 类与 `OUT.WG` 读取实现 |
 | `pseudo.cppm` | 赝势总模块：重新导出 `pseudo.io.*`、`pseudo.ncpp` |
 | `pseudo/io/ncpp.upf.cppm` | `NCPPUPF` 类：UPF v.2 模守恒赝势文件解析 |
 | `pseudo/io/uspp.upf.cppm` | `USPPUPF` 类：USPP 赝势文件解析（骨架） |

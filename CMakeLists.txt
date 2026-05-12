@@ -22,6 +22,8 @@ target_sources(io
     PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
             src/io.cppm
+            src/io/GKK.cppm
+            src/io/WG.cppm
 )
 
 # Library target for pseudo-potential module
