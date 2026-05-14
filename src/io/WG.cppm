@@ -4,13 +4,14 @@ module;
 
 export module io.WG;
 
+import io.lattice;
 import std;
 
 // WG file metadata structure
 export struct WGMetadata {
     int n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda;  // FFT grid / bands / record length / node / k-point / spin
     double Ecut;              // cutoff energy
-    double AL[3][3];          // lattice vectors (Bohr)
+    Lattice lattice;          // lattice vectors (Bohr) and reciprocal lattice (Bohr^-1)
     std::vector<int> ng_tot_per_kpt;  // total G-vectors per k-point
 };
 
@@ -198,11 +199,7 @@ auto WG::readMetadata() -> void {
     // Record 3: AL(3,3) - Fortran column-major to C++ row-major, Å to Bohr
     double al_flat[9];
     readRecord(al_flat, sizeof(al_flat), "AL");
-    for (int n = 0; n < 3; ++n) {
-        for (int c = 0; c < 3; ++c) {
-            meta_.AL[n][c] = al_flat[n * 3 + c] / BOHR_RADIUS_ANGSTROM;
-        }
-    }
+    meta_.lattice = Lattice(al_flat, LengthUnit::Angstrom);
 
     // Record 4: nnodes, ngtotnod
     int len = readRecordLength();

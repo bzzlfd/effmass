@@ -19,6 +19,6 @@
 
 - `design/conventions.md`：**[Convention-001/002]** 晶格矢量索引约定与倒空间物理量命名规范
 - `design/physical_constants.md`：物理常量命名规范与 `constexpr` 使用约定
-- `design/io_module.md`：`io` 总模块及子模块 `io.GKK`、`io.WG` 的接口设计与实现细节
+- `design/io_module.md`：`io` 总模块及子模块 `io.GKK`、`io.WG`、`io.lattice` 的接口设计与实现细节
 - `design/pseudo_module.md`：赝势读取模块的接口设计、`NCPPUPF` 类结构与 UPF 文件 tag 的映射
 - `design/cpp_conventions.md`：C++ 编码约定（命名规范、函数返回类型写法等）

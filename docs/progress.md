@@ -44,26 +44,50 @@
   - `test/CMakeLists.txt`：更新测试目标
 - 文档同步更新：`AGENTS.md`、`docs/design/pseudo_module.md`
 
+## 已完成
+
+### GKK — 多视角数据表示与 `KVecsView`
+
+- `src/io/GKK.cppm`：
+  - 新增 `KVecsView` 位掩码枚举（`Cartesian`, `Spherical`, `Integer`），支持 `|`, `&`, `~` 组合。
+  - 扩展 `KVecs` 结构体：
+    - 新增球坐标 `r, theta, phi`
+    - 新增整数索引 `iG, jG, kG`（原 `Gx, Gy, Gz` 已更名）
+    - 新增每 k 点元数据：`kPoint`（k 分数坐标，由 `inferCurrent_k()` 推断）、`reciprocalLattice`（倒格子矩阵，构造时计算并缓存）
+  - `GKK` 新增 `setDataView(view)` / `currentView()`：内部状态控制当前启用的数据表示。
+  - `loadKPoint` 支持增量计算：同一 k 点切换 view 时不重复文件 IO，仅补充计算缺失的表示。
+  - `currentData()` 返回的 `KVecs` 按 `currentView` 过滤：未启用的表示为空 `span`。
+  - 新增 `computeSpherical()` 和 `computeIntegerIndices()` 私有方法：
+    - 球坐标：`r = |K|`, `theta = acos(Kz/r)`, `phi = atan2(Ky, Kx)`
+    - 整数索引：`(iG,jG,kG) = round(A^T * K_cart / (2π) + k_frac)`，复用已有的 `inferCurrent_k()`
+  - 新增 `computeReciprocalLattice()`：从 `meta_.AL` 计算倒格子矩阵 `b_n = 2π * (a_{n+1} × a_{n+2}) / V`
+  - 移动语义更新：修复新增缓冲区的 `span` 指向。
+- 文档同步更新：`docs/design/io_module.md`
+
 ## 进行中
 
-1. GKK
-    1. current_ikpt 这个语义上像是可以得知 k 向量，可以得到吗？
-    推断 k 向量
-    2. 对于currentData的返回值，内部保存一个变量，用于控制currentData以那些视角返回
-        1. 源数据 gg(把这个重新起一个不会误会的名字),gx,gy,gz （叫g... 语义上也不好，让人以为是 G，其实是 G+k）
-        2. 球坐标视角（）
-        3. 整数视角 （）
-
-添加命名规范。
-k: (0.5, 0.5]
-G: (recip. latt.) * (i,j,k)
-K: G - k
-
-ik index of k
-
-2. 特殊函数
-3. ~~给 ncpp-upf.cppm 中的 NCPPUPF 添加更多函数~~
+1. 特殊函数
+2. ~~给 ncpp-upf.cppm 中的 NCPPUPF 添加更多函数~~
     1. ~~推断 mesh 中的网格是均匀的，还是指数的，还是未知的~~
     2. ~~获得角动量是 l 的 beta 子列表，dion子矩阵~~
 
-- span 还是 vector，需要思考
+
+1. 代码规范，函数之间两行。和python规范一样
+2. ~~抽象lattice~~
+  1. ~~写测试。用高斯消元法~~
+
+## 已完成
+
+### Lattice 抽象与 IO 模块整合
+
+- `src/io/lattice.cppm`：新建 `io.lattice` 子模块，包含 `LengthUnit` 枚举和 `Lattice` 类。
+  - `Lattice` 封装实空间晶格 `A`（Bohr）与倒空间晶格 `B`（Bohr⁻¹），构造时自动计算倒格子。
+  - 支持 `LengthUnit::Bohr` 和 `LengthUnit::Angstrom` 单位传入/转换。
+  - `A(LengthUnit)` / `B(LengthUnit)` 支持按指定单位返回数值矩阵（默认 Bohr）。
+- `src/io/GKK.cppm`：`GKKMetadata` 中 `double AL[3][3]` 替换为 `Lattice lattice`；移除内嵌的 `computeReciprocalLattice()`，所有晶格操作统一委托给 `Lattice`。
+- `src/io/WG.cppm`：`WGMetadata` 中 `double AL[3][3]` 替换为 `Lattice lattice`。
+- `test/test_lattice.cpp`：新增测试，用增广矩阵高斯消元法手动求 `A` 的逆并转置，验证 `lattice.B()` 与 `2π * (A⁻¹)ᵀ` 一致（覆盖立方、FCC、Angstrom 转换）。
+- `CMakeLists.txt` / `test/CMakeLists.txt`：加入 `io.lattice` 模块和 `test_lattice` 测试目标。
+- 文档同步更新：`docs/design/io_module.md`、`docs/design/conventions.md`、`docs/design/multi_dimensional_array.md`、`docs/note/atomic_units.md`、`docs/index.md`。
+
+

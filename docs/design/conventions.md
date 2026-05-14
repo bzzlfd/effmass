@@ -10,17 +10,18 @@
 
 ### 本项目的约定（约定 B：向量紧密安排）
 
-- `meta_.AL[n][c]` 中，**n 对应晶格矢量编号 (a1/a2/a3)，c 对应分量 (x/y/z)**
-- 即 `meta_.AL[n][0..2]` = 第 n 个晶格矢量的三个分量（内存连续）
-- 这种约定符合 C 语言习惯，`AL[n]` 可直接作为 `double[3]` 使用
+- `lattice.A()[n][c]` 中，**n 对应晶格矢量编号 (a1/a2/a3)，c 对应分量 (x/y/z)**
+- 即 `lattice.A()[n][0..2]` = 第 n 个晶格矢量的三个分量（内存连续）
+- 这种约定符合 C 语言习惯，`A()[n]` 可直接作为 `double[3]` 使用
 
 ### 关键代码
 
 ```cpp
-// 约定 B: AL[n][c] 其中 n=vector, c=component
+// 约定: A[n][c] 其中 n=vector, c=component
+std::span<const double, 9> flat;
 for (int n = 0; n < 3; ++n) {
     for (int c = 0; c < 3; ++c) {
-        meta_.AL[n][c] = al_flat[n * 3 + c] / BOHR_RADIUS_ANGSTROM;
+        A_[n][c] = flat[n * 3 + c];
     }
 }
 ```
@@ -29,10 +30,10 @@ for (int n = 0; n < 3; ++n) {
 
 ```cpp
 // 获取第 n 个晶格矢量 (a1/a2/a3) 的 x, y, z 分量
-double an[3] = {meta_.AL[n][0], meta_.AL[n][1], meta_.AL[n][2]};
+double an[3] = {lattice.A()[n][0], lattice.A()[n][1], lattice.A()[n][2]};
 
 // 获取所有晶格矢量的 x 分量
-double ax[3] = {meta_.AL[0][0], meta_.AL[1][0], meta_.AL[2][0]};
+double ax[3] = {lattice.A()[0][0], lattice.A()[1][0], lattice.A()[2][0]};
 ```
 
 ---

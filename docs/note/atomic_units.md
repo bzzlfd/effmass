@@ -18,7 +18,7 @@
 
 | 物理量 | 文件中的单位 | 内部计算单位 |
 |--------|-------------|-------------|
-| 长度（晶格矢量 `AL`） | Å（Angstrom） | Bohr |
+| 长度（晶格矢量 `A`） | Å（Angstrom） | Bohr |
 | 能量 | — | Hartree |
 | 波矢 $|G+k|^2/2$ | — | Hartree（因为 $\hbar = 1, m_e = 1$） |
 
@@ -41,12 +41,18 @@ $$1 \ \text{Hartree} = 27.211386245988 \ \text{eV}$$
 
 ## 代码实践
 
-所有从输入文件读取的以 Å 为单位的长度量，应在读取时立即转换为 Bohr：
+晶格矢量等带有物理单位的数据，应直接传入封装对象（如 `Lattice`），由对象内部根据传入的单位完成转换，而非在 IO 层手动转换：
 
 ```cpp
 // Fortran 文件中 AL 以 Angstrom 存储
-// 读取后统一转换为 Bohr（原子单位制长度单位）
-meta_.AL[n][c] = al_flat[n * 3 + c] / BOHR_RADIUS_ANGSTROM;
+// 直接构造 Lattice，传入原始数值和单位，转换在 Lattice 内部完成
+std::array<std::array<double, 3>, 3> al{};
+for (int n = 0; n < 3; ++n) {
+    for (int c = 0; c < 3; ++c) {
+        al[n][c] = al_flat[n * 3 + c];
+    }
+}
+Lattice lattice(al, LengthUnit::Angstrom);
 ```
 
 内部所有公式（如有效质量计算、倒格子体积、动能项等）均默认使用原子单位制，不再出现 $\hbar$ 和 $m_e$。

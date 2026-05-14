@@ -16,7 +16,7 @@
 | `ncpp-upf.cppm` | `std::vector<std::vector<double>> beta` | 非局域势的 beta 投射函数，每行被截断为不同长度 |
 | `ncpp-upf.cppm` | `std::vector<std::vector<double>> chi` | 赝原子波函数，每行被截断为不同长度 |
 | `io.cppm` | `std::vector<std::vector<int>> ngtotnod_` | 每 k 点、每 node 的 G-vector 计数，语义上是二维表但由嵌套 vector 承载 |
-| `io.cppm` | `double AL[3][3]` | 晶格矢量，固定 3×3 尺寸，使用原生数组 |
+| `lattice.cppm` | `std::array<std::array<double, 3>, 3>` (in `Lattice`) | 晶格矢量，固定 3×3 尺寸，封装在 `Lattice` 类中 |
 | `test_ncpp_upf.cpp` | `nl.beta[0][0]`、`wfc.chi[i][ir]` | 测试代码中对上述结构的访问 |
 
 ### `A[i,j]` 风格（flat storage + 多参数下标）
@@ -76,9 +76,9 @@ struct Matrix {
    - 适用场景：固定大小的数值矩阵（如 `dion`、平面波系数矩阵等）。
 
 3. **极小固定尺寸（如 3×3）**
-   - 允许直接使用原生数组 `T[N][M]`。
+   - 允许直接使用原生数组 `T[N][M]` 或嵌套 `std::array`。
    - 访问语法为 `A[i][j]`。
-   - 适用场景：晶格矢量 `AL[3][3]` 等。
+   - 适用场景：晶格矢量 `lattice.A()[n][c]` 等。
 
 ## 示例
 
@@ -91,7 +91,7 @@ beta[i][ir] = ...;          // OK: A[i][j]
 Matrix dion;
 dion[i, j] = ...;           // OK: A[i,j]
 
-// 3. 原生固定数组 —— 极小尺寸
-double AL[3][3];
-AL[n][c] = ...;             // OK: A[i][j]
+// 3. 极小固定尺寸 —— 封装在 Lattice 类中
+Lattice lattice;
+lattice.A()[n][c] = ...;    // OK: A[i][j]
 ```
