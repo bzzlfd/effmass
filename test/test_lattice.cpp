@@ -1,6 +1,7 @@
 import io;
 import std;
 
+
 // Gauss-Jordan elimination on augmented matrix [A | I] to compute A^{-1},
 // then return its transpose: (A^{-1})^T.
 auto gaussJordanInverseTranspose(const std::array<std::array<double, 3>, 3>& A)
@@ -66,6 +67,7 @@ auto gaussJordanInverseTranspose(const std::array<std::array<double, 3>, 3>& A)
     return result;
 }
 
+
 auto checkLattice(
     const std::array<std::array<double, 3>, 3>& A_input,
     LengthUnit unit,
@@ -99,6 +101,7 @@ auto checkLattice(
         }
     }
 }
+
 
 auto main() -> int {
     try {

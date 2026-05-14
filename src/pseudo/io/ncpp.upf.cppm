@@ -5,6 +5,7 @@ export module pseudo.io.ncpp_upf;
 
 import std;
 
+
 // === Simple dense matrix (flat storage) ===
 struct Matrix {
     std::vector<double> data;
@@ -21,6 +22,7 @@ struct Matrix {
     [[nodiscard]] auto size() const -> std::size_t { return data.size(); }
     [[nodiscard]] auto empty() const -> bool { return data.empty(); }
 };
+
 
 // === NCPPUPF Header structure ===
 export struct NCPPUPFHeader {
@@ -50,11 +52,13 @@ export struct NCPPUPFHeader {
     int number_of_proj = 0;
 };
 
+
 // === Mesh data ===
 export struct NCPPUPFMesh {
     std::vector<double> r;
     std::vector<double> rab;
 };
+
 
 // === Nonlocal data (beta projectors + D_ij) ===
 export struct NCPPUPFNonlocal {
@@ -65,12 +69,14 @@ export struct NCPPUPFNonlocal {
     Matrix dion;                             // D_ij matrix
 };
 
+
 // === Mesh type enumeration ===
 export enum class MeshType {
     Uniform,
     Exponential,
     Unknown
 };
+
 
 // === Nonlocal data filtered by angular momentum l ===
 export struct NCPPUPFNonlocalByL {
@@ -87,6 +93,7 @@ export struct NCPPUPFWavefunction {
     std::vector<double> oc;                  // [nwfc] occupation
     std::vector<std::string> labels;         // [nwfc] label
 };
+
 
 // === NCPPUPF class ===
 export class NCPPUPF {
@@ -118,6 +125,7 @@ private:
     auto readWavefunctions(const pugi::xml_node& root) -> void;
     auto readRhoAtom(const pugi::xml_node& root) -> void;
 };
+
 
 // --- helper: trim whitespace ---
 static auto trimWhitespace(const std::string& s) -> std::string {
@@ -206,6 +214,7 @@ NCPPUPF::NCPPUPF(const std::string& filename) {
     readRhoAtom(root);
 }
 
+
 auto NCPPUPF::readHeader(const pugi::xml_node& root) -> void {
     pugi::xml_node pp_header = root.child("PP_HEADER");
     if (!pp_header) {
@@ -238,6 +247,7 @@ auto NCPPUPF::readHeader(const pugi::xml_node& root) -> void {
     header_.number_of_proj  = getAttrInt(pp_header, "number_of_proj");
 }
 
+
 auto NCPPUPF::readMesh(const pugi::xml_node& root) -> void {
     pugi::xml_node pp_mesh = root.child("PP_MESH");
     if (!pp_mesh) {
@@ -259,6 +269,7 @@ auto NCPPUPF::readMesh(const pugi::xml_node& root) -> void {
     }
 }
 
+
 auto NCPPUPF::readLocalPotential(const pugi::xml_node& root) -> void {
     if (header_.is_coulomb) {
         // Coulomb pseudopotential has no local potential
@@ -272,6 +283,7 @@ auto NCPPUPF::readLocalPotential(const pugi::xml_node& root) -> void {
         throw std::runtime_error("UPF: <PP_LOCAL> size mismatch");
     }
 }
+
 
 auto NCPPUPF::readNonlocal(const pugi::xml_node& root) -> void {
     pugi::xml_node pp_nonlocal = root.child("PP_NONLOCAL");
@@ -321,6 +333,7 @@ auto NCPPUPF::readNonlocal(const pugi::xml_node& root) -> void {
     }
 }
 
+
 auto NCPPUPF::readWavefunctions(const pugi::xml_node& root) -> void {
     pugi::xml_node pp_pswfc = root.child("PP_PSWFC");
     if (!pp_pswfc) {
@@ -362,6 +375,7 @@ auto NCPPUPF::readWavefunctions(const pugi::xml_node& root) -> void {
     }
 }
 
+
 auto NCPPUPF::readRhoAtom(const pugi::xml_node& root) -> void {
     pugi::xml_node rho_node = root.child("PP_RHOATOM");
     if (!rho_node) throw std::runtime_error("UPF: missing <PP_RHOATOM>");
@@ -370,6 +384,7 @@ auto NCPPUPF::readRhoAtom(const pugi::xml_node& root) -> void {
         throw std::runtime_error("UPF: <PP_RHOATOM> size mismatch");
     }
 }
+
 
 auto NCPPUPF::meshType() const -> MeshType {
     const auto& r = mesh_.r;
@@ -421,6 +436,7 @@ auto NCPPUPF::meshType() const -> MeshType {
 
     return MeshType::Unknown;
 }
+
 
 auto NCPPUPF::nonlocalByL(int l) const -> NCPPUPFNonlocalByL {
     std::vector<int> indices;

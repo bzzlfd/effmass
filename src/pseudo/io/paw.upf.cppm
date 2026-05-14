@@ -5,6 +5,7 @@ export module pseudo.io.paw_upf;
 
 import std;
 
+
 // === PAWUPF Header structure (placeholder) ===
 export struct PAWUPFHeader {
     std::string element;
@@ -16,6 +17,7 @@ export struct PAWUPFHeader {
     std::string functional;
 };
 
+
 // === PAWUPF class (not yet implemented) ===
 export class PAWUPF {
 public:
@@ -26,6 +28,7 @@ public:
 private:
     PAWUPFHeader header_;
 };
+
 
 PAWUPF::PAWUPF(const std::string& /*filename*/) {
     throw std::runtime_error("PAWUPF reader not yet implemented");

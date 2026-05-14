@@ -7,6 +7,7 @@ export module io.WG;
 import io.lattice;
 import std;
 
+
 // WG file metadata structure
 export struct WGMetadata {
     int n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda;  // FFT grid / bands / record length / node / k-point / spin
@@ -15,11 +16,13 @@ export struct WGMetadata {
     std::vector<int> ng_tot_per_kpt;  // total G-vectors per k-point
 };
 
+
 // Wavefunction coefficient view for a single k-point and band
 export struct WGCoeffs {
     std::span<const std::complex<double>> up;     // spin-up component (always valid)
     std::span<const std::complex<double>> down;   // spin-down component (valid only when is_SO == 1)
 };
+
 
 // WG class - abstraction for OUT.WG file
 export class WG {
@@ -75,6 +78,7 @@ private:
     std::vector<std::complex<double>> tmp_buf_;  // temporary buffer for is_SO record splitting
 };
 
+
 WG::WG(const std::string& filename, std::size_t cache_capacity)
     : filename_(filename)
     , fp_(nullptr)
@@ -95,11 +99,13 @@ WG::WG(const std::string& filename, std::size_t cache_capacity)
     computeOffsets();
 }
 
+
 WG::~WG() {
     if (fp_) {
         std::fclose(fp_);
     }
 }
+
 
 WG::WG(WG&& other) noexcept
     : filename_(std::move(other.filename_))
@@ -120,6 +126,7 @@ WG::WG(WG&& other) noexcept
     other.current_iband_ = -1;
     other.current_data_view_ = {};
 }
+
 
 auto WG::operator=(WG&& other) noexcept -> WG& {
     if (this != &other) {
@@ -146,6 +153,7 @@ auto WG::operator=(WG&& other) noexcept -> WG& {
     return *this;
 }
 
+
 auto WG::readRecordLength() -> int {
     int length;
     if (std::fread(&length, sizeof(int), 1, fp_) != 1) {
@@ -153,6 +161,7 @@ auto WG::readRecordLength() -> int {
     }
     return length;
 }
+
 
 auto WG::checkRecordLength(int expected_length) -> void {
     int length;
@@ -164,6 +173,7 @@ auto WG::checkRecordLength(int expected_length) -> void {
     }
 }
 
+
 auto WG::readRecord(void* dst, std::size_t nbytes, const char* context) -> void {
     int len = readRecordLength();
     if (len != static_cast<int>(nbytes)) {
@@ -174,6 +184,7 @@ auto WG::readRecord(void* dst, std::size_t nbytes, const char* context) -> void 
     }
     checkRecordLength(len);
 }
+
 
 auto WG::readMetadata() -> void {
     // Record 1: n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda (9 ints)
@@ -207,6 +218,7 @@ auto WG::readMetadata() -> void {
     checkRecordLength(len);
 }
 
+
 auto WG::readNgtotnod(int record_len) -> void {
     int nnodes_check;
     if (std::fread(&nnodes_check, sizeof(int), 1, fp_) != 1) {
@@ -236,6 +248,7 @@ auto WG::readNgtotnod(int record_len) -> void {
     }
 }
 
+
 auto WG::skipRecord() -> void {
     int len = readRecordLength();
     if (std::fseek(fp_, len, SEEK_CUR) != 0) {
@@ -243,6 +256,7 @@ auto WG::skipRecord() -> void {
     }
     checkRecordLength(len);
 }
+
 
 auto WG::computeOffsets() -> void {
     // record the starting file offset for each (k-point, band) pair
@@ -258,6 +272,7 @@ auto WG::computeOffsets() -> void {
     }
 }
 
+
 auto WG::seekToBand(int ikpt, int iband) -> void {
     if (ikpt < 0 || ikpt >= meta_.nkpt) {
         throw std::out_of_range("Invalid k-point index");
@@ -271,6 +286,7 @@ auto WG::seekToBand(int ikpt, int iband) -> void {
         throw std::runtime_error("Failed to seek to band");
     }
 }
+
 
 auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
     if (ikpt < 0 || ikpt >= meta_.nkpt) {

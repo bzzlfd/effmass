@@ -7,6 +7,7 @@ export module io.GKK;
 import io.lattice;
 import std;
 
+
 // GKK file metadata structure
 export struct GKKMetadata {
     int n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda;  // FFT grid / record length / node / k-point / spin
@@ -15,12 +16,14 @@ export struct GKKMetadata {
     std::vector<int> ng_tot_per_kpt;  // total G-vectors per k-point
 };
 
+
 // Bitmask controlling which representations are computed and exposed in KVecs
 export enum class KVecsView : unsigned int {
     Cartesian = 1 << 0,  // kinetic, Kx, Ky, Kz
     Spherical = 1 << 1,  // r, theta, phi
     Integer   = 1 << 2,  // iG, jG, kG, kPoint, reciprocalLattice
 };
+
 
 export constexpr auto operator|(KVecsView a, KVecsView b) -> KVecsView {
     return static_cast<KVecsView>(static_cast<unsigned int>(a) | static_cast<unsigned int>(b));
@@ -34,6 +37,7 @@ export constexpr auto operator~(KVecsView a) -> KVecsView {
 export constexpr auto hasView(KVecsView flags, KVecsView view) -> bool {
     return (static_cast<unsigned int>(flags) & static_cast<unsigned int>(view)) != 0;
 }
+
 
 // k-point G-vector data view - non-owning spans to contiguous memory
 export struct KVecs {
@@ -49,6 +53,7 @@ export struct KVecs {
     std::array<double, 3>               kPoint{};            // fractional coordinate of current k-point
     std::array<std::array<double, 3>, 3> reciprocalLattice{}; // reciprocal lattice vectors: row n = b_n
 };
+
 
 // GKK class - abstraction for OUT.GKK file
 export class GKK {
@@ -106,6 +111,7 @@ private:
     KVecs current_data_;  // data view
 };
 
+
 GKK::GKK(const std::string& filename)
     : filename_(filename)
     , fp_(nullptr)
@@ -132,11 +138,13 @@ GKK::GKK(const std::string& filename)
     computeOffsets();
 }
 
+
 GKK::~GKK() {
     if (fp_) {
         std::fclose(fp_);
     }
 }
+
 
 GKK::GKK(GKK&& other) noexcept
     : filename_(std::move(other.filename_))
@@ -181,6 +189,7 @@ GKK::GKK(GKK&& other) noexcept
         }
     }
 }
+
 
 auto GKK::operator=(GKK&& other) noexcept -> GKK& {
     if (this != &other) {
@@ -232,6 +241,7 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
     return *this;
 }
 
+
 auto GKK::readRecordLength() -> int {
     int length;
     if (std::fread(&length, sizeof(int), 1, fp_) != 1) {
@@ -239,6 +249,7 @@ auto GKK::readRecordLength() -> int {
     }
     return length;
 }
+
 
 auto GKK::checkRecordLength(int expected_length) -> void {
     int length;
@@ -250,6 +261,7 @@ auto GKK::checkRecordLength(int expected_length) -> void {
     }
 }
 
+
 auto GKK::readRecord(void* dst, std::size_t nbytes, const char* context) -> void {
     int len = readRecordLength();
     if (len != static_cast<int>(nbytes)) {
@@ -260,6 +272,7 @@ auto GKK::readRecord(void* dst, std::size_t nbytes, const char* context) -> void
     }
     checkRecordLength(len);
 }
+
 
 auto GKK::readMetadata() -> void {
     // Record 1: n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda
@@ -293,6 +306,7 @@ auto GKK::readMetadata() -> void {
     checkRecordLength(len);
 }
 
+
 auto GKK::readNgtotnod(int record_len) -> void {
     int nnodes_check;
     if (std::fread(&nnodes_check, sizeof(int), 1, fp_) != 1) {
@@ -323,6 +337,7 @@ auto GKK::readNgtotnod(int record_len) -> void {
     }
 }
 
+
 auto GKK::skipRecord() -> void {
     int len = readRecordLength();
     if (std::fseek(fp_, len, SEEK_CUR) != 0) {
@@ -330,6 +345,7 @@ auto GKK::skipRecord() -> void {
     }
     checkRecordLength(len);
 }
+
 
 auto GKK::computeOffsets() -> void {
     // record the starting file offset for each k-point's data
@@ -351,6 +367,7 @@ auto GKK::computeOffsets() -> void {
     }
 }
 
+
 auto GKK::seekToKPoint(int ikpt) -> void {
     if (ikpt < 0 || ikpt >= meta_.nkpt) {
         throw std::out_of_range("Invalid k-point index");
@@ -360,6 +377,7 @@ auto GKK::seekToKPoint(int ikpt) -> void {
         throw std::runtime_error("Failed to seek to k-point");
     }
 }
+
 
 auto GKK::updateDataSpans(std::size_t ng) -> void {
     // Cartesian is always loaded when loadKPoint succeeds
@@ -385,6 +403,7 @@ auto GKK::updateDataSpans(std::size_t ng) -> void {
     }
 }
 
+
 auto GKK::computeSpherical(std::size_t ng) -> void {
     for (std::size_t ig = 0; ig < ng; ++ig) {
         const double kx = Kx_buf_[ig];
@@ -396,6 +415,7 @@ auto GKK::computeSpherical(std::size_t ng) -> void {
         phi_buf_[ig]   = std::atan2(ky, kx);
     }
 }
+
 
 auto GKK::computeIntegerIndices(std::size_t ng) -> void {
     auto k_frac = inferCurrent_k();
@@ -416,6 +436,7 @@ auto GKK::computeIntegerIndices(std::size_t ng) -> void {
         kG_buf_[ig] = static_cast<int>(std::lround(cz / TWO_PI + k_frac[2]));
     }
 }
+
 
 auto GKK::setDataView(KVecsView view) -> void {
     if (view == desired_views_) {
@@ -456,6 +477,7 @@ auto GKK::setDataView(KVecsView view) -> void {
 
     desired_views_ = view;
 }
+
 
 auto GKK::loadKPoint(int ikpt) -> const KVecs& {
     // exact cache hit: same k-point and all desired representations already computed
@@ -523,6 +545,7 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
     updateDataSpans(total_pos);
     return current_data_;
 }
+
 
 auto GKK::inferCurrent_k() const -> std::array<double, 3> {
     if (current_ikpt_ < 0) {

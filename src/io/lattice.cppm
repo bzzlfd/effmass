@@ -5,10 +5,12 @@ export module io.lattice;
 
 import std;
 
+
 export enum class LengthUnit {
     Bohr,
     Angstrom,
 };
+
 
 export class Lattice {
 public:
@@ -29,6 +31,7 @@ private:
     static auto toArray(std::initializer_list<std::initializer_list<double>> A)
         -> std::array<std::array<double, 3>, 3>;
 };
+
 
 auto Lattice::toArray(std::initializer_list<std::initializer_list<double>> A)
     -> std::array<std::array<double, 3>, 3>
@@ -52,6 +55,7 @@ auto Lattice::toArray(std::initializer_list<std::initializer_list<double>> A)
     return result;
 }
 
+
 Lattice::Lattice(std::span<const double, 9> flat, LengthUnit unit)
 {
     for (int n = 0; n < 3; ++n) {
@@ -69,10 +73,12 @@ Lattice::Lattice(std::span<const double, 9> flat, LengthUnit unit)
     computeReciprocalLattice();
 }
 
+
 Lattice::Lattice(std::initializer_list<std::initializer_list<double>> A, LengthUnit unit)
     : Lattice(toArray(A), unit)
 {
 }
+
 
 auto Lattice::A(LengthUnit unit) const -> std::array<std::array<double, 3>, 3> {
     switch (unit) {
@@ -92,6 +98,7 @@ auto Lattice::A(LengthUnit unit) const -> std::array<std::array<double, 3>, 3> {
     }
 }
 
+
 auto Lattice::B(LengthUnit unit) const -> std::array<std::array<double, 3>, 3> {
     switch (unit) {
     case LengthUnit::Bohr:
@@ -110,6 +117,7 @@ auto Lattice::B(LengthUnit unit) const -> std::array<std::array<double, 3>, 3> {
     }
 }
 
+
 Lattice::Lattice(const std::array<std::array<double, 3>, 3>& A, LengthUnit unit)
     : A_(A)
 {
@@ -122,6 +130,7 @@ Lattice::Lattice(const std::array<std::array<double, 3>, 3>& A, LengthUnit unit)
     }
     computeReciprocalLattice();
 }
+
 
 auto Lattice::computeReciprocalLattice() -> void {
     // A_[n][c] = real-space lattice vector a_n (component c)

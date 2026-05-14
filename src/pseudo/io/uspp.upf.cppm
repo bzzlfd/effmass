@@ -5,6 +5,7 @@ export module pseudo.io.uspp_upf;
 
 import std;
 
+
 // === USPPUPF Header structure (placeholder) ===
 export struct USPPUPFHeader {
     std::string element;
@@ -16,6 +17,7 @@ export struct USPPUPFHeader {
     std::string functional;
 };
 
+
 // === USPPUPF class (not yet implemented) ===
 export class USPPUPF {
 public:
@@ -26,6 +28,7 @@ public:
 private:
     USPPUPFHeader header_;
 };
+
 
 USPPUPF::USPPUPF(const std::string& /*filename*/) {
     throw std::runtime_error("USPPUPF reader not yet implemented");
