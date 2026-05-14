@@ -2,8 +2,6 @@ import io;
 import std;
 
 
-// Gauss-Jordan elimination on augmented matrix [A | I] to compute A^{-1},
-// then return its transpose: (A^{-1})^T.
 auto gaussJordanInverseTranspose(const std::array<std::array<double, 3>, 3>& A)
     -> std::array<std::array<double, 3>, 3>
 {
@@ -68,17 +66,12 @@ auto gaussJordanInverseTranspose(const std::array<std::array<double, 3>, 3>& A)
 }
 
 
-auto checkLattice(
-    const std::array<std::array<double, 3>, 3>& A_input,
-    LengthUnit unit,
-    const std::string& name
-) -> void
+auto verifyB(const Lattice& lattice, const std::string& name) -> void
 {
-    Lattice lattice(A_input, unit);
-
     constexpr double TWO_PI = 2.0 * std::numbers::pi;
     constexpr double tol = 1e-12;
 
+    auto B_comp = lattice.B();
     auto B_ref = gaussJordanInverseTranspose(lattice.A());
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
@@ -86,7 +79,6 @@ auto checkLattice(
         }
     }
 
-    const auto& B_comp = lattice.B();
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
             double diff = std::abs(B_comp[i][j] - B_ref[i][j]);
@@ -100,6 +92,17 @@ auto checkLattice(
             }
         }
     }
+}
+
+
+auto checkLattice(
+    const std::array<std::array<double, 3>, 3>& A_input,
+    LengthUnit unit,
+    const std::string& name
+) -> void
+{
+    Lattice lattice(A_input, unit);
+    verifyB(lattice, name);
 }
 
 
@@ -129,7 +132,6 @@ auto main() -> int {
         );
 
         // 3. Simple cubic in Angstrom (using initializer list)
-        // 2.645886... Angstrom = 5.0 Bohr (since 1 Bohr = 0.52917721067 Å)
         checkLattice(
             {{{2.64588605335, 0.0, 0.0},
               {0.0, 2.64588605335, 0.0},
@@ -141,22 +143,14 @@ auto main() -> int {
         // 4. Simple cubic from std::vector<double> (using std::span)
         std::vector<double> flat = {5.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 5.0};
         Lattice lattice_from_vec(std::span<const double, 9>(flat.data(), 9), LengthUnit::Bohr);
-        const auto& B_vec = lattice_from_vec.B();
-        const auto& B_ref = lattice_from_vec.B(); // same object, just re-verify
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < 3; ++j) {
-                if (std::abs(B_vec[i][j] - B_ref[i][j]) > 1e-12) {
-                    throw std::runtime_error("std::vector constructor mismatch");
-                }
-            }
-        }
+        verifyB(lattice_from_vec, "std::span constructor");
 
         // Verify Angstrom conversion explicitly (using initializer list)
         Lattice lattice_ang({{2.64588605335, 0.0, 0.0},
                              {0.0, 2.64588605335, 0.0},
                              {0.0, 0.0, 2.64588605335}},
                             LengthUnit::Angstrom);
-        const auto& A_ang = lattice_ang.A();
+        const auto A_ang = lattice_ang.A();
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < 3; ++j) {
                 double expected = (i == j) ? 5.0 : 0.0;
@@ -165,6 +159,69 @@ auto main() -> int {
                 }
             }
         }
+
+        // 5. Default constructor + setLattice (std::array)
+        Lattice lattice_def;
+        lattice_def.setLattice(cubic, LengthUnit::Bohr);
+        const auto A_def = lattice_def.A();
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                if (std::abs(A_def[i][j] - cubic[i][j]) > 1e-12) {
+                    throw std::runtime_error("default ctor + setLattice(array): A mismatch");
+                }
+            }
+        }
+        verifyB(lattice_def, "default ctor + setLattice(array)");
+
+        // 6. default ctor + setLattice (std::span)
+        Lattice lattice_def_span;
+        lattice_def_span.setLattice(std::span<const double, 9>(flat.data(), 9), LengthUnit::Bohr);
+        verifyB(lattice_def_span, "default ctor + setLattice(span)");
+
+        // 7. default ctor + setLattice (initializer_list)
+        Lattice lattice_def_il;
+        lattice_def_il.setLattice(
+            {{{5.0, 0.0, 0.0}, {0.0, 5.0, 0.0}, {0.0, 0.0, 5.0}}},
+            LengthUnit::Bohr
+        );
+        verifyB(lattice_def_il, "default ctor + setLattice(init list)");
+
+        // 8. Modify existing lattice with setLattice
+        Lattice lattice_mod(cubic, LengthUnit::Bohr);
+        std::array<std::array<double, 3>, 3> fcc = {{
+            {0.0, a, a},
+            {a, 0.0, a},
+            {a, a, 0.0}
+        }};
+        lattice_mod.setLattice(fcc, LengthUnit::Bohr);
+        const auto A_mod = lattice_mod.A();
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                if (std::abs(A_mod[i][j] - fcc[i][j]) > 1e-12) {
+                    throw std::runtime_error("setLattice modify: A mismatch");
+                }
+            }
+        }
+        verifyB(lattice_mod, "setLattice modify");
+
+        // 9. setLattice with Angstrom unit
+        Lattice lattice_set_ang;
+        lattice_set_ang.setLattice(
+            {{{2.64588605335, 0.0, 0.0},
+              {0.0, 2.64588605335, 0.0},
+              {0.0, 0.0, 2.64588605335}}},
+            LengthUnit::Angstrom
+        );
+        const auto A_set_ang = lattice_set_ang.A();
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                double expected = (i == j) ? 5.0 : 0.0;
+                if (std::abs(A_set_ang[i][j] - expected) > 1e-12) {
+                    throw std::runtime_error("setLattice Angstrom conversion: A mismatch");
+                }
+            }
+        }
+        verifyB(lattice_set_ang, "setLattice Angstrom");
 
         std::println("All Lattice tests passed!");
         return 0;

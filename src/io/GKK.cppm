@@ -298,7 +298,7 @@ auto GKK::readMetadata() -> void {
     // Record 3: AL(3,3) - note Fortran is column-major
     double al_flat[9];
     readRecord(al_flat, sizeof(al_flat), "AL");
-    meta_.lattice = Lattice(al_flat, LengthUnit::Angstrom);
+    meta_.lattice.setLattice(al_flat, LengthUnit::Angstrom);
 
     // Record 4: nnodes, ngtotnod
     int len = readRecordLength();
@@ -420,6 +420,7 @@ auto GKK::computeSpherical(std::size_t ng) -> void {
 auto GKK::computeIntegerIndices(std::size_t ng) -> void {
     auto k_frac = inferCurrent_k();
     constexpr double TWO_PI = 2.0 * std::numbers::pi;
+    auto A_mat = meta_.lattice.A();
     for (std::size_t ig = 0; ig < ng; ++ig) {
         const double kx = Kx_buf_[ig];
         const double ky = Ky_buf_[ig];
@@ -427,9 +428,9 @@ auto GKK::computeIntegerIndices(std::size_t ng) -> void {
 
         // c[n] = A[n][0] * Kx + A[n][1] * Ky + A[n][2] * Kz
         // (iG,jG,kG) = round(c / (2π) + k_frac)
-        double cx = meta_.lattice.A()[0][0] * kx + meta_.lattice.A()[0][1] * ky + meta_.lattice.A()[0][2] * kz;
-        double cy = meta_.lattice.A()[1][0] * kx + meta_.lattice.A()[1][1] * ky + meta_.lattice.A()[1][2] * kz;
-        double cz = meta_.lattice.A()[2][0] * kx + meta_.lattice.A()[2][1] * ky + meta_.lattice.A()[2][2] * kz;
+        double cx = A_mat[0][0] * kx + A_mat[0][1] * ky + A_mat[0][2] * kz;
+        double cy = A_mat[1][0] * kx + A_mat[1][1] * ky + A_mat[1][2] * kz;
+        double cz = A_mat[2][0] * kx + A_mat[2][1] * ky + A_mat[2][2] * kz;
 
         iG_buf_[ig] = static_cast<int>(std::lround(cx / TWO_PI + k_frac[0]));
         jG_buf_[ig] = static_cast<int>(std::lround(cy / TWO_PI + k_frac[1]));
@@ -562,6 +563,8 @@ auto GKK::inferCurrent_k() const -> std::array<double, 3> {
 
     std::array<double, 3> k_frac = {0.0, 0.0, 0.0};
 
+    auto A_mat = meta_.lattice.A();
+
     for (int dim = 0; dim < 3; ++dim) {
         double sum_cos = 0.0;
         double sum_sin = 0.0;
@@ -573,7 +576,7 @@ auto GKK::inferCurrent_k() const -> std::array<double, 3> {
             const double Kz = data.Kz[ig];
 
             // c = a_dim · v / (2π), fractional coordinate in reciprocal basis
-            const double c = (meta_.lattice.A()[dim][0] * Kx + meta_.lattice.A()[dim][1] * Ky + meta_.lattice.A()[dim][2] * Kz) / TWO_PI;
+            const double c = (A_mat[dim][0] * Kx + A_mat[dim][1] * Ky + A_mat[dim][2] * Kz) / TWO_PI;
 
             // c = n - k_frac, thus c mod 1 = (-k_frac) mod 1
             // Use circular mean on [0,1) to robustly handle wrap-around at 0/1 boundary

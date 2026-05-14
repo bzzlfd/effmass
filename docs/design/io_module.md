@@ -70,7 +70,7 @@ export struct KVecs {
 - **Spherical**：由 `Kx/Ky/Kz` 转换而来，`r = |K|`，`theta = acos(Kz/r)`，`phi = atan2(Ky, Kx)`。
 - **Integer**：利用 `inferCurrent_k()` 推断 k 点分数坐标，通过公式 `(iG,jG,kG) = round(A^T * K_cart / (2π) + k_frac)` 计算 G 向量的整数米勒指数。同时填充该 k 点相关的全局元数据：
   - `kPoint`：当前 k 点的分数坐标（由 `inferCurrent_k()` 推断，范围 `(-0.5, 0.5]`）
-  - `reciprocalLattice`：倒格子矩阵（行向量 `b1, b2, b3`，单位 Bohr⁻¹），由 `Lattice` 类在构造时计算并缓存。
+  - `reciprocalLattice`：倒格子矩阵（行向量 `b1, b2, b3`，单位 Bohr⁻¹），由 `Lattice::B()` 在每次调用时动态计算。
 
 ### `Lattice`
 
@@ -79,11 +79,15 @@ export struct KVecs {
 ```cpp
 export class Lattice {
 public:
+    Lattice() = default;  // 默认构造，A_ 为全零
     explicit Lattice(const std::array<std::array<double, 3>, 3>& A, LengthUnit unit);
     explicit Lattice(std::span<const double, 9> flat, LengthUnit unit);
     Lattice(std::initializer_list<std::initializer_list<double>> A, LengthUnit unit);
 
-    auto unit() const -> LengthUnit;
+    auto setLattice(const std::array<std::array<double, 3>, 3>& A, LengthUnit unit) -> void;
+    auto setLattice(std::span<const double, 9> flat, LengthUnit unit) -> void;
+    auto setLattice(std::initializer_list<std::initializer_list<double>> A, LengthUnit unit) -> void;
+
     auto A(LengthUnit unit = LengthUnit::Bohr) const -> std::array<std::array<double, 3>, 3>;
     auto B(LengthUnit unit = LengthUnit::Bohr) const -> std::array<std::array<double, 3>, 3>;
 };
@@ -93,25 +97,37 @@ public:
 
 `Lattice` 内部统一采用 **Hartree 原子单位制** 存储：
 
-构造时传入的 `LengthUnit`（`Bohr` 或 `Angstrom`），转换成 Bohr 单位。
-读取时(`lattice.A()`, `lattice.B()`) 再由 Bohr 单位转换。
+通过构造或 `setLattice()` 传入 `LengthUnit`（`Bohr` 或 `Angstrom`），转换成 Bohr 单位。
+读取时（`A()`, `B()`）再由 Bohr 单位转换。
 
-#### 构造函数
+#### 构造函数与 `setLattice`
 
-| 构造函数 | 说明 |
-|----------|------|
-| `Lattice(const std::array<std::array<double, 3>, 3>& A, LengthUnit unit)` | 从嵌套 `std::array` 构造 |
-| `Lattice(std::span<const double, 9> flat, LengthUnit unit)` | 从扁平的 9 个 `double`（行优先）构造 |
-| `Lattice(std::initializer_list<std::initializer_list<double>> A, LengthUnit unit)` | 从嵌套大括号初始化列表构造 |
+-  `Lattice() = default;` 
+-  `Lattice(span<const double, 9>, LengthUnit)` 
+-  `Lattice(const array<array>& A, LengthUnit)` 
+-  `Lattice(std::initializer_list<initializer_list> A, LengthUnit)` 
+-  `setLattice(span<const double, 9>, LengthUnit)` 
+-  `setLattice(const array<array>& A, LengthUnit)` 
+-  `setLattice(std::initializer_list<initializer_list> A, LengthUnit)` 
 
-三种非默认构造都通过委托最终收敛到相同的单位转换与倒格子计算逻辑。
+转发路径
+
+```
+Lattice(span) - setLattice(span) - setLatticeFromFlat
+Lattice(array) - setLattice(array) - setLatticeFromFlat
+Lattice(ilist) - setLattice(ilist) - setLatticeFromFlat
+```
+
+`setLatticeFromFlat` 完成：将 flat 数据写入 `A_` → 单位转换（Angstrom→Bohr）→ `computeReciprocalLattice()` 提前验证体积非零。
 
 #### 访问接口
 
 - `A(LengthUnit unit = LengthUnit::Bohr)`：返回实空间晶格矩阵，可选指定输出单位。
-- `B(LengthUnit unit = LengthUnit::Bohr)`：返回倒空间晶格矩阵，可选指定输出单位。
+- `B(LengthUnit unit = LengthUnit::Bohr)`：返回倒空间晶格矩阵，计算后可选指定输出单位。
 
 `A()` 和 `B()` 均采用按值返回，因为当请求的单位与内部存储单位不同时需要进行数值转换。
+
+内部数据存储, `A()`/`B()` 均由计算得到，其数据不由 lattice 存储。
 
 ## `GKK` 类
 

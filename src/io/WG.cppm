@@ -210,7 +210,7 @@ auto WG::readMetadata() -> void {
     // Record 3: AL(3,3) - Fortran column-major to C++ row-major, Å to Bohr
     double al_flat[9];
     readRecord(al_flat, sizeof(al_flat), "AL");
-    meta_.lattice = Lattice(al_flat, LengthUnit::Angstrom);
+    meta_.lattice.setLattice(al_flat, LengthUnit::Angstrom);
 
     // Record 4: nnodes, ngtotnod
     int len = readRecordLength();

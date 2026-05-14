@@ -2,6 +2,17 @@
 
 ## 已完成
 
+### Lattice 内部扁平化存储 + 全部路径汇聚到 `setLatticeFromFlat`
+
+- `src/io/lattice.cppm`：
+  - 新增私有嵌套类型 `array2d`（包装 `std::array<double, 9>`，重写 C++23 双参 `operator[](int i, int j)` → `A_[n, c]` 索引语法），替代 `std::array<std::array<double, 3>, 3>` 作为 `A_` 的内部存储，内存扁平连续
+  - `A()` 改为从 `A_` 按元素构建 `std::array<std::array<double, 3>, 3>` 返回
+  - `setLattice(array)` 改为展平到 `std::array<double, 9>` 后委托 `setLatticeFromFlat`
+  - `Lattice(ilist)` 改为调用 `setLattice(A, unit)`（不再直接调 `setLatticeFromFlat`），保持三位构造一致委托三位 set
+  - 六条入口路径全部汇聚到 `setLatticeFromFlat`（唯一写入 `A_` 的位置）
+  - `computeReciprocalLattice()`：`A_[i].data()` → `&A_[i, 0]`
+- `docs/design/io_module.md`：更新转发路径图为一元汇聚结构，补充 `array2d` 内部存储说明
+
 ### IO 模块重构 — 拆分 `io.cppm` 为子模块
 
 - `src/io/GKK.cppm`：新建 `io.GKK` 子模块，包含 `GKKMetadata`、`KVecs`、`GKK` 类及全部实现
