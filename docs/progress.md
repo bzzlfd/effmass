@@ -1,37 +1,24 @@
 # io.EIGEN 已完成
 
-`io.EIGEN` 模块已实现并测试通过（`test/test_eigen.cpp`），代码位于 `src/io/EIGEN.cppm`。
+## 完成
 
-实现内容：
-- `EIGENMetadata` 结构体（含 islda, nkpt, nband, nref_tot_8, natom, nnode, is_SO）
-- `KPointVec` 结构体（k 点坐标，`.x/.y/.z` 命名成员 + `[0]/[1]/[2]` 下标访问）
-- `Array3d` 类（三维本征值数组，一维连续存储，支持多参数 `[iband, ikpt, ispin]`、`[iband, ikpt]` 及链式 `[ispin][ikpt][iband]` 访问）
-- `EIGEN` 类（一次性读取，文件格式兼容新/旧 header，验证 `islda_tmp`/`ikpt_tmp`）
-- `print_info()` 成员函数
+- 确定技术路线：球贝塞尔 $j_l(x)$ 自写递推 + `径向加权Riemann` 积分，实球谐 $Y_{lm}$ 自写连带勒让德递推，3D FFT 提供 PocketFFT 和自写两种实现。
+- 实现了 `transform` 模块（`src/transform/`），包括三个子模块：
+  - `transform.sph_bessel`：球贝塞尔函数 $j_l(x)$（向上递推 + 小量幂级数）+ 径向积分 $\int r^2 f(r) j_l(qr) dr$
+  - `transform.sph_harmonics`：实球谐函数 $Y_{lm}(\theta, \phi)$
+  - `transform.fft3d`：1D/3D FFT（PocketFFT 包装 + 自写混合基实现）
+- 添加 PocketFFT 为 git submodule（`vendor/pocketfft/`）
+- 更新 CMake 构建，添加 `transform` library target
+- 编写 `test/test_transform.cpp`，涵盖球贝塞尔、球谐函数、FFT 三个组件的验证测试
+- 所有 4 个测试通过（`test_io_ncpp`, `test_ncpp`, `test_lattice`, `test_transform`）
 
-文档：
-- `docs/note/file_formats.md` 补充 OUT.EIGEN 格式说明（包括 nref_tot_8 含义不明确的说明）
-- `docs/design/io_module.md` 添加 EIGEN 类设计
+## 技术说明
 
-# io.RHO / io.VR 已完成
+- `std::cyl_bessel_j` 在当前 libc++ / clang 20 中不可用，球贝塞尔改用自实现
+- FFT 约定（FFTW 风格）：`forward=true` = 负指数无归一化，`forward=false` = 正指数除 $n$ 归一化；`fft(true) → fft(false)` 得回原序列
+- 自写 FFT 覆盖：power-of-2 radix-2、小规模 direct DFT ($n \le 64$)、大非 power-of-2 Bluestein 算法
 
-`io.RHO`（及别名 `io.VR`）模块已实现并测试通过（`test/test_rho.cpp`），代码位于 `src/io/RHO.cppm`、`src/io/VR.cppm`。
+## 下一步
 
-实现内容：
-- `RHOMetadata` 结构体（含 n1, n2, n3, nnodes, nstate）
-- `RHO` 类：实空间网格数据读取，flat vector 存储 `[state][i][j][k]`，通过 `operator[]` 提供 `[i, j, k]` 和 `[i, j, k, state]` 两种索引方式
-- `VR` 是 `RHO` 的类型别名（`using VR = RHO;`）
-- 文件格式兼容新/旧 header（4 int 旧格式 vs 5 int 新格式）
-- `print_info()` 成员函数
-
-设计要点：
-- `operator[](i, j, k)` 不做运行时 nstate 检查（与 EIGEN 的 Array3d 不同），保持热路径性能
-- nstate 一般情况为 1；多自旋时由独立文件 `OUT.RHO_2` 处理
-
-文档：
-- `docs/note/file_formats.md` 补充 OUT.VR/OUT.RHO 格式说明
-- `docs/design/io_module.md` 添加 RHO/VR 类设计
-
-# 文档
-
-文件格式分析写入 note/file_formats.md，EIGEN/VR/RHO 类设计写入 design/io_module
+- 集成 `transform` 到伪势非局域项计算（`NCPP` 算符层）
+- 集成 `fft3d` 到波函数 k→r 空间变换

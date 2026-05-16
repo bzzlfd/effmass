@@ -1,0 +1,238 @@
+import std;
+import transform;
+
+auto check(bool cond, std::string_view msg) -> void {
+    if (!cond) {
+        throw std::runtime_error(std::string("FAILED: ") + std::string(msg));
+    }
+    std::println("  PASSED: {}", msg);
+}
+
+auto near(double a, double b, double eps = 1e-12) -> bool {
+    return std::abs(a - b) < eps;
+}
+
+auto near_c(std::complex<double> a, std::complex<double> b, double eps = 1e-12) -> bool {
+    return std::abs(a - b) < eps;
+}
+
+auto test_spherical_bessel() -> void {
+    std::println("\n=== Spherical Bessel Functions ===");
+
+    double eps = 1e-12;
+
+    // j_0(x) = sin(x)/x
+    check(near(transform::sphericalBesselJ(0, 0.0), 1.0, 1e-10), "j_0(0) = 1");
+    check(near(transform::sphericalBesselJ(0, 1.0), std::sin(1.0)), "j_0(1) = sin(1)");
+    check(near(transform::sphericalBesselJ(0, std::numbers::pi / 2), std::sin(std::numbers::pi / 2) / (std::numbers::pi / 2)),
+          "j_0(pi/2) = sin(pi/2)/(pi/2)");
+
+    // j_1(x) = sin(x)/x^2 - cos(x)/x
+    double x = 2.0;
+    double j1_expected = std::sin(x) / (x * x) - std::cos(x) / x;
+    check(near(transform::sphericalBesselJ(1, x), j1_expected, eps), "j_1(2) analytic");
+
+    // j_2(x) via recurrence
+    double j0 = transform::sphericalBesselJ(0, x);
+    double j1 = transform::sphericalBesselJ(1, x);
+    double j2 = transform::sphericalBesselJ(2, x);
+    check(near(j2, 3.0 / x * j1 - j0, eps), "j_2(2) recurrence relation");
+
+    // Small x series
+    check(near(transform::sphericalBesselJ(0, 0.01), std::sin(0.01) / 0.01, eps), "j_0(small x) series");
+    double j3_small = transform::sphericalBesselJ(3, 0.001);
+    double j3_expected = std::pow(0.001, 3) / 105.0;
+    check(near(j3_small, j3_expected, 1e-18), "j_3(0.001) = x^3/105");
+}
+
+
+auto test_spherical_harmonics() -> void {
+    std::println("\n=== Real Spherical Harmonics ===");
+
+    double eps = 1e-12;
+
+    // Y_{00} = 1/(2*sqrt(pi))
+    check(near(transform::realSphericalHarmonic(0, 0, 0.0, 0.0), 1.0 / (2.0 * std::sqrt(std::numbers::pi)), eps),
+          "Y_00 constant");
+
+    // Y_{10}(theta) = sqrt(3/(4pi)) * cos(theta)
+    double theta0 = 0.5;
+    double y10 = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::cos(theta0);
+    check(near(transform::realSphericalHarmonic(1, 0, theta0, 0.0), y10, eps), "Y_10(theta)");
+
+    // Y_{1,1} = sqrt(3/(4pi)) * sin(theta) * cos(phi)
+    double phi0 = 0.3;
+    double y11 = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::cos(phi0);
+    check(near(transform::realSphericalHarmonic(1, 1, theta0, phi0), y11, eps), "Y_11(theta,phi)");
+
+    // Y_{1,-1} = sqrt(3/(4pi)) * sin(theta) * sin(phi)
+    double y1m1 = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::sin(phi0);
+    check(near(transform::realSphericalHarmonic(1, -1, theta0, phi0), y1m1, eps), "Y_1,-1(theta,phi)");
+
+    // m > l should return 0
+    check(near(transform::realSphericalHarmonic(2, 3, 0.5, 0.3), 0.0, eps), "Y_{2,3} = 0 (|m| > l)");
+}
+
+
+auto test_fft1d_custom() -> void {
+    std::println("\n=== 1D Custom FFT ===");
+
+    double eps = 1e-12;
+
+    // Simple delta function test: forward then inverse gives back original
+    int n = 8;
+    std::vector<std::complex<double>> data(n);
+    std::vector<std::complex<double>> original(n);
+    data[0] = 1.0;
+    original = data;
+
+    transform::fft1d_custom(data, true);
+    transform::fft1d_custom(data, false);
+
+    for (int i = 0; i < n; ++i) {
+        check(near_c(data[i], original[i], 1e-14), std::format("delta FFT roundtrip [{}]", i));
+    }
+
+    // Sine wave test
+    std::vector<std::complex<double>> data2(n);
+    for (int i = 0; i < n; ++i) {
+        data2[i] = std::cos(2.0 * std::numbers::pi * i / n);
+    }
+
+    transform::fft1d_custom(data2, true);
+    double expected = n / 2.0;
+    check(near(std::abs(data2[1]), expected, eps), "cos(2pi k/n) FFT peak at k=1");
+    check(near(std::abs(data2[n - 1]), expected, eps), "cos(2pi k/n) FFT peak at k=n-1");
+
+    // n=2 inverse DFT with normalization: [1,0] → [0.5, 0.5]
+    std::vector<std::complex<double>> data3 = {{1.0, 0.0}, {0.0, 0.0}};
+    transform::fft1d_custom(data3, false);
+    check(near_c(data3[0], {0.5, 0.0}, 1e-15), "n=2 inverse[0]");
+    check(near_c(data3[1], {0.5, 0.0}, 1e-15), "n=2 inverse[1]");
+
+    // Non-power-of-2: n=6
+    int n6 = 6;
+    std::vector<std::complex<double>> data6(n6);
+    data6[0] = 1.0;
+    original = data6;
+    transform::fft1d_custom(data6, true);
+    transform::fft1d_custom(data6, false);
+    for (int i = 0; i < n6; ++i) {
+        check(near_c(data6[i], original[i], 1e-14), std::format("n=6 delta FFT roundtrip [{}]", i));
+    }
+
+    // Large non-power-of-2: n=30
+    int n30 = 30;
+    std::vector<std::complex<double>> data30(n30);
+    for (int i = 0; i < n30; ++i) {
+        data30[i] = std::complex<double>(i % 3, (i * i) % 7);
+    }
+    original = data30;
+    transform::fft1d_custom(data30, true);
+    transform::fft1d_custom(data30, false);
+    for (int i = 0; i < n30; ++i) {
+        check(near_c(data30[i], original[i], 1e-12), std::format("n=30 FFT roundtrip [{}]", i));
+    }
+}
+
+#ifdef EFFMASS_USE_POCKETFFT
+auto test_fft1d_pocket() -> void {
+    std::println("\n=== 1D PocketFFT FFT ===");
+
+    double eps = 1e-12;
+
+    int n = 8;
+    std::vector<std::complex<double>> data(n);
+    data[0] = 1.0;
+    auto original = data;
+    transform::fft1d_pocket(data, false);
+    transform::fft1d_pocket(data, true);
+    for (int i = 0; i < n; ++i) {
+        check(near_c(data[i], original[i], 1e-14), std::format("delta FFT roundtrip [{}]", i));
+    }
+
+    // Non-power-of-2 with PocketFFT
+    int n6 = 6;
+    std::vector<std::complex<double>> data6(n6);
+    data6[0] = 1.0;
+    original = data6;
+    transform::fft1d_pocket(data6, false);
+    transform::fft1d_pocket(data6, true);
+    for (int i = 0; i < n6; ++i) {
+        check(near_c(data6[i], original[i], 1e-14), std::format("n=6 pocket roundtrip [{}]", i));
+    }
+
+    // Large non-power-of-2: n=45 (common grid size)
+    int n45 = 45;
+    std::vector<std::complex<double>> data45(n45);
+    for (int i = 0; i < n45; ++i) {
+        data45[i] = std::complex<double>(i * 0.1, std::sin(0.1 * i));
+    }
+    original = data45;
+    transform::fft1d_pocket(data45, false);
+    transform::fft1d_pocket(data45, true);
+    for (int i = 0; i < n45; ++i) {
+        check(near_c(data45[i], original[i], 1e-12), std::format("n=45 pocket roundtrip [{}]", i));
+    }
+
+    // Consistency between PocketFFT and custom
+    int n_test = 8;
+    std::vector<std::complex<double>> d1(n_test), d2(n_test);
+    for (int i = 0; i < n_test; ++i) d1[i] = d2[i] = std::complex<double>(i, -i);
+    transform::fft1d_pocket(d1, false);
+    transform::fft1d_custom(d2, false);
+    for (int i = 0; i < n_test; ++i) {
+        check(near_c(d1[i], d2[i], 1e-12), std::format("pocket == custom forward [{}]", i));
+    }
+}
+#endif
+
+
+auto test_fft3d() -> void {
+    std::println("\n=== 3D FFT ===");
+
+    int n1 = 6, n2 = 8, n3 = 5;
+    int total = n1 * n2 * n3;
+
+    std::vector<std::complex<double>> grid(total);
+    for (int i = 0; i < total; ++i) {
+        grid[i] = std::complex<double>(i % 7, (i * i) % 11);
+    }
+    auto original = grid;
+
+    transform::fft3d(grid, n1, n2, n3, false);
+    transform::fft3d(grid, n1, n2, n3, true);
+
+    for (int i = 0; i < total; ++i) {
+        check(near_c(grid[i], original[i], 1e-12), std::format("3D FFT roundtrip [{}]", i));
+    }
+
+    // Delta function 3D
+    std::vector<std::complex<double>> delta(total, 0.0);
+    delta[0] = 1.0;
+    auto delta_orig = delta;
+    transform::fft3d(delta, n1, n2, n3, false);
+    transform::fft3d(delta, n1, n2, n3, true);
+    for (int i = 0; i < total; ++i) {
+        check(near_c(delta[i], delta_orig[i], 1e-14), std::format("3D delta FFT roundtrip [{}]", i));
+    }
+}
+
+
+auto main() -> int {
+    try {
+        std::println("=== Transform Module Tests ===");
+        test_spherical_bessel();
+        test_spherical_harmonics();
+        test_fft1d_custom();
+#ifdef EFFMASS_USE_POCKETFFT
+        test_fft1d_pocket();
+#endif
+        test_fft3d();
+        std::println("\nAll tests passed!");
+        return 0;
+    } catch (const std::exception& e) {
+        std::println("Error: {}", e.what());
+        return 1;
+    }
+}

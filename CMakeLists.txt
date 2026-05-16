@@ -43,6 +43,26 @@ target_sources(pseudo
 )
 target_link_libraries(pseudo PRIVATE pugixml::pugixml)
 
+option(EFFMASS_USE_POCKETFFT "Use PocketFFT for FFT (falls back to custom implementation)" ON)
+
+# Library target for transform module
+add_library(transform)
+target_sources(transform
+    PUBLIC
+        FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            src/transform.cppm
+            src/transform/sph_bessel.cppm
+            src/transform/sph_harmonics.cppm
+            src/transform/fft3d.cppm
+)
+
+if(EFFMASS_USE_POCKETFFT)
+    target_compile_definitions(transform PRIVATE EFFMASS_USE_POCKETFFT)
+    target_sources(transform PRIVATE vendor/pocketfft/pocketfft.cpp)
+    set_source_files_properties(vendor/pocketfft/pocketfft.cpp PROPERTIES COMPILE_DEFINITIONS "restrict=__restrict__")
+    target_include_directories(transform PRIVATE vendor/pocketfft)
+endif()
+
 # Tests
 enable_testing()
 add_subdirectory(test)

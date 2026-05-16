@@ -22,3 +22,11 @@
 - `design/io_module.md`：`io` 总模块及子模块 `io.GKK`、`io.WG`、`io.EIGEN`、`io.lattice` 的接口设计与实现细节
 - `design/pseudo_module.md`：赝势读取模块的接口设计、`NCPPUPF` 类结构与 UPF 文件 tag 的映射
 - `design/cpp_conventions.md`：C++ 编码约定（命名规范、函数返回类型写法等）
+
+## 实现的模块
+
+| 模块 | 路径 | 功能 |
+|------|------|------|
+| `io` | `src/io.cppm` + `src/io/` | 读取 OUT.GKK、OUT.WG 等文件，提供 K 矢量、晶格、波函数系数 |
+| `pseudo` | `src/pseudo.cppm` + `src/pseudo/` | UPF 赝势文件解析（NCPPUPF） |
+| `transform` | `src/transform.cppm` + `src/transform/` | 球贝塞尔函数、实球谐函数、1D/3D FFT |

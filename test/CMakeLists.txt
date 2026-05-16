@@ -22,3 +22,11 @@ add_test(NAME test_eigen COMMAND test_eigen WORKING_DIRECTORY ${CMAKE_SOURCE_DIR
 add_executable(test_rho test_rho.cpp)
 target_link_libraries(test_rho PRIVATE io)
 add_test(NAME test_rho COMMAND test_rho WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Transform tests (FFT, spherical harmonics, spherical Bessel)
+add_executable(test_transform test_transform.cpp)
+target_link_libraries(test_transform PRIVATE transform)
+if(EFFMASS_USE_POCKETFFT)
+    target_compile_definitions(test_transform PRIVATE EFFMASS_USE_POCKETFFT)
+endif()
+add_test(NAME test_transform COMMAND test_transform WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
