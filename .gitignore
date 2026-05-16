@@ -43,6 +43,7 @@
 
 /reference/
 *.immature
+memo.md
 .tree
 .vscode
 .cache 
