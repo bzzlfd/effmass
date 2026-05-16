@@ -74,21 +74,17 @@ auto test_spherical_harmonics() -> void {
 }
 
 
-auto test_fft1d_custom() -> void {
-    std::println("\n=== 1D Custom FFT ===");
+auto test_fft1d() -> void {
+    std::println("\n=== 1D FFT ===");
 
     double eps = 1e-12;
 
-    // Simple delta function test: forward then inverse gives back original
     int n = 8;
     std::vector<std::complex<double>> data(n);
-    std::vector<std::complex<double>> original(n);
     data[0] = 1.0;
-    original = data;
-
-    transform::fft1d_custom(data, true);
-    transform::fft1d_custom(data, false);
-
+    auto original = data;
+    transform::fft1d(data, true);
+    transform::fft1d(data, false);
     for (int i = 0; i < n; ++i) {
         check(near_c(data[i], original[i], 1e-14), std::format("delta FFT roundtrip [{}]", i));
     }
@@ -98,94 +94,41 @@ auto test_fft1d_custom() -> void {
     for (int i = 0; i < n; ++i) {
         data2[i] = std::cos(2.0 * std::numbers::pi * i / n);
     }
-
-    transform::fft1d_custom(data2, true);
+    transform::fft1d(data2, true);
     double expected = n / 2.0;
     check(near(std::abs(data2[1]), expected, eps), "cos(2pi k/n) FFT peak at k=1");
     check(near(std::abs(data2[n - 1]), expected, eps), "cos(2pi k/n) FFT peak at k=n-1");
 
-    // n=2 inverse DFT with normalization: [1,0] → [0.5, 0.5]
+    // n=2
     std::vector<std::complex<double>> data3 = {{1.0, 0.0}, {0.0, 0.0}};
-    transform::fft1d_custom(data3, false);
+    transform::fft1d(data3, false);
     check(near_c(data3[0], {0.5, 0.0}, 1e-15), "n=2 inverse[0]");
     check(near_c(data3[1], {0.5, 0.0}, 1e-15), "n=2 inverse[1]");
 
-    // Non-power-of-2: n=6
+    // Non-power-of-2
     int n6 = 6;
     std::vector<std::complex<double>> data6(n6);
     data6[0] = 1.0;
     original = data6;
-    transform::fft1d_custom(data6, true);
-    transform::fft1d_custom(data6, false);
+    transform::fft1d(data6, true);
+    transform::fft1d(data6, false);
     for (int i = 0; i < n6; ++i) {
         check(near_c(data6[i], original[i], 1e-14), std::format("n=6 delta FFT roundtrip [{}]", i));
     }
 
-    // Large non-power-of-2: n=30
-    int n30 = 30;
-    std::vector<std::complex<double>> data30(n30);
-    for (int i = 0; i < n30; ++i) {
-        data30[i] = std::complex<double>(i % 3, (i * i) % 7);
-    }
-    original = data30;
-    transform::fft1d_custom(data30, true);
-    transform::fft1d_custom(data30, false);
-    for (int i = 0; i < n30; ++i) {
-        check(near_c(data30[i], original[i], 1e-12), std::format("n=30 FFT roundtrip [{}]", i));
-    }
-}
-
-#ifdef EFFMASS_USE_POCKETFFT
-auto test_fft1d_pocket() -> void {
-    std::println("\n=== 1D PocketFFT FFT ===");
-
-    double eps = 1e-12;
-
-    int n = 8;
-    std::vector<std::complex<double>> data(n);
-    data[0] = 1.0;
-    auto original = data;
-    transform::fft1d_pocket(data, false);
-    transform::fft1d_pocket(data, true);
-    for (int i = 0; i < n; ++i) {
-        check(near_c(data[i], original[i], 1e-14), std::format("delta FFT roundtrip [{}]", i));
-    }
-
-    // Non-power-of-2 with PocketFFT
-    int n6 = 6;
-    std::vector<std::complex<double>> data6(n6);
-    data6[0] = 1.0;
-    original = data6;
-    transform::fft1d_pocket(data6, false);
-    transform::fft1d_pocket(data6, true);
-    for (int i = 0; i < n6; ++i) {
-        check(near_c(data6[i], original[i], 1e-14), std::format("n=6 pocket roundtrip [{}]", i));
-    }
-
-    // Large non-power-of-2: n=45 (common grid size)
+    // Large non-power-of-2: n=45
     int n45 = 45;
     std::vector<std::complex<double>> data45(n45);
     for (int i = 0; i < n45; ++i) {
         data45[i] = std::complex<double>(i * 0.1, std::sin(0.1 * i));
     }
     original = data45;
-    transform::fft1d_pocket(data45, false);
-    transform::fft1d_pocket(data45, true);
+    transform::fft1d(data45, true);
+    transform::fft1d(data45, false);
     for (int i = 0; i < n45; ++i) {
-        check(near_c(data45[i], original[i], 1e-12), std::format("n=45 pocket roundtrip [{}]", i));
-    }
-
-    // Consistency between PocketFFT and custom
-    int n_test = 8;
-    std::vector<std::complex<double>> d1(n_test), d2(n_test);
-    for (int i = 0; i < n_test; ++i) d1[i] = d2[i] = std::complex<double>(i, -i);
-    transform::fft1d_pocket(d1, false);
-    transform::fft1d_custom(d2, false);
-    for (int i = 0; i < n_test; ++i) {
-        check(near_c(d1[i], d2[i], 1e-12), std::format("pocket == custom forward [{}]", i));
+        check(near_c(data45[i], original[i], 1e-12), std::format("n=45 FFT roundtrip [{}]", i));
     }
 }
-#endif
 
 
 auto test_fft3d() -> void {
@@ -224,10 +167,7 @@ auto main() -> int {
         std::println("=== Transform Module Tests ===");
         test_spherical_bessel();
         test_spherical_harmonics();
-        test_fft1d_custom();
-#ifdef EFFMASS_USE_POCKETFFT
-        test_fft1d_pocket();
-#endif
+        test_fft1d();
         test_fft3d();
         std::println("\nAll tests passed!");
         return 0;
