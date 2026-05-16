@@ -51,7 +51,7 @@ target_sources(transform
             src/transform.cppm
             src/transform/sph_bessel.cppm
             src/transform/sph_harmonics.cppm
-            src/transform/fft3d.cppm
+            src/transform/fft.cppm
     PRIVATE
         vendor/pocketfft/pocketfft.c
 )

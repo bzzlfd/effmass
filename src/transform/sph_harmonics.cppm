@@ -2,8 +2,6 @@ export module transform.sph_harmonics;
 
 import std;
 
-namespace transform {
-
 namespace detail {
 
     auto legendreP(int l, int m_abs, double x) -> double {
@@ -67,4 +65,3 @@ export auto realSphericalHarmonic(int l, int m, double theta, double phi) -> dou
     }
 }
 
-} // namespace transform

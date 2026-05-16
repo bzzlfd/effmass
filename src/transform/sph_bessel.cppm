@@ -2,8 +2,6 @@ export module transform.sph_bessel;
 
 import std;
 
-namespace transform {
-
 namespace detail {
 
     constexpr double BESSEL_EPS = 1e-15;
@@ -133,4 +131,3 @@ export auto radialIntegrate(
     return result;
 }
 
-} // namespace transform
