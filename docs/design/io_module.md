@@ -283,7 +283,7 @@ export struct EIGENMetadata {
     int islda;        // 自旋极化标志
     int nkpt;         // k 点数
     int nband;        // 能带数（Fortran 原变量名 mx）
-    int nref_tot_8;   // 参考态总数（含义尚不明确，原样保留）
+    int nref_tot_8;   // （含义尚不明确，原样保留）
     int natom;        // 原子数
     int nnode;        // 节点数（Fortran 原变量名 nnodes）
     int is_SO;        // 自旋轨道耦合标志（旧格式文件可能缺失，此时设为 0）
@@ -374,3 +374,79 @@ public:
 4. **数据冗余**：文件中每个 `(ispin, ikpt)` 对都有一份 weight/ak 数据（4 doubles）。这些量在语义上按 kpt 索引（而非按自旋），因此最终保留最后一次读入的值。
 
 5. **移动语义**：自定义移动构造/赋值，正确转移 `FILE*` 所有权（源对象 `fp_` 置空）。
+
+## `RHO` / `VR` 类
+
+`RHO` 类封装了对 `OUT.RHO`（电荷密度）和 `OUT.VR`（价电子势能）实空间 FFT 网格数据的读取操作。两者文件格式完全相同，`VR` 是 `RHO` 的类型别名（`using VR = RHO`）。
+
+### 数据结构
+
+#### `RHOMetadata`
+
+```cpp
+export struct RHOMetadata {
+    int n1, n2, n3;       // FFT 网格维度
+    int nnodes;           // 节点数
+    int nstate;           // （含义尚不明确，原样保留）
+};
+```
+
+### `RHO` 类
+
+```cpp
+export class RHO {
+public:
+    explicit RHO(const std::string& filename);
+    ~RHO();
+
+    // 禁用拷贝，启用移动
+    RHO(const RHO&) = delete;
+    auto operator=(const RHO&) -> RHO& = delete;
+    RHO(RHO&&) noexcept;
+    auto operator=(RHO&&) noexcept -> RHO&;
+
+    // 公有数据成员
+    RHOMetadata meta;
+    Lattice lattice;
+
+    // 三维网格访问
+    auto operator[](int i, int j, int k) -> double&;              // state 0，无运行时检查
+    auto operator[](int i, int j, int k) const -> double;
+    auto operator[](int i, int j, int k, int state) -> double&;   // 显式 state
+    auto operator[](int i, int j, int k, int state) const -> double;
+
+    auto print_info() const -> void;
+};
+```
+
+### 索引公式
+
+0-based 坐标 `(i, j, k)` 对应的扁平索引（文件存储顺序与访问顺序一致，无需重排）：
+
+```
+idx = state × n1 × n2 × n3 + i × n2 × n3 + j × n3 + k
+```
+
+其中 `k` 变化最快，`i` 变化最慢，与 Fortran 参考代码中的映射一致。
+
+### 设计要点
+
+1. **索引设计——与 EIGEN 的差异**：
+   - `RHO::operator[](int i, int j, int k)` **不做任何运行时检查**，直接计算索引并返回引用。这是有意为之——`[i, j, k]` 是最常用的访问模式，每次判断 `nstate` 会拖慢高频访问的热路径。
+   - 与 `EIGEN` 的 `Array3d::operator[](iband, ikpt)` 不同：后者在 `islda != 1` 时抛异常，因为语义上是"省略最后一个自旋维度"；而 `RHO` 的 `[i, j, k]` 语义明确为"访问第一个 state"，不需要防御性检查。
+   - 显式 state 的 `operator[](i, j, k, state)` 不做 nstate 越界检查，由调用方保证。
+   
+2. **nstate 说明**：
+   - `nstate` 是早期文件格式字段。实际中，当存在第二个自旋时，数据写在独立的 `OUT.RHO_2` 文件中（而非在同一文件增加 state），因此 `nstate` 一般为 1。
+   
+3. **文件格式兼容性**：header record 通过前导长度标记区分新/旧格式：
+   - 20 字节 → 5 int（含 `nstate`）
+   - 16 字节 → 4 int（旧格式，`nstate = 1`）
+
+4. **一次性读取**：文件约 100KB（实测），构造函数中读取所有元数据和数据。
+
+5. **VR = RHO 别名**：`VR` 与 `RHO` 是同一类型，两者在代码中可互换使用。`src/io/VR.cppm` 仅包含：
+
+```cpp
+export using VR = RHO;
+```

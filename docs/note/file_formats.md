@@ -233,3 +233,91 @@ close(23)
 `OUT.KPT` 文件以**文本格式**存储 k 点坐标。
 
 > TODO: 待补充具体的列定义和解析方法。
+
+## OUT.VR / OUT.RHO
+
+`OUT.VR` 和 `OUT.RHO` 文件分别存储价电子波函数势和电荷密度在实空间 FFT 网格上的值。两者文件格式**完全相同**，因此 C++ 中 `VR` 是 `RHO` 的类型别名。该文件为 Fortran unformatted binary 格式。
+
+### 文件结构（按读取顺序）
+
+```fortran
+subroutine input_vr()
+implicit double precision (a-h,o-z)
+integer ierr
+
+open(11, file=filename, form="unformatted")
+rewind(11)
+
+! Record 1: 元数据头（5 ints，旧格式可能为 4 ints）
+read(11, IOSTAT=ierr) n1, n2, n3, nnodes, nstate
+
+if (ierr .ne. 0) then
+    rewind(11)
+    read(11, IOSTAT=ierr) n1, n2, n3, nnodes
+    nstate = 1
+endif
+
+! Record 2: 晶格矢量 AL(3,3)，文件中单位为 Å
+read(11) AL
+
+nr = n1 * n2 * n3
+nr_n = nr / nnodes
+allocate(vr_tmp(nr_n))
+allocate(vr(n1, n2, n3))
+
+! 后续：按 state → node 顺序存储实空间数据
+do ist = 1, nstate
+    do iread = 1, nnodes
+        read(11) vr_tmp
+        do ii = 1, nr_n
+            jj = ii + (iread - 1) * nr_n
+            i = (jj - 1) / (n2 * n3) + 1
+            j = ((jj - 1) - (i - 1) * n2 * n3) / n3 + 1
+            k = jj - (i - 1) * n2 * n3 - (j - 1) * n3
+            vr(i, j, k) = vr_tmp(ii)
+        end do
+    end do
+end do
+close(11)
+```
+
+### 映射说明
+
+Fortran 代码中的 1-based 线性索引到三维索引的映射：
+
+```
+jj = (i - 1) * n2 * n3 + (j - 1) * n3 + k     ! 1-based
+```
+
+其中 **k 变化最快**（步长 1），**i 变化最慢**（步长 n2 × n3）。C++ 中使用的 0-based 公式：
+
+```
+idx = i * n2 * n3 + j * n3 + k                  ! 0-based
+```
+
+### 数据存储方式总结
+
+| Record | 内容 | 数据类型 | 说明 |
+|--------|------|----------|------|
+| 1 | `n1, n2, n3, nnodes [, nstate]` | 4 或 5 × `int` | FFT 网格维度和节点数。旧格式无 `nstate`，设为 1。通过 record 长度区分（16 vs 20 字节） |
+| 2 | `AL(3,3)` | 9 × `double` | 晶格矢量，文件中为 **Å**，读取后转为 **Bohr** |
+| 3~ | `vr_tmp(nr_n)` | `nr_n` × `double` | 每个 `(state, node)` 对应一个 record，共 `nstate × nnodes` 个 record |
+
+#### 数据读取与重组
+
+文件按 `state` 外层循环、`node` 内层循环存储。每个 record 包含 `nr_n = n1 × n2 × n3 / nnodes` 个 double，对应一个节点上的网格切片。
+
+线性索引到网格坐标的映射（与存储顺序一致，无需重排）：
+
+```
+data[state][i][j][k] = file_data[state][node][ii]
+                     → idx = state × nr + node × nr_n + ii
+```
+
+其中 `ii` 为 record 内线性索引，`idx` 为扁平 `data_` 中的位置。
+
+### nstate 说明
+
+- **nstate 字段**：早期版本的文件格式字段，表示数据文件中存储的"状态"数。实际使用中，当存在第二个自旋时，数据位于独立的 `OUT.RHO_2` 文件中（而非在同一文件中增加 state）。
+- 旧格式文件不含此字段（record 长度为 16 字节 = 4 ints），此时 `nstate = 1`。
+- 新格式文件含此字段（record 长度为 20 字节 = 5 ints）。

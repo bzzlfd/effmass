@@ -17,3 +17,8 @@ add_test(NAME test_lattice COMMAND test_lattice WORKING_DIRECTORY ${CMAKE_SOURCE
 add_executable(test_eigen test_eigen.cpp)
 target_link_libraries(test_eigen PRIVATE io)
 add_test(NAME test_eigen COMMAND test_eigen WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# RHO/VR tests
+add_executable(test_rho test_rho.cpp)
+target_link_libraries(test_rho PRIVATE io)
+add_test(NAME test_rho COMMAND test_rho WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
