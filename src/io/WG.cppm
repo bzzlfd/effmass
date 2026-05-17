@@ -27,6 +27,8 @@ export struct WGCoeffs {
 // WG class - abstraction for OUT.WG file
 export class WG {
 public:
+    WGMetadata meta;                              // metadata
+
     explicit WG(const std::string& filename, std::size_t cache_capacity = 4);  // open file and read metadata
     ~WG();
     WG(const WG&) = delete;                    // disable copy
@@ -34,7 +36,6 @@ public:
     WG(WG&& other) noexcept;                   // enable move
     auto operator=(WG&& other) noexcept -> WG&;
 
-    auto metadata() const -> const WGMetadata& { return meta_; }   // get metadata
     auto loadBand(int ikpt, int iband) -> const WGCoeffs&;        // load band data (with cache)
     auto current_ikpt() const -> int { return current_ikpt_; }     // current k-point index
     auto current_iband() const -> int { return current_iband_; }      // current band index
@@ -61,7 +62,6 @@ private:
 
     std::string filename_;                      // file name
     std::FILE* fp_;                             // file handle
-    WGMetadata meta_;                           // metadata
     std::vector<std::vector<int>> ngtotnod_;    // G-vector count per k-point per node
     std::vector<long> band_offsets_;            // file offset per band per k-point
 
@@ -110,7 +110,7 @@ WG::~WG() {
 WG::WG(WG&& other) noexcept
     : filename_(std::move(other.filename_))
     , fp_(other.fp_)
-    , meta_(std::move(other.meta_))
+    , meta(std::move(other.meta))
     , ngtotnod_(std::move(other.ngtotnod_))
     , band_offsets_(std::move(other.band_offsets_))
     , cache_(std::move(other.cache_))
@@ -134,7 +134,7 @@ auto WG::operator=(WG&& other) noexcept -> WG& {
 
         filename_ = std::move(other.filename_);
         fp_ = other.fp_;
-        meta_ = std::move(other.meta_);
+        meta = std::move(other.meta);
         ngtotnod_ = std::move(other.ngtotnod_);
         band_offsets_ = std::move(other.band_offsets_);
         cache_ = std::move(other.cache_);
@@ -190,27 +190,27 @@ auto WG::readMetadata() -> void {
     // Record 1: n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda (9 ints)
     int header[9];
     readRecord(header, sizeof(header), "header");
-    meta_.n1 = header[0];
-    meta_.n2 = header[1];
-    meta_.n3 = header[2];
-    meta_.mx = header[3];
-    meta_.mg_nx = header[4];
-    meta_.nnodes = header[5];
-    meta_.nkpt = header[6];
-    meta_.is_SO = header[7];
-    meta_.islda = header[8];
+    meta.n1 = header[0];
+    meta.n2 = header[1];
+    meta.n3 = header[2];
+    meta.mx = header[3];
+    meta.mg_nx = header[4];
+    meta.nnodes = header[5];
+    meta.nkpt = header[6];
+    meta.is_SO = header[7];
+    meta.islda = header[8];
 
-    if (meta_.is_SO == 1) {
-        meta_.mg_nx /= 2;
+    if (meta.is_SO == 1) {
+        meta.mg_nx /= 2;
     }
 
     // Record 2: Ecut
-    readRecord(&meta_.Ecut, sizeof(double), "Ecut");
+    readRecord(&meta.Ecut, sizeof(double), "Ecut");
 
     // Record 3: AL(3,3) - Fortran column-major to C++ row-major, Å to Bohr
     double al_flat[9];
     readRecord(al_flat, sizeof(al_flat), "AL");
-    meta_.lattice.setLattice(al_flat, LengthUnit::Angstrom);
+    meta.lattice.setLattice(al_flat, LengthUnit::Angstrom);
 
     // Record 4: nnodes, ngtotnod
     int len = readRecordLength();
@@ -224,27 +224,27 @@ auto WG::readNgtotnod(int record_len) -> void {
     if (std::fread(&nnodes_check, sizeof(int), 1, fp_) != 1) {
         throw std::runtime_error("Failed to read nnodes");
     }
-    if (nnodes_check != meta_.nnodes) {
+    if (nnodes_check != meta.nnodes) {
         throw std::runtime_error("nnodes mismatch");
     }
 
-    ngtotnod_.resize(meta_.nkpt, std::vector<int>(meta_.nnodes));
-    meta_.ng_tot_per_kpt.resize(meta_.nkpt, 0);
+    ngtotnod_.resize(meta.nkpt, std::vector<int>(meta.nnodes));
+    meta.ng_tot_per_kpt.resize(meta.nkpt, 0);
 
-    for (int ikpt = 0; ikpt < meta_.nkpt; ++ikpt) {
+    for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
         int ng_total = 0;
-        for (int n = 0; n < meta_.nnodes; ++n) {
+        for (int n = 0; n < meta.nnodes; ++n) {
             int ng;
             if (std::fread(&ng, sizeof(int), 1, fp_) != 1) {
                 throw std::runtime_error("Failed to read ngtotnod");
             }
-            if (meta_.is_SO == 1) {
+            if (meta.is_SO == 1) {
                 ng /= 2;
             }
             ngtotnod_[ikpt][n] = ng;
             ng_total += ng;
         }
-        meta_.ng_tot_per_kpt[ikpt] = ng_total;
+        meta.ng_tot_per_kpt[ikpt] = ng_total;
     }
 }
 
@@ -260,12 +260,12 @@ auto WG::skipRecord() -> void {
 
 auto WG::computeOffsets() -> void {
     // record the starting file offset for each (k-point, band) pair
-    band_offsets_.resize(static_cast<std::size_t>(meta_.nkpt) * meta_.mx);
+    band_offsets_.resize(static_cast<std::size_t>(meta.nkpt) * meta.mx);
 
-    for (int ikpt = 0; ikpt < meta_.nkpt; ++ikpt) {
-        for (int b = 0; b < meta_.mx; ++b) {
-            band_offsets_[static_cast<std::size_t>(ikpt) * meta_.mx + b] = std::ftell(fp_);
-            for (int n = 0; n < meta_.nnodes; ++n) {
+    for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
+        for (int b = 0; b < meta.mx; ++b) {
+            band_offsets_[static_cast<std::size_t>(ikpt) * meta.mx + b] = std::ftell(fp_);
+            for (int n = 0; n < meta.nnodes; ++n) {
                 skipRecord();
             }
         }
@@ -274,14 +274,14 @@ auto WG::computeOffsets() -> void {
 
 
 auto WG::seekToBand(int ikpt, int iband) -> void {
-    if (ikpt < 0 || ikpt >= meta_.nkpt) {
+    if (ikpt < 0 || ikpt >= meta.nkpt) {
         throw std::out_of_range("Invalid k-point index");
     }
-    if (iband < 0 || iband >= meta_.mx) {
+    if (iband < 0 || iband >= meta.mx) {
         throw std::out_of_range("Invalid band index");
     }
 
-    long offset = band_offsets_[static_cast<std::size_t>(ikpt) * meta_.mx + iband];
+    long offset = band_offsets_[static_cast<std::size_t>(ikpt) * meta.mx + iband];
     if (std::fseek(fp_, offset, SEEK_SET) != 0) {
         throw std::runtime_error("Failed to seek to band");
     }
@@ -289,10 +289,10 @@ auto WG::seekToBand(int ikpt, int iband) -> void {
 
 
 auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
-    if (ikpt < 0 || ikpt >= meta_.nkpt) {
+    if (ikpt < 0 || ikpt >= meta.nkpt) {
         throw std::out_of_range("Invalid k-point index: " + std::to_string(ikpt));
     }
-    if (iband < 0 || iband >= meta_.mx) {
+    if (iband < 0 || iband >= meta.mx) {
         throw std::out_of_range("Invalid band index: " + std::to_string(iband));
     }
 
@@ -321,18 +321,18 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
     entry->ikpt = ikpt;
     entry->iband = iband;
 
-    const std::size_t total_ng = meta_.ng_tot_per_kpt[ikpt];
+    const std::size_t total_ng = meta.ng_tot_per_kpt[ikpt];
     entry->up.resize(total_ng);
-    if (meta_.is_SO == 1) {
+    if (meta.is_SO == 1) {
         entry->down.resize(total_ng);
     }
 
     std::size_t pos = 0;
-    for (int inode = 0; inode < meta_.nnodes; ++inode) {
+    for (int inode = 0; inode < meta.nnodes; ++inode) {
         int ng = ngtotnod_[ikpt][inode];
         if (ng == 0) continue;
 
-        if (meta_.is_SO == 1) {
+        if (meta.is_SO == 1) {
             tmp_buf_.resize(static_cast<std::size_t>(ng) * 2);
             readRecord(tmp_buf_.data(), tmp_buf_.size() * sizeof(std::complex<double>), "wg");
             for (int ig = 0; ig < ng; ++ig) {
@@ -346,7 +346,7 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
     }
 
     entry->view.up = std::span<const std::complex<double>>(entry->up.data(), entry->up.size());
-    if (meta_.is_SO == 1) {
+    if (meta.is_SO == 1) {
         entry->view.down = std::span<const std::complex<double>>(entry->down.data(), entry->down.size());
     } else {
         entry->view.down = {};

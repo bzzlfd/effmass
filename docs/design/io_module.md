@@ -8,10 +8,11 @@
 io (aggregate)
 ├── io.GKK     →  src/io/GKK.cppm
 ├── io.WG      →  src/io/WG.cppm
+├── io.EIGEN   →  src/io/EIGEN.cppm
 └── io.lattice →  src/io/lattice.cppm
 ```
 
-`io.cppm` 是聚合模块（aggregate module），通过 `export import io.GKK; export import io.WG; export import io.lattice;` 重新导出三个子模块的所有公开接口。外部代码只需 `import io;` 即可使用全部 IO 功能。
+`io.cppm` 是聚合模块（aggregate module），通过 `export import io.GKK; export import io.WG; export import io.EIGEN; export import io.lattice;` 重新导出四个子模块的所有公开接口。外部代码只需 `import io;` 即可使用全部 IO 功能。
 
 ## 数据结构
 
@@ -157,13 +158,13 @@ GKK& operator=(GKK&& other) noexcept;
 ### 公共接口
 
 ```cpp
-const GKKMetadata& metadata() const;                          // 获取元数据
-void setDataView(KVecsView view);                             // 设置需要计算的数据表示
-KVecsView currentView() const;                                // 查询当前设置的数据表示
-const KVecs& loadKPoint(int ikpt);                            // 加载指定 k 点数据（带缓存）
-int current_ikpt() const;                                     // 当前缓存的 k 点索引
-const KVecs& currentData() const;                             // 当前缓存的数据视图（按 currentView 过滤）
-std::array<double, 3> inferCurrent_k() const;                 // 从 K=G-k 数据推断 k 点分数坐标 (fractional coordinate)
+GKKMetadata meta;                                                // 元数据（公有成员）
+void setDataView(KVecsView view);                                // 设置需要计算的数据表示
+KVecsView currentView() const;                                   // 查询当前设置的数据表示
+const KVecs& loadKPoint(int ikpt);                               // 加载指定 k 点数据（带缓存）
+int current_ikpt() const;                                        // 当前缓存的 k 点索引
+const KVecs& currentData() const;                                // 当前缓存的数据视图（按 currentView 过滤）
+std::array<double, 3> inferCurrent_k() const;                    // 从 K=G-k 数据推断 k 点分数坐标 (fractional coordinate)
 ```
 
 - `setDataView`
@@ -236,8 +237,8 @@ export struct WGCoeffs {
 ### 公共接口
 
 ```cpp
-const WGMetadata& metadata() const;
-const WGCoeffs& loadBand(int ikpt, int iband);  // 加载指定 k 点、指定能带（带缓存）
+WGMetadata meta;                                          // 元数据（公有成员）
+const WGCoeffs& loadBand(int ikpt, int iband);            // 加载指定 k 点、指定能带（带缓存）
 int current_ikpt() const;
 int current_iband() const;
 const WGCoeffs& currentData() const;
@@ -268,3 +269,108 @@ const WGCoeffs& currentData() const;
 ### 元数据一致性
 
 `OUT.WG` 的头部元数据（`n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda, Ecut, lattice, ngtotnod`）必须与 `OUT.GKK` 保持一致（仅多出 `mx`）。当前类内部**暂不做交叉校验**，由调用方负责验证。
+
+## `EIGEN` 类
+
+`EIGEN` 类封装了对 `OUT.EIGEN` 文件的读取操作。
+
+### 数据结构
+
+#### `EIGENMetadata`
+
+```cpp
+export struct EIGENMetadata {
+    int islda;        // 自旋极化标志
+    int nkpt;         // k 点数
+    int nband;        // 能带数（Fortran 原变量名 mx）
+    int nref_tot_8;   // 参考态总数（含义尚不明确，原样保留）
+    int natom;        // 原子数
+    int nnode;        // 节点数（Fortran 原变量名 nnodes）
+    int is_SO;        // 自旋轨道耦合标志（旧格式文件可能缺失，此时设为 0）
+};
+```
+
+#### `KPointVec`
+
+k 点坐标向量，支持 `.x/.y/.z` 命名成员访问和 `[0]/[1]/[2]` 下标访问：
+
+```cpp
+export struct KPointVec {
+    double x{}, y{}, z{};
+    auto operator[](int i) -> double&;
+    auto operator[](int i) const -> double;
+};
+```
+
+`[0]`→`x`, `[1]`→`y`, `[2]`→`z`，越界抛 `std::out_of_range`。
+
+#### `Array3d`
+
+用于存储能量本征值的三维数组封装，一维连续存储，顺序 `[ispin][ikpt][iband]`：
+
+```cpp
+export class Array3d {
+    // 构造
+    Array3d(int nband, int nkpt, int islda);
+
+    // 查询
+    auto dims() const -> std::array<int, 3>;  // {nband, nkpt, islda}
+    auto empty() const -> bool;
+    auto size() const -> std::size_t;  // 总元素数
+    auto data() -> double*;
+    auto data() const -> const double*;
+
+    // 多参数直接访问
+    auto operator[](int iband, int ikpt, int ispin) -> double&;  // 3 参数
+    auto operator[](int iband, int ikpt, int ispin) const -> double;
+
+    auto operator[](int iband, int ikpt) -> double&;  // 2 参数，仅 islda==1 时可用
+    auto operator[](int iband, int ikpt) const -> double;
+
+    // 链式访问 [ispin][ikpt][iband]
+    auto operator[](int ispin)       -> Slice2d;
+    auto operator[](int ispin) const -> ConstSlice2d;
+    // Slice2d[ikpt] 返回 std::span<double> (len = nband)
+    // ConstSlice2d[ikpt] 返回 std::span<const double> (len = nband)
+};
+```
+
+### `EIGEN` 类
+
+```cpp
+export class EIGEN {
+public:
+    explicit EIGEN(const std::string& filename);
+    ~EIGEN();
+
+    // 禁用拷贝，启用移动
+    EIGEN(const EIGEN&) = delete;
+    auto operator=(const EIGEN&) -> EIGEN& = delete;
+    EIGEN(EIGEN&&) noexcept;
+    auto operator=(EIGEN&&) noexcept -> EIGEN&;
+
+    // 打印元数据 + sum(kpt_weight)
+    auto print_info() const -> void;
+
+    // 公有数据成员
+    EIGENMetadata meta;
+    std::vector<double> kpt_weight;    // k 点权重，size = nkpt
+    std::vector<KPointVec> kpt_vec;    // k 点坐标，size = nkpt
+    Array3d eigenvalue;                // 本征值，dims = [nband, nkpt, islda]
+};
+```
+
+### 设计要点
+
+1. **一次性读取**：EIGEN 文件通常较小（数 KB），构造函数中读取所有元数据和数据，不采用延迟加载策略。
+
+2. **文件格式兼容性**：header record 通过前导长度标记区分新/旧格式：
+   - 28 字节 → 7 int（含 `is_SO`）
+   - 24 字节 → 6 int（无 `is_SO`，设为 0）
+   - 其他长度 → 抛异常
+
+3. **验证**：读取 k 点循环时验证 `islda_tmp` 和 `ikpt_tmp` 是否与循环计数器一致（Fortran 1-based），不一致时抛异常。
+
+4. **数据冗余**：文件中每个 `(ispin, ikpt)` 对都有一份 weight/ak 数据（4 doubles）。这些量在语义上按 kpt 索引（而非按自旋），因此最终保留最后一次读入的值。
+
+5. **移动语义**：自定义移动构造/赋值，正确转移 `FILE*` 所有权（源对象 `fp_` 置空）。

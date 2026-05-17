@@ -58,14 +58,14 @@ export struct KVecs {
 // GKK class - abstraction for OUT.GKK file
 export class GKK {
 public:
+    GKKMetadata meta;                             // metadata
+
     explicit GKK(const std::string& filename);  // open file and read metadata
     ~GKK();
     GKK(const GKK&) = delete;                   // disable copy
     auto operator=(const GKK&) -> GKK& = delete;
     GKK(GKK&& other) noexcept;                  // enable move
     auto operator=(GKK&& other) noexcept -> GKK&;
-
-    auto metadata() const -> const GKKMetadata& { return meta_; }  // get metadata
 
     // Control which representations are computed and exposed in currentData()
     auto setDataView(KVecsView view) -> void;
@@ -93,7 +93,6 @@ private:
 
     std::string filename_;                      // file name
     std::FILE* fp_;                             // file handle
-    GKKMetadata meta_;                          // metadata
     std::vector<std::vector<int>> ngtotnod_;    // G-vector count per k-point per node
     std::vector<long> kpt_data_offsets_;        // file offset per k-point
     int current_ikpt_ = -1;                      // currently cached k-point
@@ -125,7 +124,7 @@ GKK::GKK(const std::string& filename)
     readMetadata();
 
     // preallocate working buffers (maximum possible size) for Cartesian only
-    max_ng_ = static_cast<std::size_t>(meta_.mg_nx) * meta_.nnodes;
+    max_ng_ = static_cast<std::size_t>(meta.mg_nx) * meta.nnodes;
     kinetic_buf_.resize(max_ng_);
     Kx_buf_.resize(max_ng_);
     Ky_buf_.resize(max_ng_);
@@ -149,7 +148,7 @@ GKK::~GKK() {
 GKK::GKK(GKK&& other) noexcept
     : filename_(std::move(other.filename_))
     , fp_(other.fp_)
-    , meta_(std::move(other.meta_))
+    , meta(std::move(other.meta))
     , ngtotnod_(std::move(other.ngtotnod_))
     , kpt_data_offsets_(std::move(other.kpt_data_offsets_))
     , current_ikpt_(other.current_ikpt_)
@@ -197,7 +196,7 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
 
         filename_ = std::move(other.filename_);
         fp_ = other.fp_;
-        meta_ = std::move(other.meta_);
+        meta = std::move(other.meta);
         ngtotnod_ = std::move(other.ngtotnod_);
         kpt_data_offsets_ = std::move(other.kpt_data_offsets_);
         current_ikpt_ = other.current_ikpt_;
@@ -278,27 +277,27 @@ auto GKK::readMetadata() -> void {
     // Record 1: n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda
     int header[8];
     readRecord(header, sizeof(header), "header");
-    meta_.n1 = header[0];
-    meta_.n2 = header[1];
-    meta_.n3 = header[2];
-    meta_.mg_nx = header[3];
-    meta_.nnodes = header[4];
-    meta_.nkpt = header[5];
-    meta_.is_SO = header[6];
-    meta_.islda = header[7];
+    meta.n1 = header[0];
+    meta.n2 = header[1];
+    meta.n3 = header[2];
+    meta.mg_nx = header[3];
+    meta.nnodes = header[4];
+    meta.nkpt = header[5];
+    meta.is_SO = header[6];
+    meta.islda = header[7];
 
     // handle spin-orbit coupling
-    if (meta_.is_SO == 1) {
-        meta_.mg_nx /= 2;
+    if (meta.is_SO == 1) {
+        meta.mg_nx /= 2;
     }
 
     // Record 2: Ecut
-    readRecord(&meta_.Ecut, sizeof(double), "Ecut");
+    readRecord(&meta.Ecut, sizeof(double), "Ecut");
 
     // Record 3: AL(3,3) - note Fortran is column-major
     double al_flat[9];
     readRecord(al_flat, sizeof(al_flat), "AL");
-    meta_.lattice.setLattice(al_flat, LengthUnit::Angstrom);
+    meta.lattice.setLattice(al_flat, LengthUnit::Angstrom);
 
     // Record 4: nnodes, ngtotnod
     int len = readRecordLength();
@@ -312,28 +311,28 @@ auto GKK::readNgtotnod(int record_len) -> void {
     if (std::fread(&nnodes_check, sizeof(int), 1, fp_) != 1) {
         throw std::runtime_error("Failed to read nnodes");
     }
-    if (nnodes_check != meta_.nnodes) {
+    if (nnodes_check != meta.nnodes) {
         throw std::runtime_error("nnodes mismatch");
     }
 
     // read G-vector count per k-point per node
-    ngtotnod_.resize(meta_.nkpt, std::vector<int>(meta_.nnodes));
-    meta_.ng_tot_per_kpt.resize(meta_.nkpt, 0);
+    ngtotnod_.resize(meta.nkpt, std::vector<int>(meta.nnodes));
+    meta.ng_tot_per_kpt.resize(meta.nkpt, 0);
 
-    for (int ikpt = 0; ikpt < meta_.nkpt; ++ikpt) {
+    for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
         int ng_total = 0;
-        for (int n = 0; n < meta_.nnodes; ++n) {
+        for (int n = 0; n < meta.nnodes; ++n) {
             int ng;
             if (std::fread(&ng, sizeof(int), 1, fp_) != 1) {
                 throw std::runtime_error("Failed to read ngtotnod");
             }
-            if (meta_.is_SO == 1) {
+            if (meta.is_SO == 1) {
                 ng /= 2;
             }
             ngtotnod_[ikpt][n] = ng;
             ng_total += ng;
         }
-        meta_.ng_tot_per_kpt[ikpt] = ng_total;
+        meta.ng_tot_per_kpt[ikpt] = ng_total;
     }
 }
 
@@ -349,16 +348,16 @@ auto GKK::skipRecord() -> void {
 
 auto GKK::computeOffsets() -> void {
     // record the starting file offset for each k-point's data
-    kpt_data_offsets_.resize(meta_.nkpt);
+    kpt_data_offsets_.resize(meta.nkpt);
 
-    for (int ikpt = 0; ikpt < meta_.nkpt; ++ikpt) {
+    for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
         kpt_data_offsets_[ikpt] = std::ftell(fp_);
 
         // skip all data for this k-point by walking through records
         // This correctly handles compiler-dependent record padding (alignment),
         // because we trust the length markers in the file rather than computing
         // the offset from ng.
-        for (int n = 0; n < meta_.nnodes; ++n) {
+        for (int n = 0; n < meta.nnodes; ++n) {
             // 4 arrays (gkk, gkk_x, gkk_y, gkk_z), each in its own record
             for (int i = 0; i < 4; ++i) {
                 skipRecord();
@@ -369,7 +368,7 @@ auto GKK::computeOffsets() -> void {
 
 
 auto GKK::seekToKPoint(int ikpt) -> void {
-    if (ikpt < 0 || ikpt >= meta_.nkpt) {
+    if (ikpt < 0 || ikpt >= meta.nkpt) {
         throw std::out_of_range("Invalid k-point index");
     }
 
@@ -420,7 +419,7 @@ auto GKK::computeSpherical(std::size_t ng) -> void {
 auto GKK::computeIntegerIndices(std::size_t ng) -> void {
     auto k_frac = inferCurrent_k();
     constexpr double TWO_PI = 2.0 * std::numbers::pi;
-    auto A_mat = meta_.lattice.A();
+    auto A_mat = meta.lattice.A();
     for (std::size_t ig = 0; ig < ng; ++ig) {
         const double kx = Kx_buf_[ig];
         const double ky = Ky_buf_[ig];
@@ -486,7 +485,7 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
         return current_data_;
     }
 
-    if (ikpt < 0 || ikpt >= meta_.nkpt) {
+    if (ikpt < 0 || ikpt >= meta.nkpt) {
         throw std::out_of_range("Invalid k-point index: " + std::to_string(ikpt));
     }
 
@@ -497,7 +496,7 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
         seekToKPoint(ikpt);
 
         // read all nodes for this k-point and merge into contiguous buffers
-        for (int inode = 0; inode < meta_.nnodes; ++inode) {
+        for (int inode = 0; inode < meta.nnodes; ++inode) {
             int ng = ngtotnod_[ikpt][inode];
             if (ng == 0) continue;
 
@@ -532,7 +531,7 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
 
     // populate per-k-point metadata for Integer view
     if (hasView(desired_views_, KVecsView::Integer)) {
-        current_data_.reciprocalLattice = meta_.lattice.B();
+        current_data_.reciprocalLattice = meta.lattice.B();
         if (total_pos > 0) {
             current_data_.kPoint = inferCurrent_k();
         } else {
@@ -563,7 +562,7 @@ auto GKK::inferCurrent_k() const -> std::array<double, 3> {
 
     std::array<double, 3> k_frac = {0.0, 0.0, 0.0};
 
-    auto A_mat = meta_.lattice.A();
+    auto A_mat = meta.lattice.A();
 
     for (int dim = 0; dim < 3; ++dim) {
         double sum_cos = 0.0;

@@ -30,11 +30,12 @@ auto function_name(args...) -> ReturnType;
 ```cpp
 export class GKK {
 public:
+    GKKMetadata meta;
+
     explicit GKK(const std::string& filename);
     ~GKK();
 
     auto operator=(GKK&& other) noexcept -> GKK&;
-    auto metadata() const -> const GKKMetadata& { return meta_; }
     auto loadKPoint(int ikpt) -> const KVecs&;
     auto current_ikpt() const -> int { return current_ikpt_; }
     auto currentData() const -> const KVecs& { return current_data_; }
@@ -125,10 +126,11 @@ export constexpr auto operator&(KVecsView a, KVecsView b) -> KVecsView {
 ```cpp
 export class GKK {
 public:
+    GKKMetadata meta;
+
     explicit GKK(const std::string& filename);
     ~GKK();
 
-    auto metadata() const -> const GKKMetadata&;
     auto loadKPoint(int ikpt) -> const KVecs&;
 
 private:
@@ -136,6 +138,4 @@ private:
     auto seekToKPoint(int ikpt) -> void;
 
     std::FILE* fp_;
-    GKKMetadata meta_;
-};
 ```

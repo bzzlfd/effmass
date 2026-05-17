@@ -173,9 +173,60 @@ close(11)
 
 ## OUT.EIGEN
 
-`OUT.EIGEN` 文件存储能量本征值和 k 点信息。
+`OUT.EIGEN` 文件存储能量本征值和 k 点信息。该文件为 Fortran unformatted binary 格式，采用 [Fortran Record 格式](fortran_record_format.md)。
 
-> TODO: 待补充详细的 record 结构和读取方法。
+### 文件结构（按读取顺序）
+
+```fortran
+open(23, file="OUT.EIGEN", form="unformatted")
+rewind(23)
+
+! Record 1: 元数据头（7 ints，旧格式可能为 6 ints）
+read(23) islda, nkpt, mx, nref_tot_8, natom, nnodes, is_SO
+
+allocate(weighkpt_2(nkpt))
+allocate(akx_2(nkpt))
+allocate(aky_2(nkpt))
+allocate(akz_2(nkpt))
+allocate(E_st(mx, nkpt, islda))
+
+! 后续：按自旋 → k 点顺序存储
+do iislda = 1, islda
+    do kpt = 1, nkpt
+        read(23) iislda_tmp, kpt_tmp, weighkpt_2(kpt), &
+            &       akx_2(kpt), aky_2(kpt), akz_2(kpt)
+        read(23) (E_st(i, kpt, iislda), i = 1, mx)
+    end do
+end do
+close(23)
+```
+
+### 数据存储方式总结
+
+| Record | 内容 | 数据类型 | 说明 |
+|--------|------|----------|------|
+| 1 | `islda, nkpt, mx, nref_tot_8, natom, nnodes [, is_SO]` | 6 或 7 × `int` | 元数据。旧格式无 `is_SO`，新格式含 `is_SO`。通过 record 长度区分（24 vs 28 字节） |
+| 2~ | k 点循环数据 | 每个 `(iislda, kpt)` 2 个 record | 见下方 |
+
+#### k 点数据布局
+
+对于每个自旋 `iislda = 1, ..., islda`，每个 k 点 `kpt = 1, ..., nkpt`：
+
+1. **k 点元数据 record**：`iislda_tmp` (int), `kpt_tmp` (int), `weighkpt_2(kpt)` (double), `akx_2(kpt)` (double), `aky_2(kpt)` (double), `akz_2(kpt)` (double)
+   - 总大小：`2 × sizeof(int) + 4 × sizeof(double) = 40` 字节
+   - `iislda_tmp` 应与外层循环 `iislda` 一致，`kpt_tmp` 应与 `kpt` 一致；不一致时报错
+   - weighkpt_2 和 akx/aky/akz 按 kpt 索引（非自旋），后一个自旋覆盖前一个
+
+2. **本征值 record**：`mx` 个 double
+   - 总大小：`mx × sizeof(double)` 字节
+   - 按列优先（Fortran column-major）存储：能带索引变化最快
+
+### 兼容性说明
+
+- **is_SO 处理**：读取时先尝试读 7 int（新格式），通过 record 长度（28 字节）判断；若 record 长度为 24 字节则为旧格式，设 `is_SO = 0`
+- 与 GKK/WG 不同，EIGEN 文件中 `is_SO` 仅作标记，不改变数据布局
+- `weighkpt_2`、`akx_2`、`aky_2`、`akz_2` 在文件中对每个 `(iislda, kpt)` 对都有存储，但最终只保留最后读入的值（按 kpt 索引，非自旋）
+- `nref_tot_8`：该字段含义尚不明确。Fortran 注释显示不同文件间（如 `eigen_all.store` 与 `bpsiifile`）该值可能不同，读取时原样保留不做解释
 
 ## OUT.KPT
 

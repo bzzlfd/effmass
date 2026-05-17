@@ -12,3 +12,8 @@ add_test(NAME test_ncpp COMMAND test_ncpp WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_executable(test_lattice test_lattice.cpp)
 target_link_libraries(test_lattice PRIVATE io)
 add_test(NAME test_lattice COMMAND test_lattice WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# EIGEN tests
+add_executable(test_eigen test_eigen.cpp)
+target_link_libraries(test_eigen PRIVATE io)
+add_test(NAME test_eigen COMMAND test_eigen WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
