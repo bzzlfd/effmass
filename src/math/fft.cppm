@@ -2,7 +2,7 @@ module;
 
 #include "pocketfft.h"
 
-export module transform.fft;
+export module math.fft;
 
 import std;
 

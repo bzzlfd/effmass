@@ -1,5 +1,5 @@
 import std;
-import transform;
+import math;
 
 auto check(bool cond, std::string_view msg) -> void {
     if (!cond) {
@@ -173,7 +173,7 @@ auto test_fft3d() -> void {
 
 auto main() -> int {
     try {
-        std::println("=== Transform Module Tests ===");
+        std::println("=== Math Module Tests ===");
         test_spherical_bessel();
         test_spherical_harmonics();
         test_fft1d();

@@ -1,4 +1,4 @@
-export module transform.sph_harmonics;
+export module math.sph_harmonics;
 
 import std;
 

@@ -1,4 +1,4 @@
-export module transform.sph_bessel;
+export module math.sph_bessel;
 
 import std;
 

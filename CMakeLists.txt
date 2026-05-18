@@ -43,15 +43,15 @@ target_sources(pseudo
 )
 target_link_libraries(pseudo PRIVATE pugixml::pugixml)
 
-# Library target for transform module
-add_library(transform)
-target_sources(transform
+# Library target for math module
+add_library(math)
+target_sources(math
     PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-            src/transform.cppm
-            src/transform/sph_bessel.cppm
-            src/transform/sph_harmonics.cppm
-            src/transform/fft.cppm
+            src/math.cppm
+            src/math/sph_bessel.cppm
+            src/math/sph_harmonics.cppm
+            src/math/fft.cppm
     PRIVATE
         vendor/pocketfft/pocketfft.c
 )
@@ -59,7 +59,7 @@ set_source_files_properties(vendor/pocketfft/pocketfft.c PROPERTIES
     LANGUAGE CXX
     COMPILE_DEFINITIONS "restrict=__restrict__"
 )
-target_include_directories(transform PRIVATE vendor/pocketfft)
+target_include_directories(math PRIVATE vendor/pocketfft)
 
 # Tests
 enable_testing()

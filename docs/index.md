@@ -29,4 +29,4 @@
 |------|------|------|
 | `io` | `src/io.cppm` + `src/io/` | 读取 OUT.GKK、OUT.WG 等文件，提供 K 矢量、晶格、波函数系数 |
 | `pseudo` | `src/pseudo.cppm` + `src/pseudo/` | UPF 赝势文件解析（NCPPUPF） |
-| `transform` | `src/transform.cppm` + `src/transform/` | 球贝塞尔函数、实球谐函数、1D/3D FFT |
+| `math` | `src/math.cppm` + `src/math/` | 球贝塞尔函数、实球谐函数、1D/3D FFT |
