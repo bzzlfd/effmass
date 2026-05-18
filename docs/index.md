@@ -21,6 +21,7 @@
 - `design/physical_constants.md`：物理常量命名规范与 `constexpr` 使用约定
 - `design/io_module.md`：`io` 总模块及子模块 `io.GKK`、`io.WG`、`io.EIGEN`、`io.lattice` 的接口设计与实现细节
 - `design/pseudo_module.md`：赝势读取模块的接口设计、`NCPPUPF` 类结构与 UPF 文件 tag 的映射
+- `design/upf_vs_binary_io.md`：UPF（pugixml）与二进制 IO（GKK/WG/RHO/EIGEN）文件生命周期管理的对比分析
 - `design/cpp_conventions.md`：C++ 编码约定（命名规范、函数返回类型写法等）
 
 ## 实现的模块
