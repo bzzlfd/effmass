@@ -120,16 +120,32 @@ private:
         }
     }
 
+    auto readRecord(void* dst, const char* context) -> void {
+        int len = readRecordLength();
+        if (std::fread(dst, 1, len, fp_) != static_cast<std::size_t>(len)) {
+            throw std::runtime_error(std::string(context) + ": read failed");
+        }
+        checkRecordLength(len);
+    }
+
     auto readRecord(void* dst, std::size_t nbytes, const char* context) -> void {
         int len = readRecordLength();
-        if (static_cast<std::size_t>(len) != nbytes) {
+        if (static_cast<int>(nbytes) > len) {
             throw std::runtime_error(
-                std::string(context) + ": record size mismatch: expected " +
-                std::to_string(nbytes) + ", got " + std::to_string(len)
+                std::string(context) + ": nbytes exceeds record length: expected ≤ " +
+                std::to_string(len) + ", got " + std::to_string(nbytes)
             );
         }
-        if (std::fread(dst, 1, nbytes, fp_) != nbytes) {
-            throw std::runtime_error(std::string(context) + ": read failed");
+        if (nbytes > 0) {
+            if (std::fread(dst, 1, nbytes, fp_) != nbytes) {
+                throw std::runtime_error(std::string(context) + ": read failed");
+            }
+        }
+        std::size_t remaining = static_cast<std::size_t>(len) - nbytes;
+        if (remaining > 0) {
+            if (std::fseek(fp_, static_cast<long>(remaining), SEEK_CUR) != 0) {
+                throw std::runtime_error(std::string(context) + ": seek failed");
+            }
         }
         checkRecordLength(len);
     }
@@ -167,7 +183,7 @@ private:
 
         // Read lattice vectors (Angstrom in file, converted to Bohr internally)
         double al_flat[9];
-        readRecord(al_flat, sizeof(al_flat), "AL");
+        readRecord(al_flat, "AL");
         lattice.setLattice(al_flat, LengthUnit::Angstrom);
     }
 
@@ -176,11 +192,12 @@ private:
         int nr_n = nr / meta.nnodes;
         data_.resize(static_cast<std::size_t>(meta.nstate) * nr);
 
+        auto nbytes = static_cast<std::size_t>(nr_n) * sizeof(double);
         for (int istate = 0; istate < meta.nstate; ++istate) {
             for (int inode = 0; inode < meta.nnodes; ++inode) {
                 double* slice = data_.data()
                     + (static_cast<std::size_t>(istate) * nr + inode * nr_n);
-                readRecord(slice, static_cast<std::size_t>(nr_n) * sizeof(double), "grid data");
+                readRecord(slice, nbytes, "grid data");
             }
         }
     }
