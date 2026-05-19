@@ -79,7 +79,8 @@ public:
 private:
     auto readRecordLength() -> int;                     // read record length marker
     auto checkRecordLength(int expected) -> void;       // verify record length marker
-    auto readRecord(void* dst, std::size_t nbytes, const char* context) -> void; // read full record data
+    auto readRecord(void* dst, const char* context) -> void; // read full record
+    auto readRecord(void* dst, std::size_t nbytes, const char* context) -> void; // read nbytes, skip rest
 
     auto readMetadata() -> void;                        // read file metadata
     auto readNgtotnod(int record_len) -> void;          // read ngtotnod array
@@ -103,7 +104,7 @@ private:
     // buffers: working arrays (contiguous) + file read buffer (reused)
     std::size_t max_ng_ = 0;  // maximum possible G-vectors per k-point
 
-    // buffers: working arrays (contiguous) + file read buffer (reused)
+    // buffers: working arrays (contiguous)
     std::vector<double> kinetic_buf_, Kx_buf_, Ky_buf_, Kz_buf_;
     std::vector<double> r_buf_, theta_buf_, phi_buf_;
     std::vector<int>    iG_buf_, jG_buf_, kG_buf_;
@@ -261,13 +262,29 @@ auto GKK::checkRecordLength(int expected_length) -> void {
 }
 
 
+auto GKK::readRecord(void* dst, const char* context) -> void {
+    int len = readRecordLength();
+    if (std::fread(dst, 1, len, fp_) != static_cast<std::size_t>(len)) {
+        throw std::runtime_error(std::string(context) + ": read failed");
+    }
+    checkRecordLength(len);
+}
+
 auto GKK::readRecord(void* dst, std::size_t nbytes, const char* context) -> void {
     int len = readRecordLength();
-    if (len != static_cast<int>(nbytes)) {
-        throw std::runtime_error(std::string(context) + ": record size mismatch");
+    if (static_cast<int>(nbytes) > len) {
+        throw std::runtime_error(std::string(context) + ": nbytes exceeds record length");
     }
-    if (std::fread(dst, 1, nbytes, fp_) != nbytes) {
-        throw std::runtime_error(std::string(context) + ": read failed");
+    if (nbytes > 0) {
+        if (std::fread(dst, 1, nbytes, fp_) != nbytes) {
+            throw std::runtime_error(std::string(context) + ": read failed");
+        }
+    }
+    std::size_t remaining = static_cast<std::size_t>(len) - nbytes;
+    if (remaining > 0) {
+        if (std::fseek(fp_, static_cast<long>(remaining), SEEK_CUR) != 0) {
+            throw std::runtime_error(std::string(context) + ": seek failed");
+        }
     }
     checkRecordLength(len);
 }
@@ -276,7 +293,7 @@ auto GKK::readRecord(void* dst, std::size_t nbytes, const char* context) -> void
 auto GKK::readMetadata() -> void {
     // Record 1: n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda
     int header[8];
-    readRecord(header, sizeof(header), "header");
+    readRecord(header, "header");
     meta.n1 = header[0];
     meta.n2 = header[1];
     meta.n3 = header[2];
@@ -292,11 +309,11 @@ auto GKK::readMetadata() -> void {
     }
 
     // Record 2: Ecut
-    readRecord(&meta.Ecut, sizeof(double), "Ecut");
+    readRecord(&meta.Ecut, "Ecut");
 
     // Record 3: AL(3,3) - note Fortran is column-major
     double al_flat[9];
-    readRecord(al_flat, sizeof(al_flat), "AL");
+    readRecord(al_flat, "AL");
     meta.lattice.setLattice(al_flat, LengthUnit::Angstrom);
 
     // Record 4: nnodes, ngtotnod
@@ -496,14 +513,17 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
         seekToKPoint(ikpt);
 
         // read all nodes for this k-point and merge into contiguous buffers
+        // Fortran records are mg_nx-sized; readRecord(dst, nbytes, ...) reads nbytes
+        // and automatically skips the remaining (mg_nx - ng) elements.
         for (int inode = 0; inode < meta.nnodes; ++inode) {
             int ng = ngtotnod_[ikpt][inode];
             if (ng == 0) continue;
 
-            readRecord(kinetic_buf_.data() + total_pos, ng * sizeof(double), "gkk");
-            readRecord(Kx_buf_.data() + total_pos,     ng * sizeof(double), "gkk_x");
-            readRecord(Ky_buf_.data() + total_pos,     ng * sizeof(double), "gkk_y");
-            readRecord(Kz_buf_.data() + total_pos,     ng * sizeof(double), "gkk_z");
+            auto nbytes = static_cast<std::size_t>(ng) * sizeof(double);
+            readRecord(kinetic_buf_.data() + total_pos, nbytes, "gkk");
+            readRecord(Kx_buf_.data() + total_pos,      nbytes, "gkk_x");
+            readRecord(Ky_buf_.data() + total_pos,      nbytes, "gkk_y");
+            readRecord(Kz_buf_.data() + total_pos,      nbytes, "gkk_z");
 
             total_pos += static_cast<std::size_t>(ng);
         }

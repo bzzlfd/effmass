@@ -52,7 +52,10 @@ private:
 
     auto readRecordLength() -> int;                     // read record length marker
     auto checkRecordLength(int expected) -> void;       // verify record length marker
-    auto readRecord(void* dst, std::size_t nbytes, const char* context) -> void; // read full record data
+    auto readRecord(void* dst, const char* context) -> void; // read full record
+    auto readRecord(void* dst, std::size_t nbytes, const char* context) -> void; // read nbytes, skip rest
+    auto readRecordSOC(std::complex<double>* dst_up, std::complex<double>* dst_down,
+                       int ng, const char* context) -> void; // read SOC record: up[0..ng) + down[0..ng)
 
     auto readMetadata() -> void;                        // read file metadata
     auto readNgtotnod(int record_len) -> void;          // read ngtotnod array
@@ -74,8 +77,6 @@ private:
     int current_ikpt_ = -1;
     int current_iband_ = -1;
     WGCoeffs current_data_view_;
-
-    std::vector<std::complex<double>> tmp_buf_;  // temporary buffer for is_SO record splitting
 };
 
 
@@ -119,7 +120,6 @@ WG::WG(WG&& other) noexcept
     , current_ikpt_(other.current_ikpt_)
     , current_iband_(other.current_iband_)
     , current_data_view_(other.current_data_view_)
-    , tmp_buf_(std::move(other.tmp_buf_))
 {
     other.fp_ = nullptr;
     other.current_ikpt_ = -1;
@@ -143,7 +143,6 @@ auto WG::operator=(WG&& other) noexcept -> WG& {
         current_ikpt_ = other.current_ikpt_;
         current_iband_ = other.current_iband_;
         current_data_view_ = other.current_data_view_;
-        tmp_buf_ = std::move(other.tmp_buf_);
 
         other.fp_ = nullptr;
         other.current_ikpt_ = -1;
@@ -174,14 +173,57 @@ auto WG::checkRecordLength(int expected_length) -> void {
 }
 
 
-auto WG::readRecord(void* dst, std::size_t nbytes, const char* context) -> void {
+auto WG::readRecord(void* dst, const char* context) -> void {
     int len = readRecordLength();
-    if (len != static_cast<int>(nbytes)) {
-        throw std::runtime_error(std::string(context) + ": record size mismatch");
-    }
-    if (std::fread(dst, 1, nbytes, fp_) != nbytes) {
+    if (std::fread(dst, 1, len, fp_) != static_cast<std::size_t>(len)) {
         throw std::runtime_error(std::string(context) + ": read failed");
     }
+    checkRecordLength(len);
+}
+
+auto WG::readRecord(void* dst, std::size_t nbytes, const char* context) -> void {
+    int len = readRecordLength();
+    if (static_cast<int>(nbytes) > len) {
+        throw std::runtime_error(std::string(context) + ": nbytes exceeds record length");
+    }
+    if (nbytes > 0) {
+        if (std::fread(dst, 1, nbytes, fp_) != nbytes) {
+            throw std::runtime_error(std::string(context) + ": read failed");
+        }
+    }
+    std::size_t remaining = static_cast<std::size_t>(len) - nbytes;
+    if (remaining > 0) {
+        if (std::fseek(fp_, static_cast<long>(remaining), SEEK_CUR) != 0) {
+            throw std::runtime_error(std::string(context) + ": seek failed");
+        }
+    }
+    checkRecordLength(len);
+}
+
+auto WG::readRecordSOC(std::complex<double>* dst_up, std::complex<double>* dst_down,
+                       int ng, const char* context) -> void {
+    int len = readRecordLength();
+    std::size_t cplx_size = sizeof(std::complex<double>);
+    std::size_t half = static_cast<std::size_t>(len) / (2 * cplx_size);
+
+    auto read_cplx = [this, cplx_size](std::complex<double>* dst, int n, const char* ctx) {
+        auto nbytes = static_cast<std::size_t>(n) * cplx_size;
+        if (std::fread(dst, 1, nbytes, fp_) != nbytes) {
+            throw std::runtime_error(std::string(ctx) + ": read failed");
+        }
+    };
+
+    auto skip_cplx = [this, cplx_size](std::size_t n) {
+        if (n > 0) {
+            std::fseek(fp_, static_cast<long>(n) * cplx_size, SEEK_CUR);
+        }
+    };
+
+    read_cplx(dst_up, ng, context);
+    skip_cplx(half - static_cast<std::size_t>(ng));
+    read_cplx(dst_down, ng, context);
+    skip_cplx(half - static_cast<std::size_t>(ng));
+
     checkRecordLength(len);
 }
 
@@ -189,7 +231,7 @@ auto WG::readRecord(void* dst, std::size_t nbytes, const char* context) -> void 
 auto WG::readMetadata() -> void {
     // Record 1: n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda (9 ints)
     int header[9];
-    readRecord(header, sizeof(header), "header");
+    readRecord(header, "header");
     meta.n1 = header[0];
     meta.n2 = header[1];
     meta.n3 = header[2];
@@ -205,11 +247,11 @@ auto WG::readMetadata() -> void {
     }
 
     // Record 2: Ecut
-    readRecord(&meta.Ecut, sizeof(double), "Ecut");
+    readRecord(&meta.Ecut, "Ecut");
 
     // Record 3: AL(3,3) - Fortran column-major to C++ row-major, Å to Bohr
     double al_flat[9];
-    readRecord(al_flat, sizeof(al_flat), "AL");
+    readRecord(al_flat, "AL");
     meta.lattice.setLattice(al_flat, LengthUnit::Angstrom);
 
     // Record 4: nnodes, ngtotnod
@@ -260,6 +302,7 @@ auto WG::skipRecord() -> void {
 
 auto WG::computeOffsets() -> void {
     // record the starting file offset for each (k-point, band) pair
+    // File layout per kpt: node=0 band=0..mx-1, node=1 band=0..mx-1, ...
     band_offsets_.resize(static_cast<std::size_t>(meta.nkpt) * meta.mx);
 
     for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
@@ -333,15 +376,12 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
         if (ng == 0) continue;
 
         if (meta.is_SO == 1) {
-            tmp_buf_.resize(static_cast<std::size_t>(ng) * 2);
-            readRecord(tmp_buf_.data(), tmp_buf_.size() * sizeof(std::complex<double>), "wg");
-            for (int ig = 0; ig < ng; ++ig) {
-                entry->up[pos + ig] = tmp_buf_[ig];
-                entry->down[pos + ig] = tmp_buf_[ng + ig];
-            }
+            readRecordSOC(entry->up.data() + pos, entry->down.data() + pos, ng, "wg");
         } else {
-            readRecord(entry->up.data() + pos, ng * sizeof(std::complex<double>), "wg");
+            auto nbytes = static_cast<std::size_t>(ng) * sizeof(std::complex<double>);
+            readRecord(entry->up.data() + pos, nbytes, "wg");
         }
+
         pos += static_cast<std::size_t>(ng);
     }
 
