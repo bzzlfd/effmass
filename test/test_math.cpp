@@ -87,12 +87,15 @@ auto test_fft1d() -> void {
     data[0] = 1.0;
     auto original = data;
     fft8(data, R2G);
+    for (int i = 0; i < n; ++i) {
+        check(near_c(data[i], {1.0, 0.0}, eps), std::format("delta after R2G [{}]", i));
+    }
     fft8(data, G2R);
     for (int i = 0; i < n; ++i) {
         check(near_c(data[i], original[i], 1e-14), std::format("delta FFT roundtrip [{}]", i));
     }
 
-    // Sine wave test
+    // Cosine wave test
     std::vector<std::complex<double>> data2(n);
     for (int i = 0; i < n; ++i) {
         data2[i] = std::cos(2.0 * std::numbers::pi * i / n);
@@ -101,6 +104,14 @@ auto test_fft1d() -> void {
     double expected = n / 2.0;
     check(near(std::abs(data2[1]), expected, eps), "cos(2pi k/n) FFT peak at k=1");
     check(near(std::abs(data2[n - 1]), expected, eps), "cos(2pi k/n) FFT peak at k=n-1");
+
+    // Constant array test: all ones -> peak at k=0
+    std::vector<std::complex<double>> data_const(n, 1.0);
+    fft8(data_const, R2G);
+    check(near(std::abs(data_const[0]), static_cast<double>(n), eps), "constant FFT peak at k=0");
+    for (int i = 1; i < n; ++i) {
+        check(near(std::abs(data_const[i]), 0.0, eps), std::format("constant FFT zero at k={}", i));
+    }
 
     // n=2
     int n2 = 2;
@@ -145,7 +156,7 @@ auto test_fft3d() -> void {
     int total = n1 * n2 * n3;
     FFT3D fft(n1, n2, n3);
 
-    // Azbitrary grid roundtrip
+    // Arbitrary grid roundtrip
     std::vector<std::complex<double>> grid(total);
     for (int i = 0; i < total; ++i) {
         grid[i] = std::complex<double>(i % 7, (i * i) % 11);
