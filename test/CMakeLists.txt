@@ -32,3 +32,8 @@ add_test(NAME test_pseudo_ncpp COMMAND test_pseudo_ncpp WORKING_DIRECTORY ${CMAK
 add_executable(test_math test_math.cpp)
 target_link_libraries(test_math PRIVATE math)
 add_test(NAME test_math COMMAND test_math WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# WG FFT normalization test
+add_executable(test_wg_fft test_wg_fft.cpp)
+target_link_libraries(test_wg_fft PRIVATE io math)
+add_test(NAME test_wg_fft COMMAND test_wg_fft WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

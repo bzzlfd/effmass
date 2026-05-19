@@ -25,6 +25,7 @@ public:
 
     auto A(LengthUnit unit = LengthUnit::Bohr) const -> std::array<std::array<double, 3>, 3>;
     auto B(LengthUnit unit = LengthUnit::Bohr) const -> std::array<std::array<double, 3>, 3>;
+    auto volume() const -> double;
 
 private:
     struct array2d {
@@ -160,6 +161,30 @@ auto Lattice::B(LengthUnit unit) const -> std::array<std::array<double, 3>, 3>
     default:
         throw std::runtime_error("Lattice::B: unknown LengthUnit");
     }
+}
+
+
+auto Lattice::volume() const -> double
+{
+    auto cross = [](const double a[3], const double b[3]) -> std::array<double, 3> {
+        return {
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0]
+        };
+    };
+
+    auto dot = [](const double a[3], const double b[3]) -> double {
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    };
+
+    const double* a1 = &A_[0, 0];
+    const double* a2 = &A_[1, 0];
+    const double* a3 = &A_[2, 0];
+
+    auto a2xa3 = cross(a2, a3);
+    double V = dot(a1, a2xa3.data());
+    return std::abs(V);
 }
 
 

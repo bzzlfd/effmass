@@ -539,6 +539,8 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
     auto missing = static_cast<unsigned int>(desired_views_) & ~static_cast<unsigned int>(ready_views_);
 
     if (total_pos > 0) {
+        updateDataSpans(total_pos);  // Cartesian spans needed by computeSpherical / computeIntegerIndices
+
         if ((missing & static_cast<unsigned int>(KVecsView::Spherical)) != 0) {
             computeSpherical(total_pos);
             ready_views_ = ready_views_ | KVecsView::Spherical;
@@ -562,6 +564,7 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
         current_data_.reciprocalLattice = {};
     }
 
+    // re-wire spans (now includes Spherical/Integer if just computed)
     updateDataSpans(total_pos);
     return current_data_;
 }
