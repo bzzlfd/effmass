@@ -88,7 +88,7 @@ auto test_fft1d() -> void {
     auto original = data;
     fft8(data, R2G);
     for (int i = 0; i < n; ++i) {
-        check(near_c(data[i], {1.0, 0.0}, eps), std::format("delta after R2G [{}]", i));
+        check(near_c(data[i], {1.0 / n, 0.0}, eps), std::format("delta after R2G [{}]", i));
     }
     fft8(data, G2R);
     for (int i = 0; i < n; ++i) {
@@ -101,14 +101,14 @@ auto test_fft1d() -> void {
         data2[i] = std::cos(2.0 * std::numbers::pi * i / n);
     }
     fft8(data2, R2G);
-    double expected = n / 2.0;
+    double expected = 0.5;
     check(near(std::abs(data2[1]), expected, eps), "cos(2pi k/n) FFT peak at k=1");
     check(near(std::abs(data2[n - 1]), expected, eps), "cos(2pi k/n) FFT peak at k=n-1");
 
     // Constant array test: all ones -> peak at k=0
     std::vector<std::complex<double>> data_const(n, 1.0);
     fft8(data_const, R2G);
-    check(near(std::abs(data_const[0]), static_cast<double>(n), eps), "constant FFT peak at k=0");
+    check(near(std::abs(data_const[0]), 1.0, eps), "constant FFT peak at k=0");
     for (int i = 1; i < n; ++i) {
         check(near(std::abs(data_const[i]), 0.0, eps), std::format("constant FFT zero at k={}", i));
     }
@@ -118,8 +118,8 @@ auto test_fft1d() -> void {
     std::vector<std::complex<double>> data3 = {{1.0, 0.0}, {0.0, 0.0}};
     FFT3D fft2(1, 1, n2);
     fft2(data3, G2R);
-    check(near_c(data3[0], {0.5, 0.0}, 1e-15), "n=2 inverse[0]");
-    check(near_c(data3[1], {0.5, 0.0}, 1e-15), "n=2 inverse[1]");
+    check(near_c(data3[0], {1.0, 0.0}, 1e-15), "n=2 inverse[0]");
+    check(near_c(data3[1], {1.0, 0.0}, 1e-15), "n=2 inverse[1]");
 
     // Non-power-of-2: n=6
     int n6 = 6;

@@ -127,8 +127,8 @@ auto main() -> int {
                + static_cast<std::size_t>(k_idx)] = coeffs.up[ig];
         }
 
-        // FFT G → R (backward FFT with 1/N scaling)
-        // Physical wavefunction: ψ(r) = N_tot * IFFT[W_g]
+        // FFT G → R (unnormalized inverse DFT)
+        // Physical wavefunction: ψ(r) = IFFT[W_g]
         // By Parseval: sum_r |ψ|² = N_tot * sum_g |W_g|²
         // So: sum_r |ψ|² * vol / N_tot = sum_g |W_g|² * vol = norm_g0
         // G-space and R-space normalization should be identical.
@@ -137,7 +137,7 @@ auto main() -> int {
 
         double sum_r = 0.0;
         for (auto& v : grid) sum_r += std::norm(v);
-        double norm_r = sum_r * static_cast<double>(n123) * vol;
+        double norm_r = sum_r * vol / static_cast<double>(n123);
 
         std::println("  G-space (band 0): sum|W_g|^2 * volume            = {:.6f}", norm_g0);
         std::println("  R-space (band 0): sum|W_r|^2 * volume/(n1*n2*n3) = {:.6f} (via G2R)", norm_r);

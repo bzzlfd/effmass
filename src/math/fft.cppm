@@ -30,9 +30,9 @@ public:
 
         auto* buf = reinterpret_cast<double*>(data.data());
         if (forward) {
-            cfft_forward(plan.get(), buf, 1.0);
+            cfft_forward(plan.get(), buf, 1.0 / n);
         } else {
-            cfft_backward(plan.get(), buf, 1.0 / n);
+            cfft_backward(plan.get(), buf, 1.0);
         }
     }
 
