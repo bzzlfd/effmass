@@ -25,9 +25,9 @@ auto main() -> int {
     try {
         std::println("=== WG FFT Normalization Test ===");
 
-        WG wg("test/test_io-local/OUT.WG");
-        GKK gkk("test/test_io-local/OUT.GKK");
-        RHO rho("test/test_io-local/OUT.RHO");
+        WG wg("test/test_io-nonlocal/OUT.WG");
+        GKK gkk("test/test_io-nonlocal/OUT.GKK");
+        RHO rho("test/test_io-nonlocal/OUT.RHO");
 
         // consistency of FFT grid dimensions and lattice volume
         check(wg.meta.n1 == gkk.meta.n1 && gkk.meta.n1 == rho.meta.n1, "n1 consistency");
@@ -44,32 +44,79 @@ auto main() -> int {
 
         std::println("  grid: {} x {} x {}, volume = {:.6f} Bohr³", n1, n2, n3, vol);
 
-        // load GKK with Integer view to get G-vector indices (iG,jG,kG)
-        gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
-        auto kvecs = gkk.loadKPoint(0);
-        int ng = static_cast<int>(kvecs.iG.size());
+        // Load EIGEN for k-point comparison
+        EIGEN eigen("test/test_io-nonlocal/OUT.EIGEN");
+        check(eigen.meta.nkpt == wg.meta.nkpt, "EIGEN/WG nkpt consistency");
+        check(eigen.meta.nband == wg.meta.mx, "EIGEN/WG nband consistency");
 
-        // Print normalization of first few bands at kpt=0
-        std::println("  Normalization check (kpt=0):");
-        for (int iband = 0; iband < std::min(5, wg.meta.mx); ++iband) {
-            auto coeffs = wg.loadBand(0, iband);
-            check(static_cast<int>(coeffs.up.size()) == ng,
-                  std::format("kpt=0 band={}: WG/GKK G-vector count match", iband));
-            double norm_g = computeGspaceNorm(coeffs.up, vol);
-            std::println("    band {}: sum|W|^2 * volume = {:.6f}", iband, norm_g);
+        // Compare infer_k with EIGEN k-points.
+        // EIGEN stores k in Cartesian (Bohr^-1). Convert to fractional via A·k/(2π).
+        auto Alat = gkk.meta.lattice.A();
+        constexpr double TWO_PI = 2.0 * std::numbers::pi;
+        auto cartToFrac = [&](double kx, double ky, double kz) -> std::array<double, 3> {
+            std::array<double, 3> f{};
+            for (int d = 0; d < 3; ++d)
+                f[d] = (Alat[d][0]*kx + Alat[d][1]*ky + Alat[d][2]*kz) / TWO_PI;
+            return f;
+        };
+
+        std::println("  infer_k vs EIGEN k-point comparison:");
+        for (int ikpt = 0; ikpt < wg.meta.nkpt; ++ikpt) {
+            gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
+            auto kv = gkk.loadKPoint(ikpt);
+            auto ik = kv.kPoint;
+            auto& ek = eigen.kpt_vec[ikpt];
+            auto ef = cartToFrac(ek.x, ek.y, ek.z);
+            double dk = std::sqrt(
+                (ik[0]-ef[0])*(ik[0]-ef[0]) + (ik[1]-ef[1])*(ik[1]-ef[1]) + (ik[2]-ef[2])*(ik[2]-ef[2]));
+            std::println("    kpt={:2d}: infer_k=({:.12f},{:.12f},{:.12f})  "
+                         "eigen_frac=({:.12f},{:.12f},{:.12f})  dk={:.2e}",
+                         ikpt, ik[0], ik[1], ik[2], ef[0], ef[1], ef[2], dk);
+            check(dk < 1e-12,
+                  std::format("kpt={}: infer_k matches EIGEN k-point", ikpt));
         }
 
-        // Full FFT roundtrip for band 0
+        // Normalization check: sum|W|^2 * volume should be 1.0
+        std::println("  Normalization (sum|W|^2 * volume == 1.0):");
+        int n_norm_fail = 0;
+        for (int ikpt = 0; ikpt < wg.meta.nkpt; ++ikpt) {
+            gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
+            auto kvecs2 = gkk.loadKPoint(ikpt);
+            int ng2 = static_cast<int>(kvecs2.iG.size());
+
+            for (int iband = 0; iband < wg.meta.mx; ++iband) {
+                auto coeffs = wg.loadBand(ikpt, iband);
+                check(static_cast<int>(coeffs.up.size()) == ng2,
+                      std::format("kpt={} band={}: WG/GKK G-vector count match", ikpt, iband));
+
+                double norm_g = computeGspaceNorm(coeffs.up, vol);
+                if (!near(norm_g, 1.0)) {
+                    std::println("    kpt={:2d} band={:2d}: FAIL norm = {:.6f}", ikpt, iband, norm_g);
+                    ++n_norm_fail;
+                }
+            }
+        }
+        if (n_norm_fail > 0) {
+            throw std::runtime_error(
+                std::format("Normalization: {} bands deviate from 1.0", n_norm_fail));
+        }
+        std::println("  Normalization: all bands = 1.0");
+
+        // Full FFT roundtrip for band 0 (reload kpt=0 to ensure valid references)
+        gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
+        auto kvecs0 = gkk.loadKPoint(0);
+        int ng0 = static_cast<int>(kvecs0.iG.size());
+
         auto coeffs = wg.loadBand(0, 0);
         double norm_g0 = computeGspaceNorm(coeffs.up, vol);
 
         // Build full FFT grid from sparse G-vector coefficients
         std::vector<std::complex<double>> grid(static_cast<std::size_t>(n123), 0.0);
 
-        for (int ig = 0; ig < ng; ++ig) {
-            int i = kvecs.iG[ig];
-            int j = kvecs.jG[ig];
-            int k = kvecs.kG[ig];
+        for (int ig = 0; ig < ng0; ++ig) {
+            int i = kvecs0.iG[ig];
+            int j = kvecs0.jG[ig];
+            int k = kvecs0.kG[ig];
 
             int i_idx = ((i % n1) + n1) % n1;
             int j_idx = ((j % n2) + n2) % n2;
