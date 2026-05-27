@@ -25,9 +25,9 @@ auto main() -> int {
     try {
         std::println("=== WG FFT Normalization Test ===");
 
-        WG wg("test/test_io-nonlocal/OUT.WG");
-        GKK gkk("test/test_io-nonlocal/OUT.GKK");
-        RHO rho("test/test_io-nonlocal/OUT.RHO");
+        WG wg("test/data_io-nonlocal/OUT.WG");
+        GKK gkk("test/data_io-nonlocal/OUT.GKK");
+        RHO rho("test/data_io-nonlocal/OUT.RHO");
 
         // consistency of FFT grid dimensions and lattice volume
         check(wg.meta.n1 == gkk.meta.n1 && gkk.meta.n1 == rho.meta.n1, "n1 consistency");
@@ -45,7 +45,7 @@ auto main() -> int {
         std::println("  grid: {} x {} x {}, volume = {:.6f} Bohr³", n1, n2, n3, vol);
 
         // Load EIGEN for k-point comparison
-        EIGEN eigen("test/test_io-nonlocal/OUT.EIGEN");
+        EIGEN eigen("test/data_io-nonlocal/OUT.EIGEN");
         check(eigen.meta.nkpt == wg.meta.nkpt, "EIGEN/WG nkpt consistency");
         check(eigen.meta.nband == wg.meta.mx, "EIGEN/WG nband consistency");
 

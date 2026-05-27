@@ -4,7 +4,7 @@ import std;
 
 auto main() -> int {
     try {
-        GKK gkk("test/test_io-local/OUT.GKK");
+        GKK gkk("test/data_io-local/OUT.GKK");
 
         const auto& m = gkk.meta;
 

@@ -4,7 +4,7 @@ import std;
 
 auto main() -> int {
     try {
-        WG wg("test/test_io-local/OUT.WG");
+        WG wg("test/data_io-local/OUT.WG");
 
         const auto& m = wg.meta;
 

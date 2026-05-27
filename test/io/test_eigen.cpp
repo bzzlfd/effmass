@@ -1,14 +1,10 @@
-#include <cmath>
-#include <print>
-#include <string>
-#include <stdexcept>
-
-#include "../src/io/EIGEN.hpp"
+import io;
+import std;
 
 
 auto main() -> int {
     try {
-        EIGEN eig("test/test_io-local/OUT.EIGEN");
+        EIGEN eig("test/data_io-local/OUT.EIGEN");
 
         const auto& m = eig.meta;
 
@@ -133,7 +129,7 @@ auto main() -> int {
         std::println("All EIGEN tests passed!");
         return 0;
     } catch (const std::exception& e) {
-        std::println(stderr, "Test failed: {}", e.what());
+        std::println(std::cerr, "Test failed: {}", e.what());
         return 1;
     }
 }

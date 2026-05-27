@@ -3,7 +3,7 @@ import std;
 
 
 auto testVR() -> void {
-    RHO vr("test/test_io-local/OUT.VR");
+    RHO vr("test/data_io-local/OUT.VR");
 
     const auto& m = vr.meta;
 
@@ -50,7 +50,7 @@ auto testVR() -> void {
 
 
 auto testRHO() -> void {
-    RHO rho("test/test_io-local/OUT.RHO");
+    RHO rho("test/data_io-local/OUT.RHO");
 
     const auto& m = rho.meta;
 
