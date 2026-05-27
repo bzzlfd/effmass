@@ -8,8 +8,20 @@ import io.lattice;
 import std;
 
 
+export {
+    class GKK;
+        struct GKKMetadata;
+        enum class KVecsView : unsigned int;
+            constexpr auto operator|(KVecsView a, KVecsView b) -> KVecsView;
+            constexpr auto operator&(KVecsView a, KVecsView b) -> KVecsView;
+            constexpr auto operator~(KVecsView a) -> KVecsView;
+            constexpr auto hasView(KVecsView flags, KVecsView view) -> bool;
+        struct KVecs;
+}
+
+
 // GKK file metadata structure
-export struct GKKMetadata {
+struct GKKMetadata {
     int n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda;  // FFT grid / record length / node / k-point / spin
     double Ecut;              // cutoff energy
     Lattice lattice;          // lattice vectors (Bohr) and reciprocal lattice (Bohr^-1)
@@ -18,29 +30,29 @@ export struct GKKMetadata {
 
 
 // Bitmask controlling which representations are computed and exposed in KVecs
-export enum class KVecsView : unsigned int {
+enum class KVecsView : unsigned int {
     Cartesian = 1 << 0,  // kinetic, Kx, Ky, Kz
     Spherical = 1 << 1,  // r, theta, phi
     Integer   = 1 << 2,  // iG, jG, kG, kPoint, reciprocalLattice
 };
 
 
-export constexpr auto operator|(KVecsView a, KVecsView b) -> KVecsView {
+constexpr auto operator|(KVecsView a, KVecsView b) -> KVecsView {
     return static_cast<KVecsView>(static_cast<unsigned int>(a) | static_cast<unsigned int>(b));
 }
-export constexpr auto operator&(KVecsView a, KVecsView b) -> KVecsView {
+constexpr auto operator&(KVecsView a, KVecsView b) -> KVecsView {
     return static_cast<KVecsView>(static_cast<unsigned int>(a) & static_cast<unsigned int>(b));
 }
-export constexpr auto operator~(KVecsView a) -> KVecsView {
+constexpr auto operator~(KVecsView a) -> KVecsView {
     return static_cast<KVecsView>(~static_cast<unsigned int>(a));
 }
-export constexpr auto hasView(KVecsView flags, KVecsView view) -> bool {
+constexpr auto hasView(KVecsView flags, KVecsView view) -> bool {
     return (static_cast<unsigned int>(flags) & static_cast<unsigned int>(view)) != 0;
 }
 
 
 // k-point G-vector data view - non-owning spans to contiguous memory
-export struct KVecs {
+struct KVecs {
     // Cartesian representation: K = G - k
     std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, G_x-k_x, G_y-k_y, G_z-k_z
     
@@ -56,7 +68,7 @@ export struct KVecs {
 
 
 // GKK class - abstraction for OUT.GKK file
-export class GKK {
+class GKK {
 public:
     GKKMetadata meta;                             // metadata
 

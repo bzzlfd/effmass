@@ -6,13 +6,19 @@ export module io.lattice;
 import std;
 
 
-export enum class LengthUnit {
+export {
+    class Lattice;
+        enum class LengthUnit : int;
+}
+
+
+enum class LengthUnit {
     Bohr,
     Angstrom,
 };
 
 
-export class Lattice {
+class Lattice {
 public:
     Lattice() = default;
     explicit Lattice(const std::array<std::array<double, 3>, 3>& A, LengthUnit unit);

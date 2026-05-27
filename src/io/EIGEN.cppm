@@ -7,7 +7,14 @@ export module io.EIGEN;
 import std;
 
 
-export struct EIGENMetadata {
+export {
+    class EIGEN;
+        struct EIGENMetadata;
+        struct kVec;
+}
+
+
+struct EIGENMetadata {
     int islda;
     int nkpt;
     int nband;
@@ -18,120 +25,26 @@ export struct EIGENMetadata {
 };
 
 
-export struct KPointVec {
+struct kVec {
     double x{}, y{}, z{};
 
     auto operator[](int i) -> double& {
         if (i < 0 || i > 2) {
-            throw std::out_of_range("KPointVec index out of range");
+            throw std::out_of_range("kVec index out of range");
         }
         return i == 0 ? x : (i == 1 ? y : z);
     }
 
     auto operator[](int i) const -> double {
         if (i < 0 || i > 2) {
-            throw std::out_of_range("KPointVec index out of range");
+            throw std::out_of_range("kVec index out of range");
         }
         return i == 0 ? x : (i == 1 ? y : z);
     }
 };
 
 
-export class Array3d {
-public:
-    Array3d() = default;
-    Array3d(int nband, int nkpt, int islda)
-        : nband_(nband)
-        , nkpt_(nkpt)
-        , islda_(islda)
-        , data_(static_cast<std::size_t>(nband) * nkpt * islda)
-    {}
-
-    auto dims() const -> std::array<int, 3> {
-        return {nband_, nkpt_, islda_};
-    }
-
-    auto empty() const -> bool { return data_.empty(); }
-    auto size() const -> std::size_t { return data_.size(); }
-    auto data() -> double* { return data_.data(); }
-    auto data() const -> const double* { return data_.data(); }
-
-    // ======================================================================== 
-    // implement of eigenvalue[iband, ikpt, ispin] (when ISPIN=1,2)
-    // ======================================================================== 
-    auto operator[](int iband, int ikpt, int ispin) -> double& {
-        return data_[index(iband, ikpt, ispin)];
-    }
-    auto operator[](int iband, int ikpt, int ispin) const -> double {
-        return data_[index(iband, ikpt, ispin)];
-    }
-
-    // implement of eigenvalue[iband][ikpt] (when ISPIN=1)
-    auto operator[](int iband, int ikpt) -> double& {
-        if (islda_ != 1) {
-            throw std::runtime_error(
-                "Array3d: islda=" + std::to_string(islda_) + " != 1, use [iband, ikpt, ispin]"
-            );
-        }
-        return data_[index(iband, ikpt, 0)];
-    }
-    auto operator[](int iband, int ikpt) const -> double {
-        if (islda_ != 1) {
-            throw std::runtime_error(
-                "Array3d: islda=" + std::to_string(islda_) + " != 1, use [iband, ikpt, ispin]"
-            );
-        }
-        return data_[index(iband, ikpt, 0)];
-    }
-
-    // ======================================================================== 
-    // implement of Array3d[ispin][ikpt][iband] access via proxy classes
-    // ======================================================================== 
-    class Slice2d {
-    public:
-        Slice2d(double* d, int nband, int nkpt)
-            : d_(d), nband_(nband), nkpt_(nkpt) {}
-        auto operator[](int ikpt) -> std::span<double> {
-            return {d_ + ikpt * nband_, static_cast<std::size_t>(nband_)};
-        }
-    private:
-        double* d_;
-        int nband_, nkpt_;
-    };
-
-    class ConstSlice2d {
-    public:
-        ConstSlice2d(const double* d, int nband, int nkpt)
-            : d_(d), nband_(nband), nkpt_(nkpt) {}
-        auto operator[](int ikpt) -> std::span<const double> {
-            return {d_ + ikpt * nband_, static_cast<std::size_t>(nband_)};
-        }
-    private:
-        const double* d_;
-        int nband_, nkpt_;
-    };
-
-    auto operator[](int ispin) -> Slice2d {
-        return {data_.data() + ispin * nkpt_ * nband_, nband_, nkpt_};
-    }
-
-    auto operator[](int ispin) const -> ConstSlice2d {
-        return {data_.data() + ispin * nkpt_ * nband_, nband_, nkpt_};
-    }
-
-private:
-    auto index(int iband, int ikpt, int ispin) const -> std::size_t {
-        return static_cast<std::size_t>(ispin) * nkpt_ * nband_
-             + static_cast<std::size_t>(ikpt) * nband_
-             + static_cast<std::size_t>(iband);
-    }
-
-    int nband_ = 0, nkpt_ = 0, islda_ = 0;
-    std::vector<double> data_;
-};
-
-
-export class EIGEN {
+class EIGEN {
 public:
     explicit EIGEN(const std::string& filename)
         : meta{}
@@ -146,7 +59,7 @@ public:
 
         kpt_weight.resize(meta.nkpt);
         kpt_vec.resize(meta.nkpt);
-        eigenvalue = Array3d(meta.nband, meta.nkpt, meta.islda);
+        eigenvalue_data_.resize(static_cast<std::size_t>(meta.nband) * meta.nkpt * meta.islda);
 
         readData();
     }
@@ -164,7 +77,7 @@ public:
         : meta(std::move(other.meta))
         , kpt_weight(std::move(other.kpt_weight))
         , kpt_vec(std::move(other.kpt_vec))
-        , eigenvalue(std::move(other.eigenvalue))
+        , eigenvalue_data_(std::move(other.eigenvalue_data_))
         , fp_(other.fp_)
     {
         other.fp_ = nullptr;
@@ -176,11 +89,35 @@ public:
             meta = std::move(other.meta);
             kpt_weight = std::move(other.kpt_weight);
             kpt_vec = std::move(other.kpt_vec);
-            eigenvalue = std::move(other.eigenvalue);
+            eigenvalue_data_ = std::move(other.eigenvalue_data_);
             fp_ = other.fp_;
             other.fp_ = nullptr;
         }
         return *this;
+    }
+
+    auto operator[](int iband, int ikpt) -> double& {
+        if (meta.islda != 1) {
+            throw std::runtime_error(
+                "EIGEN: islda=" + std::to_string(meta.islda) + " != 1, use [iband, ikpt, ispin]"
+            );
+        }
+        return eigenvalue_data_[eigIndex(iband, ikpt, 0)];
+    }
+    auto operator[](int iband, int ikpt) const -> double {
+        if (meta.islda != 1) {
+            throw std::runtime_error(
+                "EIGEN: islda=" + std::to_string(meta.islda) + " != 1, use [iband, ikpt, ispin]"
+            );
+        }
+        return eigenvalue_data_[eigIndex(iband, ikpt, 0)];
+    }
+
+    auto operator[](int iband, int ikpt, int ispin) -> double& {
+        return eigenvalue_data_[eigIndex(iband, ikpt, ispin)];
+    }
+    auto operator[](int iband, int ikpt, int ispin) const -> double {
+        return eigenvalue_data_[eigIndex(iband, ikpt, ispin)];
     }
 
     auto print_info() const -> void {
@@ -201,14 +138,10 @@ public:
 
     EIGENMetadata meta;
     std::vector<double> kpt_weight;
-    std::vector<KPointVec> kpt_vec;
-    Array3d eigenvalue;
+    std::vector<kVec> kpt_vec;
 
 private:
     // Fortran record layout (sequential, no padding): int, int, double x4
-    // C++ layout: int(4) + int(4) + double(8) + double(8) + double(8) + double(8) = 40 bytes
-    // No padding: all ints precede the first double, maintaining natural 8-byte alignment.
-    // sizeof(KptRecord) == 2*sizeof(int) + 4*sizeof(double) verified by static_assert below.
     struct KptRecord {
         int islda_tmp;
         int ikpt_tmp;
@@ -219,6 +152,12 @@ private:
     };
     static_assert(sizeof(KptRecord) == 2 * sizeof(int) + 4 * sizeof(double),
                   "KptRecord layout mismatch");
+
+    auto eigIndex(int iband, int ikpt, int ispin) const -> std::size_t {
+        return static_cast<std::size_t>(ispin) * meta.nkpt * meta.nband
+             + static_cast<std::size_t>(ikpt) * meta.nband
+             + static_cast<std::size_t>(iband);
+    }
 
     auto readRecordLength() -> int {
         int length;
@@ -315,7 +254,7 @@ private:
                 kpt_weight[ikpt] = kpt_rec.weight;
                 kpt_vec[ikpt] = {kpt_rec.akx, kpt_rec.aky, kpt_rec.akz};
 
-                double* eig_slice = eigenvalue.data()
+                double* eig_slice = eigenvalue_data_.data()
                     + (static_cast<std::size_t>(ispin) * meta.nkpt + ikpt) * meta.nband;
                 readRecord(eig_slice, meta.nband * sizeof(double), "eigenvalues");
             }
@@ -323,4 +262,5 @@ private:
     }
 
     std::FILE* fp_ = nullptr;
+    std::vector<double> eigenvalue_data_;
 };

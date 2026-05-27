@@ -52,6 +52,7 @@ target_sources(math
             src/math/sph_bessel.cppm
             src/math/sph_harmonics.cppm
             src/math/fft.cppm
+            src/math/fourier_bessel.cppm
     PRIVATE
         vendor/pocketfft/pocketfft.c
 )

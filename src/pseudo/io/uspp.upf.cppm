@@ -6,8 +6,14 @@ export module pseudo.io.uspp_upf;
 import std;
 
 
+export {
+    class USPPUPF;
+        struct USPPUPFHeader;
+}
+
+
 // === USPPUPF Header structure (placeholder) ===
-export struct USPPUPFHeader {
+struct USPPUPFHeader {
     std::string element;
     int z_valence = 0;
     int mesh_size = 0;
@@ -19,7 +25,7 @@ export struct USPPUPFHeader {
 
 
 // === USPPUPF class (not yet implemented) ===
-export class USPPUPF {
+class USPPUPF {
 public:
     explicit USPPUPF(const std::string& filename);
 

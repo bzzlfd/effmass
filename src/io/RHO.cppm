@@ -8,14 +8,20 @@ import io.lattice;
 import std;
 
 
-export struct RHOMetadata {
+export {
+    class RHO;
+        struct RHOMetadata;
+}
+
+
+struct RHOMetadata {
     int n1, n2, n3;
     int nnodes;
     int nstate;
 };
 
 
-export class RHO {
+class RHO {
 public:
     explicit RHO(const std::string& filename)
         : fp_(nullptr)

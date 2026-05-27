@@ -6,8 +6,14 @@ export module pseudo.io.paw_upf;
 import std;
 
 
+export {
+    class PAWUPF;
+        struct PAWUPFHeader;
+}
+
+
 // === PAWUPF Header structure (placeholder) ===
-export struct PAWUPFHeader {
+struct PAWUPFHeader {
     std::string element;
     int z_valence = 0;
     int mesh_size = 0;
@@ -19,7 +25,7 @@ export struct PAWUPFHeader {
 
 
 // === PAWUPF class (not yet implemented) ===
-export class PAWUPF {
+class PAWUPF {
 public:
     explicit PAWUPF(const std::string& filename);
 

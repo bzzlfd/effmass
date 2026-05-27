@@ -6,6 +6,17 @@ export module pseudo.io.ncpp_upf;
 import std;
 
 
+export {
+    class NCPPUPF;
+        struct NCPPUPFHeader;
+        struct NCPPUPFMesh;
+            enum class MeshType : int;
+        struct NCPPUPFNonlocal;
+            struct NCPPUPFNonlocalByL;
+        struct NCPPUPFWavefunction;
+}
+
+
 // === Simple dense matrix (flat storage) ===
 struct Matrix {
     std::vector<double> data;
@@ -25,7 +36,7 @@ struct Matrix {
 
 
 // === NCPPUPF Header structure ===
-export struct NCPPUPFHeader {
+struct NCPPUPFHeader {
     std::string generated;
     std::string author;
     std::string date;
@@ -54,14 +65,14 @@ export struct NCPPUPFHeader {
 
 
 // === Mesh data ===
-export struct NCPPUPFMesh {
+struct NCPPUPFMesh {
     std::vector<double> r;
     std::vector<double> rab;
 };
 
 
 // === Nonlocal data (beta projectors + D_ij) ===
-export struct NCPPUPFNonlocal {
+struct NCPPUPFNonlocal {
     std::vector<std::vector<double>> beta;  // [nbeta][mesh]
     std::vector<int> lll;                    // [nbeta] angular momentum
     std::vector<int> kbeta;                  // [nbeta] cutoff radius index
@@ -71,7 +82,7 @@ export struct NCPPUPFNonlocal {
 
 
 // === Mesh type enumeration ===
-export enum class MeshType {
+enum class MeshType {
     Uniform,
     Exponential,
     Unknown
@@ -79,14 +90,14 @@ export enum class MeshType {
 
 
 // === Nonlocal data filtered by angular momentum l ===
-export struct NCPPUPFNonlocalByL {
+struct NCPPUPFNonlocalByL {
     std::vector<std::vector<double>> beta;  // [n_beta_l][mesh]
     Matrix dion;                             // D_ij submatrix for this l
 };
 
 
 // === Wavefunction data (pseudo atomic orbitals) ===
-export struct NCPPUPFWavefunction {
+struct NCPPUPFWavefunction {
     std::vector<std::vector<double>> chi;   // [nwfc][effective_mesh]
     std::vector<int> kchi;                   // [nwfc] effective length (truncated trailing zeros)
     std::vector<int> lchi;                   // [nwfc] angular momentum
@@ -96,7 +107,7 @@ export struct NCPPUPFWavefunction {
 
 
 // === NCPPUPF class ===
-export class NCPPUPF {
+class NCPPUPF {
 public:
     explicit NCPPUPF(const std::string& filename);
 

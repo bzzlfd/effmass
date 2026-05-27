@@ -1,6 +1,7 @@
 import std;
 import math;
 
+
 auto check(bool cond, std::string_view msg) -> void {
     if (!cond) {
         throw std::runtime_error(std::string("FAILED: ") + std::string(msg));
@@ -21,30 +22,90 @@ auto test_spherical_bessel() -> void {
 
     double eps = 1e-12;
 
+    // SphericalBesselJ computes j_l(q * r_i). Use r={1} so x_i = q.
+    double r_one = 1.0;
+    auto r1 = std::span<const double>(&r_one, 1);
+
     // j_0(x) = sin(x)/x
-    check(near(sphericalBesselJ(0, 0.0), 1.0, 1e-10), "j_0(0) = 1");
-    check(near(sphericalBesselJ(0, 1.0), std::sin(1.0)), "j_0(1) = sin(1)");
-    check(near(sphericalBesselJ(0, std::numbers::pi / 2), std::sin(std::numbers::pi / 2) / (std::numbers::pi / 2)),
-          "j_0(pi/2) = sin(pi/2)/(pi/2)");
+    {
+        SphericalBesselJ bj{r1, 0.0};
+        check(near(bj.value()[0], 1.0, 1e-10), "j_0(0) = 1");
+    }
+    {
+        SphericalBesselJ bj{r1, 1.0};
+        check(near(bj.value()[0], std::sin(1.0)), "j_0(1) = sin(1)");
+    }
+    {
+        double x = std::numbers::pi / 2;
+        SphericalBesselJ bj{r1, x};
+        check(near(bj.value()[0], std::sin(x) / x), "j_0(pi/2) = sin(pi/2)/(pi/2)");
+    }
 
     // j_1(x) = sin(x)/x^2 - cos(x)/x
-    double x = 2.0;
-    double j1_expected = std::sin(x) / (x * x) - std::cos(x) / x;
-    check(near(sphericalBesselJ(1, x), j1_expected, eps), "j_1(2) analytic");
+    {
+        double x = 2.0;
+        SphericalBesselJ bj{r1, x};
+        bj.advance(1);
+        double j1_expected = std::sin(x) / (x * x) - std::cos(x) / x;
+        check(near(bj.value()[0], j1_expected, eps), "j_1(2) analytic");
+    }
 
     // j_2(x) via recurrence
-    double j0 = sphericalBesselJ(0, x);
-    double j1 = sphericalBesselJ(1, x);
-    double j2 = sphericalBesselJ(2, x);
-    check(near(j2, 3.0 / x * j1 - j0, eps), "j_2(2) recurrence relation");
+    {
+        double x = 2.0;
+        SphericalBesselJ bj{r1, x};
+        double j0 = bj.value()[0];
+        bj.advance(1);
+        double j1 = bj.value()[0];
+        bj.advance(1);
+        double j2 = bj.value()[0];
+        check(near(j2, 3.0 / x * j1 - j0, eps), "j_2(2) recurrence relation");
+    }
 
     // Small x series
-    check(near(sphericalBesselJ(0, 0.01), std::sin(0.01) / 0.01, eps), "j_0(small x) series");
-    double j3_small = sphericalBesselJ(3, 0.001);
-    double j3_expected = std::pow(0.001, 3) / 105.0;
-    check(near(j3_small, j3_expected, 1e-18), "j_3(0.001) = x^3/105");
+    {
+        SphericalBesselJ bj{r1, 0.01};
+        check(near(bj.value()[0], std::sin(0.01) / 0.01, eps), "j_0(small x) series");
+    }
+    {
+        SphericalBesselJ bj{r1, 0.001};
+        bj.advance(3);
+        double j3_expected = std::pow(0.001, 3) / 105.0;
+        check(near(bj.value()[0], j3_expected, 1e-18), "j_3(0.001) = x^3/105");
+    }
 }
 
+auto test_spherical_bessel_negative() -> void {
+    std::println("\n=== Spherical Bessel (negative x) ===");
+
+    double eps = 1e-12;
+    double x = 1.5;
+    double r_one = 1.0;
+    auto r1 = std::span<const double>(&r_one, 1);
+
+    // Even l: j_l(-x) = j_l(x)
+    {
+        SphericalBesselJ bj_pos{r1, x};
+        SphericalBesselJ bj_neg{r1, -x};
+        check(near(bj_neg.value()[0], bj_pos.value()[0], eps), "j_0 even");
+        bj_pos.advance(2); bj_neg.advance(2);
+        check(near(bj_neg.value()[0], bj_pos.value()[0], eps), "j_2 even");
+        bj_pos.advance(2); bj_neg.advance(2);
+        check(near(bj_neg.value()[0], bj_pos.value()[0], eps), "j_4 even");
+    }
+
+    // Odd l: j_l(-x) = -j_l(x)
+    {
+        SphericalBesselJ bj_pos{r1, x};
+        SphericalBesselJ bj_neg{r1, -x};
+        bj_pos.advance(1); bj_neg.advance(1);
+        check(near(bj_neg.value()[0], -bj_pos.value()[0], eps), "j_1 odd");
+        bj_pos.advance(2); bj_neg.advance(2);
+        check(near(bj_neg.value()[0], -bj_pos.value()[0], eps), "j_3 odd");
+        bj_pos.advance(2); bj_neg.advance(2);
+        check(near(bj_neg.value()[0], -bj_pos.value()[0], eps), "j_5 odd");
+    }
+}
 
 auto test_spherical_harmonics() -> void {
     std::println("\n=== Real Spherical Harmonics ===");
@@ -52,27 +113,72 @@ auto test_spherical_harmonics() -> void {
     double eps = 1e-12;
 
     // Y_{00} = 1/(2*sqrt(pi))
-    check(near(realSphericalHarmonic(0, 0, 0.0, 0.0), 1.0 / (2.0 * std::sqrt(std::numbers::pi)), eps),
-          "Y_00 constant");
+    {
+        double theta = 0.0, phi = 0.0;
+        SphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1)};
+        auto y00 = sh(0, 0);
+        check(near(y00[0], 1.0 / (2.0 * std::sqrt(std::numbers::pi)), eps), "Y_00 constant");
+    }
 
     // Y_{10}(theta) = sqrt(3/(4pi)) * cos(theta)
-    double theta0 = 0.5;
-    double y10 = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::cos(theta0);
-    check(near(realSphericalHarmonic(1, 0, theta0, 0.0), y10, eps), "Y_10(theta)");
+    {
+        double theta0 = 0.5, phi0 = 0.0;
+        SphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1)};
+        auto y10 = sh(1, 0);
+        double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::cos(theta0);
+        check(near(y10[0], expected, eps), "Y_10(theta)");
+    }
 
     // Y_{1,1} = sqrt(3/(4pi)) * sin(theta) * cos(phi)
-    double phi0 = 0.3;
-    double y11 = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::cos(phi0);
-    check(near(realSphericalHarmonic(1, 1, theta0, phi0), y11, eps), "Y_11(theta,phi)");
+    {
+        double theta0 = 0.5, phi0 = 0.3;
+        SphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1)};
+        auto y11 = sh(1, 1);
+        double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::cos(phi0);
+        check(near(y11[0], expected, eps), "Y_11(theta,phi)");
+    }
 
     // Y_{1,-1} = sqrt(3/(4pi)) * sin(theta) * sin(phi)
-    double y1m1 = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::sin(phi0);
-    check(near(realSphericalHarmonic(1, -1, theta0, phi0), y1m1, eps), "Y_1,-1(theta,phi)");
+    {
+        double theta0 = 0.5, phi0 = 0.3;
+        SphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1)};
+        auto y1m1 = sh(1, -1);
+        double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::sin(phi0);
+        check(near(y1m1[0], expected, eps), "Y_1,-1(theta,phi)");
+    }
 
     // m > l should return 0
-    check(near(realSphericalHarmonic(2, 3, 0.5, 0.3), 0.0, eps), "Y_{2,3} = 0 (|m| > l)");
+    {
+        double theta0 = 0.5, phi0 = 0.3;
+        SphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1)};
+        try {
+            auto y23 = sh(2, 3);  // throws: |m| > l
+            check(false, "Y_{2,3} should have thrown");
+        } catch (const std::invalid_argument&) {
+            check(true, "Y_{2,3} throws (|m| > l)");
+        }
+    }
 }
 
+auto test_spherical_harmonics_batch() -> void {
+    std::println("\n=== Real Spherical Harmonics (batch) ===");
+
+    double eps = 1e-12;
+    double theta = 0.7;
+    double phi = 0.3;
+    int l_max = 4;
+    int n = (l_max + 1) * (l_max + 1);
+
+    SphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1)};
+
+    for (int l = 0; l <= l_max; ++l) {
+        for (int m = -l; m <= l; ++m) {
+            auto y_lm = sh(l, m);
+            // just verify it returns the right size
+            check(y_lm.size() == 1, std::format("batch Y_{{{},{}}} size", l, m));
+        }
+    }
+}
 
 auto test_fft1d() -> void {
     std::println("\n=== 1D FFT ===");
@@ -148,7 +254,6 @@ auto test_fft1d() -> void {
     }
 }
 
-
 auto test_fft3d() -> void {
     std::println("\n=== 3D FFT ===");
 
@@ -181,14 +286,56 @@ auto test_fft3d() -> void {
     }
 }
 
+auto test_beta_q_interpolator() -> void {
+    std::println("\n=== Beta(q) Interpolator ===");
+
+    // Gaussian-like beta(r) = exp(-r^2)
+    int n = 401;
+    double dr = 0.02;
+    std::vector<double> r(n);
+    std::vector<double> rab(n, dr);
+    std::vector<double> beta(n);
+    for (int i = 0; i < n; ++i) {
+        r[i] = i * dr;
+        beta[i] = std::exp(-r[i] * r[i]);
+    }
+
+    double dq = 0.01;
+    double q_max = 10.0;
+
+    // l=0 interpolator
+    BetaQInterpolator interp0(r, rab, beta, 0, dq, q_max, RadialMeshType::Uniform);
+    // Spot check: near a known value (integral of Gaussian-like function)
+    double val0 = interp0(0.0);
+    check(val0 > 0.0, "beta(0) > 0 for Gaussian-like l=0");
+
+    double val1 = interp0(1.0);
+    double val2 = interp0(2.0);
+    check(val2 < val1, "beta(q) decreasing for l=0");
+
+    // Derivative at q=0 should be 0 for even l
+    check(near(interp0.derivative(0.0), 0.0, 1e-12), "d(beta)/dq = 0 at q=0 for l=0");
+
+    // l=1 interpolator
+    BetaQInterpolator interp1(r, rab, beta, 1, dq, q_max, RadialMeshType::Uniform);
+    check(near(interp1(0.0), 0.0, 1e-14), "beta(0) = 0 for l=1 (j_1(0)=0)");
+
+    // Table properties
+    check(interp0.step() == dq, "step check");
+    check(interp0.maxQ() == q_max, "q_max check");
+    check(interp0.angularMomentum() == 0, "l check");
+}
 
 auto main() -> int {
     try {
         std::println("=== Math Module Tests ===");
         test_spherical_bessel();
+        test_spherical_bessel_negative();
         test_spherical_harmonics();
+        test_spherical_harmonics_batch();
         test_fft1d();
         test_fft3d();
+        test_beta_q_interpolator();
         std::println("\nAll tests passed!");
         return 0;
     } catch (const std::exception& e) {

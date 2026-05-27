@@ -54,7 +54,7 @@ auto main() -> int {
             throw std::runtime_error("kpt_vec[9].z mismatch");
         }
 
-        // KPointVec operator[] access
+        // kVec operator[] access
         if (std::abs(eig.kpt_vec[0][0] - 0.0) > 1e-15) {
             throw std::runtime_error("kpt_vec[0][0] mismatch");
         }
@@ -87,50 +87,40 @@ auto main() -> int {
             throw std::runtime_error("sum(kpt_weight) mismatch: expected 1.0, got " + std::to_string(sum_weight));
         }
 
-        // Eigenvalue shape
-        auto dims = eig.eigenvalue.dims();
-        if (dims[0] != 26 || dims[1] != 10 || dims[2] != 1) {
+        // Eigenvalue shape via metadata
+        if (m.nband != 26 || m.nkpt != 10 || m.islda != 1) {
             throw std::runtime_error(
                 "eigenvalue dims mismatch: got (" +
-                std::to_string(dims[0]) + ", " + std::to_string(dims[1]) + ", " + std::to_string(dims[2]) + ")"
+                std::to_string(m.nband) + ", " + std::to_string(m.nkpt) + ", " + std::to_string(m.islda) + ")"
             );
         }
 
         // Eigenvalue values: [iband, ikpt] 2-arg access (islda == 1)
-        if (std::abs(eig.eigenvalue[0, 0] - (-103.8315071578049)) > 1e-10) {
-            throw std::runtime_error("eigenvalue[0, 0] mismatch");
+        if (std::abs(eig[0, 0] - (-103.8315071578049)) > 1e-10) {
+            throw std::runtime_error("eig[0, 0] mismatch");
         }
-        if (std::abs(eig.eigenvalue[1, 0] - (-103.8242383349260)) > 1e-10) {
-            throw std::runtime_error("eigenvalue[1, 0] mismatch");
+        if (std::abs(eig[1, 0] - (-103.8242383349260)) > 1e-10) {
+            throw std::runtime_error("eig[1, 0] mismatch");
         }
-        if (std::abs(eig.eigenvalue[2, 0] - (-30.16721646660804)) > 1e-10) {
-            throw std::runtime_error("eigenvalue[2, 0] mismatch");
+        if (std::abs(eig[2, 0] - (-30.16721646660804)) > 1e-10) {
+            throw std::runtime_error("eig[2, 0] mismatch");
         }
-        if (std::abs(eig.eigenvalue[23, 9] - 22.83226372800616) > 1e-10) {
-            throw std::runtime_error("eigenvalue[23, 9] mismatch");
+        if (std::abs(eig[23, 9] - 22.83226372800616) > 1e-10) {
+            throw std::runtime_error("eig[23, 9] mismatch");
         }
-        if (std::abs(eig.eigenvalue[24, 9] - 23.41453607942439) > 1e-10) {
-            throw std::runtime_error("eigenvalue[24, 9] mismatch");
+        if (std::abs(eig[24, 9] - 23.41453607942439) > 1e-10) {
+            throw std::runtime_error("eig[24, 9] mismatch");
         }
-        if (std::abs(eig.eigenvalue[25, 9] - 23.41453901951371) > 1e-10) {
-            throw std::runtime_error("eigenvalue[25, 9] mismatch");
+        if (std::abs(eig[25, 9] - 23.41453901951371) > 1e-10) {
+            throw std::runtime_error("eig[25, 9] mismatch");
         }
 
         // 3-arg access [iband, ikpt, ispin]
-        if (std::abs(eig.eigenvalue[0, 0, 0] - (-103.8315071578049)) > 1e-10) {
-            throw std::runtime_error("eigenvalue[0, 0, 0] mismatch");
+        if (std::abs(eig[0, 0, 0] - (-103.8315071578049)) > 1e-10) {
+            throw std::runtime_error("eig[0, 0, 0] mismatch");
         }
-        if (std::abs(eig.eigenvalue[25, 9, 0] - 23.41453901951371) > 1e-10) {
-            throw std::runtime_error("eigenvalue[25, 9, 0] mismatch");
-        }
-
-        // Chain access [ispin][ikpt][iband]
-        auto e_slice = eig.eigenvalue[0];
-        if (e_slice[0][0] != eig.eigenvalue[0, 0]) {
-            throw std::runtime_error("eigenvalue[0][0][0] mismatch via chain access");
-        }
-        if (e_slice[9][25] != eig.eigenvalue[25, 9]) {
-            throw std::runtime_error("eigenvalue[0][9][25] mismatch via chain access");
+        if (std::abs(eig[25, 9, 0] - 23.41453901951371) > 1e-10) {
+            throw std::runtime_error("eig[25, 9, 0] mismatch");
         }
 
         // print_info should not throw

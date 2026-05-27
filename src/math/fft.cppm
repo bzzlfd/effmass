@@ -7,8 +7,11 @@ export module math.fft;
 import std;
 
 
-export constexpr bool R2G = true;
-export constexpr bool G2R = false;
+export {
+    constexpr bool R2G = true;
+    constexpr bool G2R = false;
+    class FFT3D;
+}
 
 class FFT1D {
 public:
@@ -41,7 +44,7 @@ private:
 };
 
 
-export class FFT3D {
+class FFT3D {
 public:
     FFT3D(int n1, int n2, int n3)
         : scratch_(static_cast<std::size_t>(std::max({n1, n2, n3}))),

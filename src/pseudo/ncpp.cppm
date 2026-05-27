@@ -3,8 +3,12 @@ export module pseudo.ncpp;
 import std;
 import pseudo.io.ncpp_upf;
 
+export {
+    class NCPP;
+}
 
-export class NCPP {
+
+class NCPP {
 public:
     explicit NCPP(const NCPPUPF& upf);
 

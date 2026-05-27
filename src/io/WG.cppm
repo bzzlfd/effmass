@@ -8,8 +8,15 @@ import io.lattice;
 import std;
 
 
+export {
+    class WG;
+        struct WGMetadata;
+        struct WGCoeffs;
+}
+
+
 // WG file metadata structure
-export struct WGMetadata {
+struct WGMetadata {
     int n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda;  // FFT grid / bands / record length / node / k-point / spin
     double Ecut;              // cutoff energy
     Lattice lattice;          // lattice vectors (Bohr) and reciprocal lattice (Bohr^-1)
@@ -18,14 +25,14 @@ export struct WGMetadata {
 
 
 // Wavefunction coefficient view for a single k-point and band
-export struct WGCoeffs {
+struct WGCoeffs {
     std::span<const std::complex<double>> up;     // spin-up component (always valid)
     std::span<const std::complex<double>> down;   // spin-down component (valid only when is_SO == 1)
 };
 
 
 // WG class - abstraction for OUT.WG file
-export class WG {
+class WG {
 public:
     WGMetadata meta;                              // metadata
 

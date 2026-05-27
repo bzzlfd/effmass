@@ -139,3 +139,91 @@ private:
 
     std::FILE* fp_;
 ```
+
+## 导出组织规范
+
+所有被导出的名称统一放在文件开头的一个 `export { }` 块中（位于 `import` 声明之后），以便一眼看清模块的公共 API。
+
+```cpp
+export module my.module;
+
+import std;
+
+export {
+    struct PublicType { ... };
+    enum class PublicEnum { ... };
+    class PublicClass { ... };
+    class PublicClass2;
+    auto publicFunction() -> void;
+    using Alias = ExistingType;
+}
+
+// 实现细节不加 export 关键字，放在 export 块之后
+auto publicFunction() -> void { ... }
+PublicClass::PublicClass() { ... }
+
+class PublicClass2 {
+public: 
+    ...
+private: 
+    ...
+}
+
+```
+
+- **导出的类型/函数**：放入 `export { }` 块。
+- **普通实现细节**（辅助函数、常量、内部类型）：不加 `export` 关键字，放在 `export` 块之后。
+- **缩进体现层次**：`export { }` 块内部通过缩进表达类型之间的从属关系——主类型顶格，其拥有的子类型缩进一级，子类型的子类型再缩进一级。
+- **namespace**: 一种额外的隔离方式
+    - **`namespace archived`**：仅为展示另一种可能的实现方案，保留以备参考。
+    - **`namespace deprecated`**：已弃用的代码，保留以兼容旧版或过渡期使用。
+
+### 缩进示例
+
+```cpp
+export {
+    class NCPPUPF;
+        struct NCPPUPFHeader;
+        struct NCPPUPFMesh;
+            enum class MeshType : int;
+        struct NCPPUPFNonlocal;
+            struct NCPPUPFNonlocalByL;
+        struct NCPPUPFWavefunction;
+}
+```
+
+### 示例
+
+```cpp
+module;
+
+export module math.sph_bessel;
+
+import std;
+
+// 普通实现细节，不加 export
+constexpr double BESSEL_EPS = 1e-15;
+
+auto sphericalBesselJImpl(int l, double x) -> double { ... }
+
+export {
+    auto sphericalBesselJ(int l, double x) -> double;
+    auto sphericalBesselJ(int l, std::span<const double> xs, std::span<double> out) -> void;
+    class SphericalBesselJ { ... };
+}
+
+
+auto sphericalBesselJ(int l, double x) -> double { ... }
+
+auto sphericalBesselJ(int l, std::span<const double> xs, std::span<double> out) -> void { ... }
+
+// 仅为参考的另一种实现
+namespace archived {
+    auto sphericalBesselJ_Taylor(int l, double x) -> double { ... }
+}
+
+// 已弃用的接口
+namespace deprecated {
+    auto oldBesselInterface(int l, double x) -> double;
+}
+```
