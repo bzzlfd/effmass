@@ -87,6 +87,7 @@ public:
     auto current_ikpt() const -> int { return current_ikpt_; }     // current k-point index
     auto currentData() const -> const KVecs& { return current_data_; }  // current data (filtered by currentView)
     auto inferCurrent_k() const -> std::array<double, 3>;  // infer k fractional coord from G-k data
+    auto validateKineticConsistency() const -> void;        // validate kinetic = 0.5*|K|^2 for loaded k-point
 
 private:
     auto readRecordLength() -> int;                     // read record length marker
@@ -635,4 +636,26 @@ auto GKK::inferCurrent_k() const -> std::array<double, 3> {
     }
 
     return k_frac;
+}
+
+
+auto GKK::validateKineticConsistency() const -> void {
+    const auto& data = current_data_;
+    const auto ng = data.kinetic.size();
+    constexpr double eps = 1e-10;
+
+    for (std::size_t i = 0; i < ng; ++i) {
+        const double kx = data.Kx[i];
+        const double ky = data.Ky[i];
+        const double kz = data.Kz[i];
+        const double expected = 0.5 * (kx * kx + ky * ky + kz * kz);
+        const double diff = data.kinetic[i] - expected;
+        if (diff > eps * (1.0 + expected) || diff < -eps * (1.0 + expected)) {
+            throw std::runtime_error(
+                "GKK kinetic-energy mismatch at k-point " + std::to_string(current_ikpt_) +
+                ", G-vector " + std::to_string(i) +
+                ": kinetic=" + std::to_string(data.kinetic[i]) +
+                " != 0.5*(Kx^2+Ky^2+Kz^2)=" + std::to_string(expected));
+        }
+    }
 }
