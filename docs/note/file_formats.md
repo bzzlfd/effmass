@@ -217,7 +217,7 @@ close(23)
    - `iislda_tmp` 应与外层循环 `iislda` 一致，`kpt_tmp` 应与 `kpt` 一致；不一致时报错
    - weighkpt_2 和 akx/aky/akz 按 kpt 索引（非自旋），后一个自旋覆盖前一个
 
-2. **本征值 record**：`mx` 个 double
+2. **本征值 record**：`mx` 个 double，**单位为 eV**
    - 总大小：`mx × sizeof(double)` 字节
    - 按列优先（Fortran column-major）存储：能带索引变化最快
 

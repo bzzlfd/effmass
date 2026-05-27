@@ -257,6 +257,9 @@ private:
                 double* eig_slice = eigenvalue_data_.data()
                     + (static_cast<std::size_t>(ispin) * meta.nkpt + ikpt) * meta.nband;
                 readRecord(eig_slice, meta.nband * sizeof(double), "eigenvalues");
+                for (int iband = 0; iband < meta.nband; ++iband) {
+                    eig_slice[iband] /= HARTREE_TO_EV;  // file stores eV → Hartree
+                }
             }
         }
     }

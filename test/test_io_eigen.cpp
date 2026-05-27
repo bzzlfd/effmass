@@ -1,5 +1,9 @@
-import io;
-import std;
+#include <cmath>
+#include <print>
+#include <string>
+#include <stdexcept>
+
+#include "../src/io/EIGEN.hpp"
 
 
 auto main() -> int {
@@ -96,30 +100,30 @@ auto main() -> int {
         }
 
         // Eigenvalue values: [iband, ikpt] 2-arg access (islda == 1)
-        if (std::abs(eig[0, 0] - (-103.8315071578049)) > 1e-10) {
+        if (std::abs(eig[0, 0] - (-3.815737508526)) > 1e-10) {
             throw std::runtime_error("eig[0, 0] mismatch");
         }
-        if (std::abs(eig[1, 0] - (-103.8242383349260)) > 1e-10) {
+        if (std::abs(eig[1, 0] - (-3.815470384212)) > 1e-10) {
             throw std::runtime_error("eig[1, 0] mismatch");
         }
-        if (std::abs(eig[2, 0] - (-30.16721646660804)) > 1e-10) {
+        if (std::abs(eig[2, 0] - (-1.108624757074)) > 1e-10) {
             throw std::runtime_error("eig[2, 0] mismatch");
         }
-        if (std::abs(eig[23, 9] - 22.83226372800616) > 1e-10) {
+        if (std::abs(eig[23, 9] - 0.839070215740) > 1e-10) {
             throw std::runtime_error("eig[23, 9] mismatch");
         }
-        if (std::abs(eig[24, 9] - 23.41453607942439) > 1e-10) {
+        if (std::abs(eig[24, 9] - 0.860468329976) > 1e-10) {
             throw std::runtime_error("eig[24, 9] mismatch");
         }
-        if (std::abs(eig[25, 9] - 23.41453901951371) > 1e-10) {
+        if (std::abs(eig[25, 9] - 0.860468438023) > 1e-10) {
             throw std::runtime_error("eig[25, 9] mismatch");
         }
 
         // 3-arg access [iband, ikpt, ispin]
-        if (std::abs(eig[0, 0, 0] - (-103.8315071578049)) > 1e-10) {
+        if (std::abs(eig[0, 0, 0] - (-3.815737508526)) > 1e-10) {
             throw std::runtime_error("eig[0, 0, 0] mismatch");
         }
-        if (std::abs(eig[25, 9, 0] - 23.41453901951371) > 1e-10) {
+        if (std::abs(eig[25, 9, 0] - 0.860468438023) > 1e-10) {
             throw std::runtime_error("eig[25, 9, 0] mismatch");
         }
 
@@ -129,7 +133,7 @@ auto main() -> int {
         std::println("All EIGEN tests passed!");
         return 0;
     } catch (const std::exception& e) {
-        std::println(std::cerr, "Test failed: {}", e.what());
+        std::println(stderr, "Test failed: {}", e.what());
         return 1;
     }
 }

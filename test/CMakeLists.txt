@@ -4,7 +4,6 @@ target_link_libraries(test_io_ncpp PRIVATE pseudo)
 add_test(NAME test_io_ncpp COMMAND test_io_ncpp WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_io_eigen test_io_eigen.cpp)
-target_link_libraries(test_io_eigen PRIVATE io)
 add_test(NAME test_io_eigen COMMAND test_io_eigen WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_io_rho test_io_rho.cpp)
