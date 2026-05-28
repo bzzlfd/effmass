@@ -321,3 +321,56 @@ data[state][i][j][k] = file_data[state][node][ii]
 - **nstate 字段**：早期版本的文件格式字段，表示数据文件中存储的"状态"数。实际使用中，当存在第二个自旋时，数据位于独立的 `OUT.RHO_2` 文件中（而非在同一文件中增加 state）。
 - 旧格式文件不含此字段（record 长度为 16 字节 = 4 ints），此时 `nstate = 1`。
 - 新格式文件含此字段（record 长度为 20 字节 = 5 ints）。
+
+## atom.config
+
+`atom.config` 文件以纯文本格式存储体系结构信息：原子数、晶格矢量、原子位置以及其它可选的卡片数据（如 FORCE、MAGNETIC 等）。
+
+该文件**不是** Fortran unformatted binary 格式，而是行式文本（ASCII），因此 C++ 读取时使用 `fopen("r")` + `fgets`，而非 `fread` + Fortran record 格式。
+
+### 文件结构
+
+```
+natom                   ← 第一行：原子数（整数）
+LATTICE                 ← 卡片关键词（可带前导/后导空格）
+  a1_x    a1_y    a1_z  ← 晶格矢量 1 (Å)
+  a2_x    a2_y    a2_z  ← 晶格矢量 2 (Å)
+  a3_x    a3_y    a3_z  ← 晶格矢量 3 (Å)
+POSITION                ← 卡片关键词
+  species  x      y      z     imove_x imove_y imove_z  ← natom 行
+  species  x      y      z     imove_x imove_y imove_z
+  ...
+FORCE                   ← 其它可选卡片（顺序自由）
+  ...
+MAGNETIC
+  ...
+```
+
+### 布局说明
+
+| 行 | 内容 | 说明 |
+|----|------|------|
+| 1 | `natom` | 整数，原子总数 |
+| 2+ | 卡片及其数据 | 按关键词分组。已知关键词：`LATTICE`、`POSITION`、`FORCE`、`MAGNETIC` 等。**卡片间顺序自由** |
+
+### 已知卡片
+
+| 卡片关键词 | 数据行数 | 说明 |
+|-----------|---------|------|
+| `LATTICE` | 3 行 | 三个晶格矢量，每行 3 个 double，单位为 **Å** |
+| `POSITION` | `natom` 行 | 每行：`species x y z imove_x imove_y imove_z`。其中 `x y z` 为**分数坐标**；`imove_*` 为 `1`/`0` 表示该方向是否可移动（读取时忽略）。|
+
+### C++ 读取说明
+
+`ATOM` 类（`io.ATOM` 模块）使用如下策略：
+
+1. `fgets` 读取首行 → `std::strtol` 解析 `natom`
+2. 卡片循环：逐行读取、**去除前后空格**、按关键词匹配
+   - 匹配 `LATTICE` → 读取接下来 3 行，解析为晶格矩阵 → `Lattice(A, LengthUnit::Angstrom)`
+   - 匹配 `POSITION` → 读取接下来 `natom` 行，每行用 `strtol`/`strtod` 链式解析 `species` 和分数坐标，跳过 `imove_*`
+   - 其它行（未知卡片或其数据）→ 静默跳过
+3. 卡片的顺序可以任意，解析器以关键词为驱动，不依赖固定顺序
+
+> **注意**：目前仅实现 `LATTICE` 和 `POSITION` 两个卡片。其它卡片（FORCE、MAGNETIC 等）及其数据会被静默跳过。
+>
+> **单位**：晶格矢量以 Å 为单位读入，立即通过 `Lattice(..., LengthUnit::Angstrom)` 转换为 Bohr（原子单位制）。分数坐标不涉及单位转换。

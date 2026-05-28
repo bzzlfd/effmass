@@ -6,13 +6,16 @@
 
 ```
 io (aggregate)
-├── io.GKK     →  src/io/GKK.cppm
-├── io.WG      →  src/io/WG.cppm
+├── io.ATOM    →  src/io/ATOM.cppm
 ├── io.EIGEN   →  src/io/EIGEN.cppm
-└── io.lattice →  src/io/lattice.cppm
+├── io.GKK     →  src/io/GKK.cppm
+├── io.lattice →  src/io/lattice.cppm
+├── io.RHO     →  src/io/RHO.cppm
+├── io.VR      →  src/io/VR.cppm
+└── io.WG      →  src/io/WG.cppm
 ```
 
-`io.cppm` 是聚合模块（aggregate module），通过 `export import io.GKK; export import io.WG; export import io.EIGEN; export import io.lattice;` 重新导出四个子模块的所有公开接口。外部代码只需 `import io;` 即可使用全部 IO 功能。
+`io.cppm` 是聚合模块（aggregate module），通过 `export import` 重新导出所有子模块的公开接口。外部代码只需 `import io;` 即可使用全部 IO 功能。
 
 ## 数据结构
 
@@ -450,3 +453,55 @@ idx = state × n1 × n2 × n3 + i × n2 × n3 + j × n3 + k
 ```cpp
 export using VR = RHO;
 ```
+
+## `ATOM` 类
+
+`ATOM` 类封装了对 `atom.config` 文本格式文件的读取操作。与其它 IO 类不同，`atom.config` 是**纯文本**（非 Fortran binary）格式，因此采用 `fopen("r")` + `fgets` 的行式解析方式，而非 `fread` + Fortran record 格式。
+
+关于文件格式定义，请参阅 [`note/file_formats.md`](../note/file_formats.md#atomconfig)。
+
+### `ATOM` 类
+
+```cpp
+export class ATOM {
+public:
+    explicit ATOM(const std::string& filename);
+    ~ATOM();
+
+    ATOM(const ATOM&) = delete;
+    auto operator=(const ATOM&) -> ATOM& = delete;
+    ATOM(ATOM&&) noexcept;
+    auto operator=(ATOM&&) noexcept -> ATOM&;
+
+    auto print_info() const -> void;
+
+    // 公有数据成员
+    int natom{};
+    Lattice lattice;               // 晶格，内部单位为 Bohr（由 LengthUnit::Angstrom 构造）
+    std::vector<int> species;      // 原子序数，索引 0..natom-1
+    std::vector<double> x, y, z;   // 分数坐标，索引 0..natom-1
+};
+```
+
+原子数据以四个独立的 vector 存储（`species`、`x`、`y`、`z`），而非聚合为 struct，保持数据扁平化。
+
+### 设计要点
+
+1. **文本解析**：与其它类的最大区别。使用 `fgets` 逐行读取，`strtol`/`strtod` 链式解析数值。第一行读 `natom`，然后进入卡片循环匹配关键词。
+
+2. **卡片循环（card-loop）**：文件以关键词为驱动，卡片（LATTICE、POSITION 等）可自由排列。解析器逐行去除前后空格，匹配已知关键词：
+   - `LATTICE` → 3 行晶格矢量，构造 `Lattice(A, LengthUnit::Angstrom)`
+   - `POSITION` → `natom` 行原子数据（忽略 `imove_*` 标志）
+   - 其它行 → 跳过
+
+3. **解析辅助函数**：共同的解析逻辑放在模块内匿名命名空间（anonymous namespace）的 `parseAtomConfigFile` 函数中。匿名命名空间保证符号不跨模块泄露，避免 ODR 冲突。主实现和 `archived` 实现均调用此函数。
+
+4. **文件句柄生命周期**：与 EIGEN/RHO 一致——构造时 `fopen`，析构时 `fclose`。支持移动语义。文件在构造中读取完毕后实际不再需要，但保持打开直到析构以统一模式。异常安全性：构造中若解析失败，`FILE*` 会泄漏（与其它类同），由析构函数覆盖正常路径。
+
+5. **`archived::SimpleATOM`（模块内部参考实现）**：文件末尾保留了一个不持 `FILE*` 的轻量版本（`namespace archived`，不导出），展示另一种设计思路：
+   - 构造中使用局部 `FILE*`，读取完毕立即 `fclose`
+   - Rule of zero：不需要自定义析构、移动、拷贝——类可平凡复制
+   - 代码结构与主实现共享同一 `parseAtomConfigFile` 解析函数
+   - 仅供内部参考，不构成公共 API
+
+6. **单位**：晶格矢量从 Å 读入，立即通过 `Lattice` 转换为 Bohr。分数坐标不涉及单位转换。

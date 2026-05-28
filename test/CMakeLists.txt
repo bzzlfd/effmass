@@ -3,6 +3,10 @@ add_executable(test-io-eigen io/test_eigen.cpp)
 target_link_libraries(test-io-eigen PRIVATE io)
 add_test(NAME test-io-eigen COMMAND test-io-eigen WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test-io-atom io/test_atom.cpp)
+target_link_libraries(test-io-atom PRIVATE io)
+add_test(NAME test-io-atom COMMAND test-io-atom WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test-io-rho io/test_rho.cpp)
 target_link_libraries(test-io-rho PRIVATE io)
 add_test(NAME test-io-rho COMMAND test-io-rho WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
