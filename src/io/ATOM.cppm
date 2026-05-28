@@ -28,6 +28,83 @@ public:
 
     auto print_info() const -> void;
 
+    // --- iteration views ---
+    struct TypeEntry { int z; int count; };
+    struct AtomEntry { int species; double x, y, z; };
+
+    class TypeView {
+        friend class ATOM;
+        const ATOM* a_;
+        explicit TypeView(const ATOM* a) : a_(a) {}
+    public:
+        class Iterator {
+            friend class TypeView;
+            const ATOM* a_;
+            int it_;
+            Iterator(const ATOM* a, int it) : a_(a), it_(it) {}
+        public:
+            auto operator*() const -> TypeEntry { return {a_->zval[it_], a_->type_count[it_]}; }
+            auto operator++() -> Iterator& { ++it_; return *this; }
+            bool operator!=(const Iterator& o) const { return it_ != o.it_; }
+        };
+        auto begin() const { return Iterator(a_, 0); }
+        auto end() const { return Iterator(a_, a_->ntyp); }
+    };
+
+    class AtomView {
+        friend class ATOM;
+        const ATOM* a_;
+        int start_;
+        int count_;
+        AtomView(const ATOM* a, int ityp) : a_(a) {
+            start_ = 0;
+            for (int t = 0; t < ityp; ++t) start_ += a->type_count[t];
+            count_ = a->type_count[ityp];
+        }
+    public:
+        class Iterator {
+            friend class AtomView;
+            const ATOM* a_;
+            int start_;
+            int k_;
+            Iterator(const ATOM* a, int start, int k) : a_(a), start_(start), k_(k) {}
+        public:
+            auto operator*() const -> AtomEntry {
+                int orig = a_->sorted_idx[start_ + k_];
+                return {a_->species[orig], a_->x[orig], a_->y[orig], a_->z[orig]};
+            }
+            auto operator++() -> Iterator& { ++k_; return *this; }
+            bool operator!=(const Iterator& o) const { return k_ != o.k_; }
+        };
+        auto begin() const { return Iterator(a_, start_, 0); }
+        auto end() const { return Iterator(a_, start_, count_); }
+    };
+
+    class SpecieView {
+        friend class ATOM;
+        const ATOM* a_;
+        explicit SpecieView(const ATOM* a) : a_(a) {}
+    public:
+        class Iterator {
+            friend class SpecieView;
+            const ATOM* a_;
+            int i_;
+            Iterator(const ATOM* a, int i) : a_(a), i_(i) {}
+        public:
+            auto operator*() const -> AtomEntry {
+                return {a_->species[i_], a_->x[i_], a_->y[i_], a_->z[i_]};
+            }
+            auto operator++() -> Iterator& { ++i_; return *this; }
+            bool operator!=(const Iterator& o) const { return i_ != o.i_; }
+        };
+        auto begin() const { return Iterator(a_, 0); }
+        auto end() const { return Iterator(a_, a_->natom); }
+    };
+
+    auto eachType() const -> TypeView { return TypeView(this); }
+    auto eachAtom(int ityp) const -> AtomView { return AtomView(this, ityp); }
+    auto eachSpecie() const -> SpecieView { return SpecieView(this); }
+
     // parsed data (as-read order, unsorted)
     int natom{};
     Lattice lattice;

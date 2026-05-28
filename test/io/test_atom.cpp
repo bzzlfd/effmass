@@ -113,6 +113,57 @@ auto main() -> int {
                          atom.sorted_idx[0], atom.sorted_idx[1],
                          atom.sorted_idx[2], atom.sorted_idx[3]);
 
+            // --- iteration views ---
+            {
+                // eachType: should yield [type0: Z=7 count=2, type1: Z=13 count=2] in order
+                int seen_types = 0;
+                for (auto&& t : atom.eachType()) {
+                    check(seen_types < 2, "eachType: too many iterations");
+                    if (seen_types == 0) {
+                        check(t.z == 7, "eachType[0]: z != 7");
+                        check(t.count == 2, "eachType[0]: count != 2");
+                    } else {
+                        check(t.z == 13, "eachType[1]: z != 13");
+                        check(t.count == 2, "eachType[1]: count != 2");
+                    }
+                    ++seen_types;
+                }
+                check(seen_types == 2, "eachType: expected 2 types");
+                std::println("  eachType [OK]");
+            }
+
+            {
+                // eachAtom(0) = type N (Z=7): 2 atoms
+                int count0 = 0;
+                for (auto&& a : atom.eachAtom(0)) {
+                    check(a.species == 7, std::format("eachAtom(0)[{}]: species != 7", count0));
+                    ++count0;
+                }
+                check(count0 == 2, "eachAtom(0): expected 2 atoms");
+
+                // eachAtom(1) = type Al (Z=13): 2 atoms
+                int count1 = 0;
+                for (auto&& a : atom.eachAtom(1)) {
+                    check(a.species == 13, std::format("eachAtom(1)[{}]: species != 13", count1));
+                    ++count1;
+                }
+                check(count1 == 2, "eachAtom(1): expected 2 atoms");
+                std::println("  eachAtom [OK]");
+            }
+
+            {
+                // eachSpecie: original order [13, 13, 7, 7]
+                int idx = 0;
+                int expected[] = {13, 13, 7, 7};
+                for (auto&& a : atom.eachSpecie()) {
+                    check(a.species == expected[idx],
+                          std::format("eachSpecie[{}]: species {} != expected {}", idx, a.species, expected[idx]));
+                    ++idx;
+                }
+                check(idx == 4, "eachSpecie: expected 4 atoms");
+                std::println("  eachSpecie [OK]");
+            }
+
             // sorted_idx is a valid permutation: each index 0..natom-1 appears exactly once
             {
                 std::vector<bool> seen(atom.natom, false);
@@ -144,6 +195,14 @@ auto main() -> int {
             check(atom.ntyp  == 0, "source ntyp not zeroed after move");
             check(atom.zval.empty(), "source zval not empty after move");
             std::println("  move semantics [OK]");
+
+            // moved-from iteration views are empty
+            {
+                int n = 0;
+                for (auto&& t : atom.eachType()) { ++n; (void)t; }
+                check(n == 0, "moved-from eachType should be empty");
+                std::println("  moved-from eachType empty [OK]");
+            }
 
             // --- print_info ---
             moved.print_info();
