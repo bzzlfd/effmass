@@ -13,8 +13,60 @@ static auto close(double a, double b, double eps = 1e-12) -> bool {
 }
 
 
+// --- element conversion tests ---
+
+static auto testElementConversion() -> void {
+    std::println("=== element name/number conversion ===");
+
+    // Z → name
+    check(ATOM::elementName(1)  == "H",   "Z=1 should be H");
+    check(ATOM::elementName(6)  == "C",   "Z=6 should be C");
+    check(ATOM::elementName(7)  == "N",   "Z=7 should be N");
+    check(ATOM::elementName(13) == "Al",  "Z=13 should be Al");
+    check(ATOM::elementName(79) == "Au",  "Z=79 should be Au");
+    check(ATOM::elementName(112) == "Cn", "Z=112 should be Cn");
+    std::println("  elementName [OK]");
+
+    // name → Z
+    check(ATOM::atomicNumber("H")  == 1,  "\"H\" → Z=1");
+    check(ATOM::atomicNumber("C")  == 6,  "\"C\" → Z=6");
+    check(ATOM::atomicNumber("N")  == 7,  "\"N\" → Z=7");
+    check(ATOM::atomicNumber("Al") == 13, "\"Al\" → Z=13");
+    check(ATOM::atomicNumber("Au") == 79, "\"Au\" → Z=79");
+    check(ATOM::atomicNumber("Cn") == 112,"\"Cn\" → Z=112");
+    std::println("  atomicNumber [OK]");
+
+    // round-trip
+    for (int z = 1; z <= 112; ++z) {
+        auto name = ATOM::elementName(z);
+        int z2 = ATOM::atomicNumber(name);
+        check(z == z2, std::format("round-trip failed for Z={}, name={}", z, name));
+    }
+    std::println("  round-trip Z→name→Z for 1..112 [OK]");
+
+    // out-of-range
+    bool caught_oor = false;
+    try { ATOM::elementName(0); } catch (const std::out_of_range&) { caught_oor = true; }
+    check(caught_oor, "elementName(0) should throw out_of_range");
+
+    caught_oor = false;
+    try { ATOM::elementName(113); } catch (const std::out_of_range&) { caught_oor = true; }
+    check(caught_oor, "elementName(113) should throw out_of_range");
+
+    std::println("  out-of-range [OK]");
+
+    // unknown symbol
+    bool caught_inv = false;
+    try { ATOM::atomicNumber("Zz"); } catch (const std::invalid_argument&) { caught_inv = true; }
+    check(caught_inv, "atomicNumber(\"Zz\") should throw invalid_argument");
+    std::println("  unknown symbol [OK]");
+}
+
+
 auto main() -> int {
     try {
+        testElementConversion();
+
         auto test = [](std::string_view label, const std::string& path) {
             std::println("=== {} ===", label);
             ATOM atom(path);

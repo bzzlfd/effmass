@@ -14,6 +14,10 @@ export {
 export class ATOM {
 public:
     explicit ATOM(const std::string& filename);
+
+    // element name ↔ atomic number conversion (Z = 1..112)
+    static auto elementName(int atomic_number) -> std::string_view;
+    static auto atomicNumber(std::string_view name) -> int;
     ~ATOM();
 
     ATOM(const ATOM&) = delete;
@@ -185,6 +189,51 @@ auto ATOM::analyzeSpecies() -> void {
     std::ranges::stable_sort(sorted_idx, [&](int a, int b) {
         return atom_type[a] < atom_type[b];
     });
+}
+
+
+// --- element symbols, Z = 1..112 (matching gen_element_name_number.f90) ---
+
+namespace {
+
+constexpr std::string_view element_symbols[] = {
+    "",   // index 0 unused; 1-based below
+    "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne",
+    "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca",
+    "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn",
+    "Ga", "Ge", "As", "Se", "Br", "Kr", "Rb", "Sr", "Y", "Zr",
+    "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "Sn",
+    "Sb", "Te", "I", "Xe", "Cs", "Ba", "La", "Ce", "Pr", "Nd",
+    "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb",
+    "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+    "Tl", "Pb", "Bi", "Po", "At", "Rn", "Fr", "Ra", "Ac", "Th",
+    "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm",
+    "Md", "No", "Lr", "Rf", "Db", "Sg", "Bh", "Hs", "Mt", "Ds",
+    "Rg", "Cn",
+};
+
+constexpr int max_element = static_cast<int>(std::size(element_symbols)) - 1;
+
+} // anonymous namespace
+
+
+auto ATOM::elementName(int atomic_number) -> std::string_view {
+    if (atomic_number < 1 || atomic_number > max_element) {
+        throw std::out_of_range(
+            "atomic number not between 1 and " + std::to_string(max_element)
+        );
+    }
+    return element_symbols[atomic_number];
+}
+
+
+auto ATOM::atomicNumber(std::string_view name) -> int {
+    for (int z = 1; z <= max_element; ++z) {
+        if (element_symbols[z] == name) return z;
+    }
+    throw std::invalid_argument(
+        "unknown element symbol: " + std::string(name)
+    );
 }
 
 
