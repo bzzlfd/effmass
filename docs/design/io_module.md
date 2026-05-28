@@ -475,15 +475,20 @@ public:
 
     auto print_info() const -> void;
 
-    // 公有数据成员
+    // parsed data (as-read order, unsorted)
     int natom{};
-    Lattice lattice;               // 晶格，内部单位为 Bohr（由 LengthUnit::Angstrom 构造）
-    std::vector<int> species;      // 原子序数，索引 0..natom-1
-    std::vector<double> x, y, z;   // 分数坐标，索引 0..natom-1
+    Lattice lattice;
+    std::vector<int> species;
+    std::vector<double> x, y, z;
+
+    // species analysis (computed during construction)
+    int ntyp{};
+    std::vector<int> zval;       // ntyp
+    std::vector<int> type_count; // ntyp
+    std::vector<int> atom_type;  // ntyp
+    std::vector<int> sorted_idx; // natom
 };
 ```
-
-原子数据以四个独立的 vector 存储（`species`、`x`、`y`、`z`），而非聚合为 struct，保持数据扁平化。
 
 ### 设计要点
 
@@ -496,12 +501,23 @@ public:
 
 3. **解析辅助函数**：共同的解析逻辑放在模块内匿名命名空间（anonymous namespace）的 `parseAtomConfigFile` 函数中。匿名命名空间保证符号不跨模块泄露，避免 ODR 冲突。主实现和 `archived` 实现均调用此函数。
 
-4. **文件句柄生命周期**：与 EIGEN/RHO 一致——构造时 `fopen`，析构时 `fclose`。支持移动语义。文件在构造中读取完毕后实际不再需要，但保持打开直到析构以统一模式。异常安全性：构造中若解析失败，`FILE*` 会泄漏（与其它类同），由析构函数覆盖正常路径。
+4. **species 分析**：构造中解析完成后调用 `analyzeSpecies()`，计算：
+   - `ntyp` / `zval[itype]` / `type_count[itype]`：去重排序后的 species 种类、原子序数、每类数量
+   - `atom_type[iatom]`：第 `ia` 个原子属于哪一类型（按 `zval` 的排序）
+   - `sorted_idx[new] = old`：将原子按类型分组的排列（`stable_sort`，同类型内保持原序）
+   
+   数据存储选型上，采用**分离的 vector**（`species`、`x`、`y`、`z`）而非 `vector<Atom>` 结构体数组。利弊：
+   - 分离 vector 允许调用方直接传递单个数组（如 `species.data()`），无需先拆包
+   - 只关心 species 时无需附带位置数据
+   - 排序需要额外维护一个排列数组（`sorted_idx`），不能直接对容器 `sort`
+   - 若改为结构体，排序更直接但失去扁平数组的灵活性。当前项目倾向于扁平数组风格。
 
-5. **`archived::SimpleATOM`（模块内部参考实现）**：文件末尾保留了一个不持 `FILE*` 的轻量版本（`namespace archived`，不导出），展示另一种设计思路：
+5. **文件句柄生命周期**：与 EIGEN/RHO 一致——构造时 `fopen`，析构时 `fclose`。支持移动语义。文件在构造中读取完毕后实际不再需要，但保持打开直到析构以统一模式。异常安全性：构造中若解析失败，`FILE*` 会泄漏（与其它类同），由析构函数覆盖正常路径。
+
+6. **`archived::SimpleATOM`（模块内部参考实现）**：文件末尾保留了一个不持 `FILE*` 的轻量版本（`namespace archived`，不导出），展示另一种设计思路：
    - 构造中使用局部 `FILE*`，读取完毕立即 `fclose`
    - Rule of zero：不需要自定义析构、移动、拷贝——类可平凡复制
    - 代码结构与主实现共享同一 `parseAtomConfigFile` 解析函数
    - 仅供内部参考，不构成公共 API
 
-6. **单位**：晶格矢量从 Å 读入，立即通过 `Lattice` 转换为 Bohr。分数坐标不涉及单位转换。
+7. **单位**：晶格矢量从 Å 读入，立即通过 `Lattice` 转换为 Bohr。分数坐标不涉及单位转换。

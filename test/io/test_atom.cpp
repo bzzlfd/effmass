@@ -19,55 +19,81 @@ auto main() -> int {
             std::println("=== {} ===", label);
             ATOM atom(path);
 
+            // --- parsing ---
             check(atom.natom == 4, "natom != 4");
             std::println("  natom = {} [OK]", atom.natom);
 
-            // Lattice vectors (Angstrom)
             auto A = atom.lattice.A(LengthUnit::Angstrom);
-
             check(close(A[0][0],  1.56429407), "a1x mismatch");
             check(close(A[0][1], -2.70943680), "a1y mismatch");
             check(close(A[0][2],  0.00000000), "a1z mismatch");
-
             check(close(A[1][0],  1.56429407), "a2x mismatch");
             check(close(A[1][1],  2.70943680), "a2y mismatch");
             check(close(A[1][2],  0.00000000), "a2z mismatch");
-
             check(close(A[2][0],  0.00000000), "a3x mismatch");
             check(close(A[2][1],  0.00000000), "a3y mismatch");
             check(close(A[2][2],  5.01695500), "a3z mismatch");
             std::println("  lattice vectors [OK]");
 
-            // Atom species
-            check(atom.species[0] == 13, "species[0] != 13");
-            check(atom.species[1] == 13, "species[1] != 13");
-            check(atom.species[2] ==  7, "species[2] != 7");
-            check(atom.species[3] ==  7, "species[3] != 7");
+            // --- species analysis ---
+            check(atom.ntyp == 2, "ntyp != 2");
+            check(atom.zval[0] ==  7, "zval[0] != 7");
+            check(atom.zval[1] == 13, "zval[1] != 13");
+            check(atom.type_count[0] == 2, "type_count[0] != 2");
+            check(atom.type_count[1] == 2, "type_count[1] != 2");
+            std::println("  ntyp = {}, zval = [{}, {}], counts = [{}, {}] [OK]",
+                         atom.ntyp, atom.zval[0], atom.zval[1],
+                         atom.type_count[0], atom.type_count[1]);
 
-            // Fractional coordinates
-            check(close(atom.x[0], 0.66666667) &&
-                  close(atom.y[0], 0.33333333) &&
-                  close(atom.z[0], 0.49928700), "atom[0] position mismatch");
-            check(close(atom.x[1], 0.33333333) &&
-                  close(atom.y[1], 0.66666667) &&
-                  close(atom.z[1], 0.99928700), "atom[1] position mismatch");
-            check(close(atom.x[2], 0.66666667) &&
-                  close(atom.y[2], 0.33333333) &&
-                  close(atom.z[2], 0.88071300), "atom[2] position mismatch");
-            check(close(atom.x[3], 0.33333333) &&
-                  close(atom.y[3], 0.66666667) &&
-                  close(atom.z[3], 0.38071300), "atom[3] position mismatch");
-            std::println("  atoms [OK]");
+            // atom_type: original order: [13, 13, 7, 7] → type [1, 1, 0, 0]
+            check(atom.atom_type[0] == 1, "atom_type[0] != 1");
+            check(atom.atom_type[1] == 1, "atom_type[1] != 1");
+            check(atom.atom_type[2] == 0, "atom_type[2] != 0");
+            check(atom.atom_type[3] == 0, "atom_type[3] != 0");
 
-            // Move semantics
+            // sorted_idx: groups by type → [type0=7, type0=7, type1=13, type1=13]
+            //             → original indices: [2, 3, 0, 1]
+            check(atom.sorted_idx[0] == 2, "sorted_idx[0] != 2");
+            check(atom.sorted_idx[1] == 3, "sorted_idx[1] != 3");
+            check(atom.sorted_idx[2] == 0, "sorted_idx[2] != 0");
+            check(atom.sorted_idx[3] == 1, "sorted_idx[3] != 1");
+            std::println("  sorted_idx = [{}, {}, {}, {}] [OK]",
+                         atom.sorted_idx[0], atom.sorted_idx[1],
+                         atom.sorted_idx[2], atom.sorted_idx[3]);
+
+            // sorted_idx is a valid permutation: each index 0..natom-1 appears exactly once
+            {
+                std::vector<bool> seen(atom.natom, false);
+                for (int k = 0; k < atom.natom; ++k) {
+                    int idx = atom.sorted_idx[k];
+                    check(idx >= 0 && idx < atom.natom, "sorted_idx: out of range");
+                    check(!seen[idx], "sorted_idx: duplicate");
+                    seen[idx] = true;
+                }
+                for (int i = 0; i < atom.natom; ++i) {
+                    check(seen[i], std::format("sorted_idx: index {} missing", i));
+                }
+            }
+
+            // sorted_idx groups atoms by type
+            for (int k = 1; k < atom.natom; ++k) {
+                int ta = atom.atom_type[atom.sorted_idx[k - 1]];
+                int tb = atom.atom_type[atom.sorted_idx[k]];
+                check(ta <= tb, std::format("sorted_idx: type out of order at k={}", k));
+            }
+            std::println("  sorted_idx groups by type [OK]");
+
+            // --- move semantics ---
             ATOM moved = std::move(atom);
             check(moved.natom == 4, "natom lost after move");
+            check(moved.ntyp  == 2, "ntyp lost after move");
+            check(moved.zval.size() == 2, "zval lost after move");
             check(atom.natom == 0, "source natom not zeroed after move");
-            check(atom.species.empty(), "source species not empty after move");
-            check(atom.x.empty(), "source x not empty after move");
+            check(atom.ntyp  == 0, "source ntyp not zeroed after move");
+            check(atom.zval.empty(), "source zval not empty after move");
             std::println("  move semantics [OK]");
 
-            // print_info()
+            // --- print_info ---
             moved.print_info();
             std::println("  print_info() [OK]");
         };

@@ -24,12 +24,32 @@ public:
 
     auto print_info() const -> void;
 
+    // parsed data (as-read order, unsorted)
     int natom{};
     Lattice lattice;
     std::vector<int> species;
     std::vector<double> x, y, z;   // fractional coordinates
 
+    // species analysis (computed during construction)
+    //
+    // Approach: separate vectors (species / x / y / z) rather than a vector of
+    // struct Atom{int species; double x,y,z;}.  Tradeoffs:
+    //   + flat arrays let callers pass individual buffers without unpacking
+    //   + compact when only species (not positions) are needed
+    //   - sorting requires an external permutation instead of a trivial struct-sort
+    //   - the permutation (sorted_idx) must be maintained explicitly
+    // The struct approach would make sorting trivial but loses the flat-buffer
+    // advantage.  For this use-case (moderate natom) the choice is stylistic;
+    // separate vectors are used here to match the project's flat-array idiom.
+    int ntyp{};                     // number of distinct species types
+    std::vector<int> zval;          // zval[it] = atomic number, sorted ascending, length ntyp
+    std::vector<int> type_count;    // type_count[it] = how many atoms of that type, length ntyp
+    std::vector<int> atom_type;     // atom_type[ia] = which type (0..ntyp-1) atom ia belongs to
+    std::vector<int> sorted_idx;    // sorted_idx[new] = old — permutation grouping atoms by type
+
 private:
+    auto analyzeSpecies() -> void;
+
     std::FILE* fp_ = nullptr;
 };
 
@@ -135,6 +155,36 @@ ATOM::ATOM(const std::string& filename) {
         throw std::runtime_error("Cannot open file: " + filename);
     }
     parseAtomConfigFile(fp_, natom, lattice, species, x, y, z);
+    analyzeSpecies();
+}
+
+
+auto ATOM::analyzeSpecies() -> void {
+    // 1. sort unique species → zval
+    auto sorted = species;
+    std::ranges::sort(sorted);
+    zval.clear();
+    for (int z : sorted) {
+        if (zval.empty() || zval.back() != z) zval.push_back(z);
+    }
+    ntyp = static_cast<int>(zval.size());
+
+    // 2. count atoms per type
+    type_count.assign(ntyp, 0);
+    atom_type.resize(natom);
+    for (int i = 0; i < natom; ++i) {
+        auto it = std::ranges::lower_bound(zval, species[i]);
+        int ityp = static_cast<int>(it - zval.begin());
+        atom_type[i] = ityp;
+        ++type_count[ityp];
+    }
+
+    // 3. permutation that groups atoms by type (stable within type)
+    sorted_idx.resize(natom);
+    std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
+    std::ranges::stable_sort(sorted_idx, [&](int a, int b) {
+        return atom_type[a] < atom_type[b];
+    });
 }
 
 
@@ -150,6 +200,11 @@ ATOM::ATOM(ATOM&& other) noexcept
     , x(std::move(other.x))
     , y(std::move(other.y))
     , z(std::move(other.z))
+    , ntyp(std::exchange(other.ntyp, 0))
+    , zval(std::move(other.zval))
+    , type_count(std::move(other.type_count))
+    , atom_type(std::move(other.atom_type))
+    , sorted_idx(std::move(other.sorted_idx))
     , fp_(std::exchange(other.fp_, nullptr))
 {}
 
@@ -157,30 +212,38 @@ ATOM::ATOM(ATOM&& other) noexcept
 auto ATOM::operator=(ATOM&& other) noexcept -> ATOM& {
     if (this != &other) {
         if (fp_) std::fclose(fp_);
-        natom    = std::exchange(other.natom, 0);
-        lattice  = std::move(other.lattice);
-        species  = std::move(other.species);
-        x        = std::move(other.x);
-        y        = std::move(other.y);
-        z        = std::move(other.z);
-        fp_      = std::exchange(other.fp_, nullptr);
+        natom      = std::exchange(other.natom, 0);
+        lattice    = std::move(other.lattice);
+        species    = std::move(other.species);
+        x          = std::move(other.x);
+        y          = std::move(other.y);
+        z          = std::move(other.z);
+        ntyp       = std::exchange(other.ntyp, 0);
+        zval       = std::move(other.zval);
+        type_count = std::move(other.type_count);
+        atom_type  = std::move(other.atom_type);
+        sorted_idx = std::move(other.sorted_idx);
+        fp_        = std::exchange(other.fp_, nullptr);
     }
     return *this;
 }
 
 
 auto ATOM::print_info() const -> void {
-    std::println("ATOM: natom = {}", natom);
+    std::println("ATOM: natom = {}, ntyp = {}", natom, ntyp);
     auto A_ang = lattice.A(LengthUnit::Angstrom);
     std::println("  Lattice vectors (Angstrom):");
     for (int i = 0; i < 3; ++i) {
         std::println("    {:14.8f}{:14.8f}{:14.8f}",
                      A_ang[i][0], A_ang[i][1], A_ang[i][2]);
     }
+    for (int it = 0; it < ntyp; ++it) {
+        std::println("  type {}: Z = {}, count = {}", it, zval[it], type_count[it]);
+    }
     int nshow = (std::cmp_less(natom, 5)) ? natom : 5;
     for (int i = 0; i < nshow; ++i) {
-        std::println("  atom[{}]: species={},  frac=({:.8f}, {:.8f}, {:.8f})",
-                     i, species[i], x[i], y[i], z[i]);
+        std::println("  atom[{}]: species={}, type={},  frac=({:.8f}, {:.8f}, {:.8f})",
+                     i, species[i], atom_type[i], x[i], y[i], z[i]);
     }
     if (std::cmp_greater(natom, 5)) {
         std::println("  ... and {} more atoms", natom - 5);
@@ -189,6 +252,11 @@ auto ATOM::print_info() const -> void {
 
 
 // --- archived: alternative eager-close implementation (module-internal, for reference) ---
+//
+// Compared to ATOM:
+//   - Parsing logic identical (shared parseAtomConfigFile)
+//   - No FILE* member → rule of zero, trivially copyable
+//   - No species analysis (ntyp / zval / sorted_idx etc.)
 
 namespace archived {
 
