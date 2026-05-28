@@ -32,7 +32,7 @@ struct GKKMetadata {
 // Bitmask controlling which representations are computed and exposed in KVecs
 enum class KVecsView : unsigned int {
     Cartesian = 1 << 0,  // kinetic, Kx, Ky, Kz
-    Spherical = 1 << 1,  // r, theta, phi
+    Spherical = 1 << 1,  // q, theta, phi
     Integer   = 1 << 2,  // iG, jG, kG, kPoint, reciprocalLattice
 };
 
@@ -57,7 +57,7 @@ struct KVecs {
     std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, G_x-k_x, G_y-k_y, G_z-k_z
     
     // Spherical representation of K = G - k
-    std::span<const double> r, theta, phi;        // |K|, polar angle [0,π], azimuthal angle [-π,π]
+    std::span<const double> q, theta, phi;        // |K|, polar angle [0,π], azimuthal angle [-π,π]
 
     // Integer indices of G vector in reciprocal lattice basis
     std::span<const int>    iG, jG, kG;           // G = iG*b1 + jG*b2 + kG*b3
@@ -102,7 +102,7 @@ private:
     auto seekToKPoint(int ikpt) -> void;                // seek to k-point data
 
     auto updateDataSpans(std::size_t ng) -> void;       // update current_data_ spans according to desired_views_
-    auto computeSpherical(std::size_t ng) -> void;      // compute r, theta, phi from Kx, Ky, Kz
+    auto computeSpherical(std::size_t ng) -> void;      // compute q, theta, phi from Kx, Ky, Kz
     auto computeIntegerIndices(std::size_t ng) -> void; // compute iG, jG, kG from Kx, Ky, Kz and inferred k
 
     std::string filename_;                      // file name
@@ -119,7 +119,7 @@ private:
 
     // buffers: working arrays (contiguous)
     std::vector<double> kinetic_buf_, Kx_buf_, Ky_buf_, Kz_buf_;
-    std::vector<double> r_buf_, theta_buf_, phi_buf_;
+    std::vector<double> q_buf_, theta_buf_, phi_buf_;
     std::vector<int>    iG_buf_, jG_buf_, kG_buf_;
     KVecs current_data_;  // data view
 };
@@ -173,7 +173,7 @@ GKK::GKK(GKK&& other) noexcept
     , Kx_buf_(std::move(other.Kx_buf_))
     , Ky_buf_(std::move(other.Ky_buf_))
     , Kz_buf_(std::move(other.Kz_buf_))
-    , r_buf_(std::move(other.r_buf_))
+    , q_buf_(std::move(other.q_buf_))
     , theta_buf_(std::move(other.theta_buf_))
     , phi_buf_(std::move(other.phi_buf_))
     , iG_buf_(std::move(other.iG_buf_))
@@ -190,8 +190,8 @@ GKK::GKK(GKK&& other) noexcept
         current_data_.Kx      = std::span<const double>(Kx_buf_.data(), ng);
         current_data_.Ky      = std::span<const double>(Ky_buf_.data(), ng);
         current_data_.Kz      = std::span<const double>(Kz_buf_.data(), ng);
-        if (!current_data_.r.empty()) {
-            current_data_.r     = std::span<const double>(r_buf_.data(), ng);
+        if (!current_data_.q.empty()) {
+            current_data_.q     = std::span<const double>(q_buf_.data(), ng);
             current_data_.theta = std::span<const double>(theta_buf_.data(), ng);
             current_data_.phi   = std::span<const double>(phi_buf_.data(), ng);
         }
@@ -221,7 +221,7 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
         Kx_buf_ = std::move(other.Kx_buf_);
         Ky_buf_ = std::move(other.Ky_buf_);
         Kz_buf_ = std::move(other.Kz_buf_);
-        r_buf_ = std::move(other.r_buf_);
+        q_buf_ = std::move(other.q_buf_);
         theta_buf_ = std::move(other.theta_buf_);
         phi_buf_ = std::move(other.phi_buf_);
         iG_buf_ = std::move(other.iG_buf_);
@@ -239,8 +239,8 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
             current_data_.Kx      = std::span<const double>(Kx_buf_.data(), ng);
             current_data_.Ky      = std::span<const double>(Ky_buf_.data(), ng);
             current_data_.Kz      = std::span<const double>(Kz_buf_.data(), ng);
-            if (!current_data_.r.empty()) {
-                current_data_.r     = std::span<const double>(r_buf_.data(), ng);
+            if (!current_data_.q.empty()) {
+                current_data_.q     = std::span<const double>(q_buf_.data(), ng);
                 current_data_.theta = std::span<const double>(theta_buf_.data(), ng);
                 current_data_.phi   = std::span<const double>(phi_buf_.data(), ng);
             }
@@ -416,11 +416,11 @@ auto GKK::updateDataSpans(std::size_t ng) -> void {
     current_data_.Kz      = std::span<const double>(Kz_buf_.data(), ng);
 
     if (hasView(desired_views_, KVecsView::Spherical) && hasView(ready_views_, KVecsView::Spherical)) {
-        current_data_.r     = std::span<const double>(r_buf_.data(), ng);
+        current_data_.q     = std::span<const double>(q_buf_.data(), ng);
         current_data_.theta = std::span<const double>(theta_buf_.data(), ng);
         current_data_.phi   = std::span<const double>(phi_buf_.data(), ng);
     } else {
-        current_data_.r = current_data_.theta = current_data_.phi = {};
+        current_data_.q = current_data_.theta = current_data_.phi = {};
     }
 
     if (hasView(desired_views_, KVecsView::Integer) && hasView(ready_views_, KVecsView::Integer)) {
@@ -434,13 +434,15 @@ auto GKK::updateDataSpans(std::size_t ng) -> void {
 
 
 auto GKK::computeSpherical(std::size_t ng) -> void {
+    // Handles kinetic=0 (|K|=0, i.e. Kx=Ky=Kz=0, the Gamma-point G=G-k vector):
+    // q=0 → theta=0 via guard below, phi=0 via atan2(0,0)=0. No division-by-zero.
     for (std::size_t ig = 0; ig < ng; ++ig) {
         const double kx = Kx_buf_[ig];
         const double ky = Ky_buf_[ig];
         const double kz = Kz_buf_[ig];
-        const double r  = std::sqrt(kx * kx + ky * ky + kz * kz);
-        r_buf_[ig]     = r;
-        theta_buf_[ig] = (r > 0.0) ? std::acos(kz / r) : 0.0;
+        const double q  = std::sqrt(kx * kx + ky * ky + kz * kz);
+        q_buf_[ig]     = q;
+        theta_buf_[ig] = (q > 0.0) ? std::acos(kz / q) : 0.0;
         phi_buf_[ig]   = std::atan2(ky, kx);
     }
 }
@@ -475,16 +477,16 @@ auto GKK::setDataView(KVecsView view) -> void {
 
     // If new view does not need Spherical, release buffers and clear cached state
     if (!hasView(view, KVecsView::Spherical)) {
-        r_buf_.clear();
-        r_buf_.shrink_to_fit();
+        q_buf_.clear();
+        q_buf_.shrink_to_fit();
         theta_buf_.clear();
         theta_buf_.shrink_to_fit();
         phi_buf_.clear();
         phi_buf_.shrink_to_fit();
-        current_data_.r = current_data_.theta = current_data_.phi = {};
+        current_data_.q = current_data_.theta = current_data_.phi = {};
         ready_views_ = ready_views_ & ~KVecsView::Spherical;
-    } else if (r_buf_.empty()) {
-        r_buf_.resize(max_ng_);
+    } else if (q_buf_.empty()) {
+        q_buf_.resize(max_ng_);
         theta_buf_.resize(max_ng_);
         phi_buf_.resize(max_ng_);
     }

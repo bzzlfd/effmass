@@ -86,7 +86,7 @@ auto main() -> int {
         }
 
         // Spherical and Integer views should not be available yet
-        if (!kv0.r.empty() || !kv0.theta.empty() || !kv0.phi.empty()) {
+        if (!kv0.q.empty() || !kv0.theta.empty() || !kv0.phi.empty()) {
             throw std::runtime_error("Spherical data should not be available without setDataView");
         }
         if (!kv0.iG.empty() || !kv0.jG.empty() || !kv0.kG.empty()) {
@@ -105,10 +105,10 @@ auto main() -> int {
         // Test Spherical view
         gkk.setDataView(KVecsView::Cartesian | KVecsView::Spherical);
         const auto& kv_sph = gkk.loadKPoint(0);
-        if (kv_sph.r.empty() || kv_sph.theta.empty() || kv_sph.phi.empty()) {
+        if (kv_sph.q.empty() || kv_sph.theta.empty() || kv_sph.phi.empty()) {
             throw std::runtime_error("Spherical data should be available after setDataView");
         }
-        if (kv_sph.r.size() != 1737) {
+        if (kv_sph.q.size() != 1737) {
             throw std::runtime_error("spherical r size mismatch");
         }
         // Verify spherical relationship: r = sqrt(Kx^2 + Ky^2 + Kz^2)
@@ -118,7 +118,7 @@ auto main() -> int {
                 kv_sph.Ky[i] * kv_sph.Ky[i] +
                 kv_sph.Kz[i] * kv_sph.Kz[i]
             );
-            if (std::abs(kv_sph.r[i] - r_expected) > 1e-12) {
+            if (std::abs(kv_sph.q[i] - r_expected) > 1e-12) {
                 throw std::runtime_error("spherical r[" + std::to_string(i) + "] mismatch");
             }
         }
