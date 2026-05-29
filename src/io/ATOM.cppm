@@ -15,9 +15,6 @@ export class ATOM {
 public:
     explicit ATOM(const std::string& filename);
 
-    // element name ↔ atomic number conversion (Z = 1..112)
-    static auto elementName(int atomic_number) -> std::string_view;
-    static auto atomicNumber(std::string_view name) -> int;
     ~ATOM();
 
     ATOM(const ATOM&) = delete;
@@ -27,23 +24,51 @@ public:
     auto operator=(ATOM&&) noexcept -> ATOM&;
 
     auto print_info() const -> void;
+    // element name ↔ atomic number conversion (Z = 1..112)
+    static auto elementName(int atomic_number) -> std::string_view;
+    static auto atomicNumber(std::string_view name) -> int;
+
+    // --- member variables ---
+
+    // parsed data (as-read order, unsorted)
+    int natom{};
+    Lattice lattice;
+    std::vector<int> species;
+    std::vector<double> x, y, z;   // fractional coordinates
+
+    // species analysis (computed during construction)
+    //
+    // Approach: separate vectors (species / x / y / z) rather than a vector of
+    // struct Atom{int species; double x,y,z;}.  Tradeoffs:
+    //   + flat arrays let callers pass individual buffers without unpacking
+    //   + compact when only species (not positions) are needed
+    //   - sorting requires an external permutation instead of a trivial struct-sort
+    //   - the permutation (sorted_idx) must be maintained explicitly
+    // The struct approach would make sorting trivial but loses the flat-buffer
+    // advantage.  For this use-case (moderate natom) the choice is stylistic;
+    // separate vectors are used here to match the project's flat-array idiom.
+    int ntyp{};                     // number of distinct species types
+    std::vector<int> zvals;          // zvals[it] = atomic number, sorted ascending, length ntyp
+    std::vector<int> type_counts;    // type_counts[it] = how many atoms of that type, length ntyp
+    std::vector<int> atom_types;     // atom_types[ia] = which type (0..ntyp-1) atom ia belongs to
+    std::vector<int> sorted_idx;    // sorted_idx[new] = old — permutation grouping atoms by type
 
     // --- iteration views ---
     struct TypeEntry { int z; int count; };
-    struct AtomEntry { int species; double x, y, z; };
+    struct AtomEntry { int specie; double x, y, z; };
 
     class TypeView {
         friend class ATOM;
         const ATOM* a_;
         explicit TypeView(const ATOM* a) : a_(a) {}
-    public:
+      public:
         class Iterator {
             friend class TypeView;
             const ATOM* a_;
             int it_;
             Iterator(const ATOM* a, int it) : a_(a), it_(it) {}
-        public:
-            auto operator*() const -> TypeEntry { return {a_->zval[it_], a_->type_count[it_]}; }
+          public:
+            auto operator*() const -> TypeEntry { return {a_->zvals[it_], a_->type_counts[it_]}; }
             auto operator++() -> Iterator& { ++it_; return *this; }
             bool operator!=(const Iterator& o) const { return it_ != o.it_; }
         };
@@ -58,8 +83,8 @@ public:
         int count_;
         AtomView(const ATOM* a, int ityp) : a_(a) {
             start_ = 0;
-            for (int t = 0; t < ityp; ++t) start_ += a->type_count[t];
-            count_ = a->type_count[ityp];
+            for (int t = 0; t < ityp; ++t) start_ += a->type_counts[t];
+            count_ = a->type_counts[ityp];
         }
     public:
         class Iterator {
@@ -104,29 +129,6 @@ public:
     auto eachType() const -> TypeView { return TypeView(this); }
     auto eachAtom(int ityp) const -> AtomView { return AtomView(this, ityp); }
     auto eachSpecie() const -> SpecieView { return SpecieView(this); }
-
-    // parsed data (as-read order, unsorted)
-    int natom{};
-    Lattice lattice;
-    std::vector<int> species;
-    std::vector<double> x, y, z;   // fractional coordinates
-
-    // species analysis (computed during construction)
-    //
-    // Approach: separate vectors (species / x / y / z) rather than a vector of
-    // struct Atom{int species; double x,y,z;}.  Tradeoffs:
-    //   + flat arrays let callers pass individual buffers without unpacking
-    //   + compact when only species (not positions) are needed
-    //   - sorting requires an external permutation instead of a trivial struct-sort
-    //   - the permutation (sorted_idx) must be maintained explicitly
-    // The struct approach would make sorting trivial but loses the flat-buffer
-    // advantage.  For this use-case (moderate natom) the choice is stylistic;
-    // separate vectors are used here to match the project's flat-array idiom.
-    int ntyp{};                     // number of distinct species types
-    std::vector<int> zval;          // zval[it] = atomic number, sorted ascending, length ntyp
-    std::vector<int> type_count;    // type_count[it] = how many atoms of that type, length ntyp
-    std::vector<int> atom_type;     // atom_type[ia] = which type (0..ntyp-1) atom ia belongs to
-    std::vector<int> sorted_idx;    // sorted_idx[new] = old — permutation grouping atoms by type
 
 private:
     auto analyzeSpecies() -> void;
@@ -241,30 +243,30 @@ ATOM::ATOM(const std::string& filename) {
 
 
 auto ATOM::analyzeSpecies() -> void {
-    // 1. sort unique species → zval
-    auto sorted = species;
-    std::ranges::sort(sorted);
-    zval.clear();
-    for (int z : sorted) {
-        if (zval.empty() || zval.back() != z) zval.push_back(z);
+    // 1. sort unique species → zvals
+    auto sorted_species = species;
+    std::ranges::sort(sorted_species);
+    zvals.clear();
+    for (int z : sorted_species) {
+        if (zvals.empty() || zvals.back() != z) zvals.push_back(z);
     }
-    ntyp = static_cast<int>(zval.size());
+    ntyp = static_cast<int>(zvals.size());
 
     // 2. count atoms per type
-    type_count.assign(ntyp, 0);
-    atom_type.resize(natom);
+    type_counts.assign(ntyp, 0);
+    atom_types.resize(natom);
     for (int i = 0; i < natom; ++i) {
-        auto it = std::ranges::lower_bound(zval, species[i]);
-        int ityp = static_cast<int>(it - zval.begin());
-        atom_type[i] = ityp;
-        ++type_count[ityp];
+        auto it = std::ranges::lower_bound(zvals, species[i]);
+        int ityp = static_cast<int>(it - zvals.begin());
+        atom_types[i] = ityp;
+        ++type_counts[ityp];
     }
 
     // 3. permutation that groups atoms by type (stable within type)
     sorted_idx.resize(natom);
     std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
     std::ranges::stable_sort(sorted_idx, [&](int a, int b) {
-        return atom_type[a] < atom_type[b];
+        return atom_types[a] < atom_types[b];
     });
 }
 
@@ -327,9 +329,9 @@ ATOM::ATOM(ATOM&& other) noexcept
     , y(std::move(other.y))
     , z(std::move(other.z))
     , ntyp(std::exchange(other.ntyp, 0))
-    , zval(std::move(other.zval))
-    , type_count(std::move(other.type_count))
-    , atom_type(std::move(other.atom_type))
+    , zvals(std::move(other.zvals))
+    , type_counts(std::move(other.type_counts))
+    , atom_types(std::move(other.atom_types))
     , sorted_idx(std::move(other.sorted_idx))
     , fp_(std::exchange(other.fp_, nullptr))
 {}
@@ -345,9 +347,9 @@ auto ATOM::operator=(ATOM&& other) noexcept -> ATOM& {
         y          = std::move(other.y);
         z          = std::move(other.z);
         ntyp       = std::exchange(other.ntyp, 0);
-        zval       = std::move(other.zval);
-        type_count = std::move(other.type_count);
-        atom_type  = std::move(other.atom_type);
+        zvals       = std::move(other.zvals);
+        type_counts = std::move(other.type_counts);
+        atom_types  = std::move(other.atom_types);
         sorted_idx = std::move(other.sorted_idx);
         fp_        = std::exchange(other.fp_, nullptr);
     }
@@ -364,12 +366,12 @@ auto ATOM::print_info() const -> void {
                      A_ang[i][0], A_ang[i][1], A_ang[i][2]);
     }
     for (int it = 0; it < ntyp; ++it) {
-        std::println("  type {}: Z = {}, count = {}", it, zval[it], type_count[it]);
+        std::println("  type {}: Z = {}, count = {}", it, zvals[it], type_counts[it]);
     }
     int nshow = (std::cmp_less(natom, 5)) ? natom : 5;
     for (int i = 0; i < nshow; ++i) {
         std::println("  atom[{}]: species={}, type={},  frac=({:.8f}, {:.8f}, {:.8f})",
-                     i, species[i], atom_type[i], x[i], y[i], z[i]);
+                     i, species[i], atom_types[i], x[i], y[i], z[i]);
     }
     if (std::cmp_greater(natom, 5)) {
         std::println("  ... and {} more atoms", natom - 5);
@@ -382,7 +384,7 @@ auto ATOM::print_info() const -> void {
 // Compared to ATOM:
 //   - Parsing logic identical (shared parseAtomConfigFile)
 //   - No FILE* member → rule of zero, trivially copyable
-//   - No species analysis (ntyp / zval / sorted_idx etc.)
+//   - No species analysis (ntyp / zvals / sorted_idx etc.)
 
 namespace archived {
 
@@ -405,6 +407,78 @@ struct SimpleATOM {
         }
         std::fclose(fp);
     }
+};
+
+} // namespace archived
+
+
+// --- archived: alternative "view-as-iterator" iteration pattern (module-internal, for reference) ---
+//
+// Compared to the main ATOM iteration views (eachType / eachAtom / eachSpecie):
+//   - View class IS the iterator: all 5 range-for operations on one class
+//   - No separate Iterator nested class
+//   - Uses EndTag sentinel so end() returns a non-dereferenceable type
+//   - Tradeoff: less type separation vs. simpler structure
+//   - Tradeoff: `end()` sentinel has no data (one bool compare instead of field-vs-field)
+//   - This approach is viable whenever the view only needs forward iteration
+
+namespace archived {
+
+struct EndTag {};
+
+class TypeView {
+    const ATOM* a_ = nullptr;
+    int it_ = 0;
+    friend ATOM;
+    TypeView(const ATOM* a, int it) : a_(a), it_(it) {}
+public:
+    auto operator*() const -> ATOM::TypeEntry { return {a_->zvals[it_], a_->type_counts[it_]}; }
+    auto operator++() -> TypeView& { ++it_; return *this; }
+    bool operator!=(EndTag) const { return it_ < a_->ntyp; }
+
+    auto begin() const -> TypeView { return *this; }
+    auto end() const -> EndTag { return {}; }
+};
+
+
+class AtomView {
+    const ATOM* a_ = nullptr;
+    int start_ = 0;
+    int k_ = 0;
+    int count_ = 0;
+    friend ATOM;
+    AtomView(const ATOM* a, int ityp) : a_(a) {
+        start_ = 0;
+        for (int t = 0; t < ityp; ++t) start_ += a->type_counts[t];
+        count_ = a->type_counts[ityp];
+    }
+public:
+    auto operator*() const -> ATOM::AtomEntry {
+        int orig = a_->sorted_idx[start_ + k_];
+        return {a_->species[orig], a_->x[orig], a_->y[orig], a_->z[orig]};
+    }
+    auto operator++() -> AtomView& { ++k_; return *this; }
+    bool operator!=(EndTag) const { return k_ < count_; }
+
+    auto begin() const -> AtomView { return *this; }
+    auto end() const -> EndTag { return {}; }
+};
+
+
+class SpecieView {
+    const ATOM* a_ = nullptr;
+    int i_ = 0;
+    friend ATOM;
+    SpecieView(const ATOM* a, int i) : a_(a), i_(i) {}
+public:
+    auto operator*() const -> ATOM::AtomEntry {
+        return {a_->species[i_], a_->x[i_], a_->y[i_], a_->z[i_]};
+    }
+    auto operator++() -> SpecieView& { ++i_; return *this; }
+    bool operator!=(EndTag) const { return i_ < a_->natom; }
+
+    auto begin() const -> SpecieView { return *this; }
+    auto end() const -> EndTag { return {}; }
 };
 
 } // namespace archived

@@ -483,9 +483,9 @@ public:
 
     // species analysis (computed during construction)
     int ntyp{};
-    std::vector<int> zval;       // ntyp
-    std::vector<int> type_count; // ntyp
-    std::vector<int> atom_type;  // ntyp
+    std::vector<int> zvals;       // ntyp
+    std::vector<int> type_counts; // ntyp
+    std::vector<int> atom_types;  // ntyp
     std::vector<int> sorted_idx; // natom
 };
 ```
@@ -502,8 +502,8 @@ public:
 3. **解析辅助函数**：共同的解析逻辑放在模块内匿名命名空间（anonymous namespace）的 `parseAtomConfigFile` 函数中。匿名命名空间保证符号不跨模块泄露，避免 ODR 冲突。主实现和 `archived` 实现均调用此函数。
 
 4. **species 分析**：构造中解析完成后调用 `analyzeSpecies()`，计算：
-   - `ntyp` / `zval[itype]` / `type_count[itype]`：去重排序后的 species 种类、原子序数、每类数量
-   - `atom_type[iatom]`：第 `ia` 个原子属于哪一类型（按 `zval` 的排序）
+   - `ntyp` / `zvals[itype]` / `type_counts[itype]`：去重排序后的 species 种类、原子序数、每类数量
+   - `atom_types[iatom]`：第 `ia` 个原子属于哪一类型（按 `zvals` 的排序）
    - `sorted_idx[new] = old`：将原子按类型分组的排列（`stable_sort`，同类型内保持原序）
    
    数据存储选型上，采用**分离的 vector**（`species`、`x`、`y`、`z`）而非 `vector<Atom>` 结构体数组。利弊：
@@ -521,3 +521,110 @@ public:
    - 仅供内部参考，不构成公共 API
 
 7. **单位**：晶格矢量从 Å 读入，立即通过 `Lattice` 转换为 Bohr。分数坐标不涉及单位转换。
+
+### 元素符号 ↔ 原子序数转换
+
+```cpp
+static auto elementName(int atomic_number) -> std::string_view;
+static auto atomicNumber(std::string_view name) -> int;
+```
+
+用法：
+
+```cpp
+ATOM::elementName(6)   // → "C"
+ATOM::atomicNumber("Au")  // → 79
+```
+
+实现要点：
+
+1. **数据源**：内部维护 `constexpr element_symbols[113]` 数组（下标 0 空置，1–112 对应 IUPAC 元素符号），数据与参考 Fortran 代码 `gen_element_name_number.f90` 的 112 个元素表一致（仅 112 号由 "Ch" 改为现代符号 "Cn"）。
+2. **`elementName(z)`**：下标直接查表，Z 超出 1–112 范围抛 `std::out_of_range`。
+3. **`atomicNumber(name)`**：线性扫描 1–112 匹配，未匹配抛 `std::invalid_argument`。ntyp 通常很小（实际算例 ≤ 5 种），线性扫描的性能开销可忽略。
+
+### 迭代视图
+
+ATOM 提供三种 range-for 可遍历的视图，用于访问物种类型和原子数据，统一用 `auto&&` 接收元素（详见下方「为什么用 `auto&&`」）：
+
+```cpp
+// TypeView：遍历物种类型
+for (auto&& t : atom.eachType())          // ATOM::TypeEntry
+    std::println("Z = {}, count = {}", t.z, t.count);
+
+// AtomView：遍历指定类型的所有原子（按 Z 分组后的顺序）
+for (auto&& a : atom.eachAtom(ityp))      // ATOM::AtomEntry
+    std::println("species = {}, frac = ({}, {}, {})", a.species, a.x, a.y, a.z);
+
+// SpecieView：按原始读取顺序遍历所有原子
+for (auto&& a : atom.eachSpecie())        // ATOM::AtomEntry
+    std::println("{}", a.species);
+```
+
+#### 为什么用 `auto&&`
+
+`operator*()` 按值返回 `TypeEntry` 或 `AtomEntry`，产生临时对象（右值）：
+
+```cpp
+auto operator*() const -> TypeEntry { return {a_->zvals[it_], a_->type_counts[it_]}; }
+```
+
+| 写法               | 能否编译 | 说明 |
+|-------------------|---------|------|
+| `auto& a`         | ❌      | 非 const 左值引用不能绑右值 |
+| `const auto& a`   | ✅      | const 引用可延寿，但只读 |
+| `auto&& a`        | ✅      | 转发引用，万能绑定 |
+
+range-for 展开后 `auto&& a = *__it`，`auto&&`（转发引用）可以绑定到任何值类别，因此是通用写法。
+
+#### 实现方式
+
+三个视图类均定义为 `ATOM` 的**嵌套类**（随 `export class ATOM` 自动导出），每个视图内部嵌套自己的 `Iterator` 类：
+
+```
+ATOM
+├── TypeView          — eachType() 的返回类型
+│   └── Iterator      — 内部迭代器，*it → TypeEntry
+├── AtomView          — eachAtom(ityp) 的返回类型
+│   └── Iterator      — 内部迭代器，*it → AtomEntry
+└── SpecieView        — eachSpecie() 的返回类型
+    └── Iterator      — 内部迭代器，*it → AtomEntry
+```
+
+每个迭代器实现 range-for 所需的三个操作：
+
+```cpp
+auto operator*()  const -> EntryType;   // 解引用
+auto operator++() -> Iterator&;         // 前进
+bool operator!=(const Iterator& o);     // 判等
+```
+
+View 类提供 `begin()` / `end()` 返回迭代器对。
+
+#### `friend` 的作用
+
+```cpp
+class TypeView {
+    friend class ATOM;                 // 只允许 ATOM 调用私有构造
+    TypeView(const ATOM* a);
+};
+```
+
+**不是**让 `TypeView` 能访问 `ATOM` 的私有成员——`ATOM` 的 `zvals`、`ntyp` 等本来就是 `public` 的。而是**让 `ATOM` 能构造 `TypeView`**：把构造设为 `private` 防止用户绕过 `eachType()` 直接实例化视图。
+
+嵌套类读外围类的 `public` 成员不需要 `friend`；外围类读嵌套类的 `private` 成员才需要。详见 [`cpp_conventions.md`](cpp_conventions.md) 的迭代器设计风格约定。
+
+#### 与 eachSpecie 的关系
+
+```
+每个 atom.eachType() + eachAtom 组合  →  所有原子恰好一次，按 Z 分组
+atom.eachSpecie()                     →  所有原子恰好一次，原始顺序
+```
+
+覆盖的原子集合相同，**顺序不同**。以下例 `species = [13, 13, 7, 7]`（原始顺序），`sorted_idx = [2, 3, 0, 1]`：
+
+```cpp
+eachSpecie:         13, 13, 7, 7     ← 原始顺序
+Type+Atom:           7,  7, 13, 13   ← Z 分组排序
+```
+
+如果原始文件已按 Z 排序，两种遍历碰到的顺序恰巧相同——但这是巧合，不是保证。

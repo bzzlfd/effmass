@@ -89,19 +89,19 @@ auto main() -> int {
 
             // --- species analysis ---
             check(atom.ntyp == 2, "ntyp != 2");
-            check(atom.zval[0] ==  7, "zval[0] != 7");
-            check(atom.zval[1] == 13, "zval[1] != 13");
-            check(atom.type_count[0] == 2, "type_count[0] != 2");
-            check(atom.type_count[1] == 2, "type_count[1] != 2");
-            std::println("  ntyp = {}, zval = [{}, {}], counts = [{}, {}] [OK]",
-                         atom.ntyp, atom.zval[0], atom.zval[1],
-                         atom.type_count[0], atom.type_count[1]);
+            check(atom.zvals[0] ==  7, "zvals[0] != 7");
+            check(atom.zvals[1] == 13, "zvals[1] != 13");
+            check(atom.type_counts[0] == 2, "type_counts[0] != 2");
+            check(atom.type_counts[1] == 2, "type_counts[1] != 2");
+            std::println("  ntyp = {}, zvals = [{}, {}], counts = [{}, {}] [OK]",
+                         atom.ntyp, atom.zvals[0], atom.zvals[1],
+                         atom.type_counts[0], atom.type_counts[1]);
 
-            // atom_type: original order: [13, 13, 7, 7] → type [1, 1, 0, 0]
-            check(atom.atom_type[0] == 1, "atom_type[0] != 1");
-            check(atom.atom_type[1] == 1, "atom_type[1] != 1");
-            check(atom.atom_type[2] == 0, "atom_type[2] != 0");
-            check(atom.atom_type[3] == 0, "atom_type[3] != 0");
+            // atom_types: original order: [13, 13, 7, 7] → type [1, 1, 0, 0]
+            check(atom.atom_types[0] == 1, "atom_types[0] != 1");
+            check(atom.atom_types[1] == 1, "atom_types[1] != 1");
+            check(atom.atom_types[2] == 0, "atom_types[2] != 0");
+            check(atom.atom_types[3] == 0, "atom_types[3] != 0");
 
             // sorted_idx: groups by type → [type0=7, type0=7, type1=13, type1=13]
             //             → original indices: [2, 3, 0, 1]
@@ -136,7 +136,7 @@ auto main() -> int {
                 // eachAtom(0) = type N (Z=7): 2 atoms
                 int count0 = 0;
                 for (auto&& a : atom.eachAtom(0)) {
-                    check(a.species == 7, std::format("eachAtom(0)[{}]: species != 7", count0));
+                    check(a.specie == 7, std::format("eachAtom(0)[{}]: species != 7", count0));
                     ++count0;
                 }
                 check(count0 == 2, "eachAtom(0): expected 2 atoms");
@@ -144,7 +144,7 @@ auto main() -> int {
                 // eachAtom(1) = type Al (Z=13): 2 atoms
                 int count1 = 0;
                 for (auto&& a : atom.eachAtom(1)) {
-                    check(a.species == 13, std::format("eachAtom(1)[{}]: species != 13", count1));
+                    check(a.specie == 13, std::format("eachAtom(1)[{}]: species != 13", count1));
                     ++count1;
                 }
                 check(count1 == 2, "eachAtom(1): expected 2 atoms");
@@ -156,8 +156,8 @@ auto main() -> int {
                 int idx = 0;
                 int expected[] = {13, 13, 7, 7};
                 for (auto&& a : atom.eachSpecie()) {
-                    check(a.species == expected[idx],
-                          std::format("eachSpecie[{}]: species {} != expected {}", idx, a.species, expected[idx]));
+                    check(a.specie == expected[idx],
+                          std::format("eachSpecie[{}]: species {} != expected {}", idx, a.specie, expected[idx]));
                     ++idx;
                 }
                 check(idx == 4, "eachSpecie: expected 4 atoms");
@@ -180,8 +180,8 @@ auto main() -> int {
 
             // sorted_idx groups atoms by type
             for (int k = 1; k < atom.natom; ++k) {
-                int ta = atom.atom_type[atom.sorted_idx[k - 1]];
-                int tb = atom.atom_type[atom.sorted_idx[k]];
+                int ta = atom.atom_types[atom.sorted_idx[k - 1]];
+                int tb = atom.atom_types[atom.sorted_idx[k]];
                 check(ta <= tb, std::format("sorted_idx: type out of order at k={}", k));
             }
             std::println("  sorted_idx groups by type [OK]");
@@ -190,10 +190,10 @@ auto main() -> int {
             ATOM moved = std::move(atom);
             check(moved.natom == 4, "natom lost after move");
             check(moved.ntyp  == 2, "ntyp lost after move");
-            check(moved.zval.size() == 2, "zval lost after move");
+            check(moved.zvals.size() == 2, "zvals lost after move");
             check(atom.natom == 0, "source natom not zeroed after move");
             check(atom.ntyp  == 0, "source ntyp not zeroed after move");
-            check(atom.zval.empty(), "source zval not empty after move");
+            check(atom.zvals.empty(), "source zvals not empty after move");
             std::println("  move semantics [OK]");
 
             // moved-from iteration views are empty
