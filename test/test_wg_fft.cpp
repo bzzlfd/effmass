@@ -2,6 +2,9 @@ import std;
 import math;
 import io;
 
+#define OCC_READER_IMPORT_STD
+#include "io/occ_reader.hpp"
+
 
 auto check(bool cond, std::string_view msg) -> void {
     if (!cond) throw std::runtime_error(std::string("FAILED: ") + std::string(msg));

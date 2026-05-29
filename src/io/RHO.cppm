@@ -80,14 +80,16 @@ public:
 
     // [i, j, k, state] explicit state access
     auto operator[](int i, int j, int k, int state) -> double& {
-        return data_[(static_cast<std::size_t>(state) * meta.n1 + i) * meta.n2 * meta.n3
-                   + static_cast<std::size_t>(j) * meta.n3
+        return data_[static_cast<std::size_t>(state) * meta.n1 * meta.n2 * meta.n3
+                   + static_cast<std::size_t>(i) * meta.n1 * meta.n2
+                   + static_cast<std::size_t>(j) * meta.n1
                    + static_cast<std::size_t>(k)];
     }
 
     auto operator[](int i, int j, int k, int state) const -> double {
-        return data_[(static_cast<std::size_t>(state) * meta.n1 + i) * meta.n2 * meta.n3
-                   + static_cast<std::size_t>(j) * meta.n3
+        return data_[static_cast<std::size_t>(state) * meta.n1 * meta.n2 * meta.n3
+                   + static_cast<std::size_t>(i) * meta.n1 * meta.n2
+                   + static_cast<std::size_t>(j) * meta.n1
                    + static_cast<std::size_t>(k)];
     }
 
