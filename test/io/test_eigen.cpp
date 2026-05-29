@@ -1,9 +1,7 @@
+import std;
 import io;
 
-#include <print>
-#include <cmath>
-#include <iostream>
-
+#define OCC_READER_IMPORT_STD
 #include "occ_reader.hpp"
 
 constexpr double HARTREE_TO_EV = 27.211386245988;

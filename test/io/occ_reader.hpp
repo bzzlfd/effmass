@@ -1,11 +1,8 @@
 #pragma once
 
-#include <cstdio>
-#include <cstring>
-#include <cstdlib>
-#include <string>
-#include <vector>
-#include <stdexcept>
+// Note: standard library must be available before including this header.
+// Either `import std;` or traditional `#include` of:
+//   <cstdio> <cstring> <cstdlib> <string> <vector> <stdexcept>
 
 
 // Lightweight header-only reader for OUT.OCC text format.
