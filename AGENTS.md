@@ -127,6 +127,7 @@ auto function_name(args...) -> ReturnType;
 - 每次完成一个进度后，评估是否需要更新 `docs/` 目录。
 
 ## Git commit messages
+> DO NOT run `git add`, `git commit`, `git push`, `git reset`, `git rebase` and/or do any other git mutations unless explicitly asked to do so. Ask for confirmation each time when you need to do git mutations, even if the user has confirmed in earlier conversations.
 
 采用 Conventional Commits 格式：
 
