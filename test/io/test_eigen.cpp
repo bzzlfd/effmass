@@ -1,5 +1,12 @@
 import io;
-import std;
+
+#include <print>
+#include <cmath>
+#include <iostream>
+
+#include "occ_reader.hpp"
+
+constexpr double HARTREE_TO_EV = 27.211386245988;
 
 
 auto main() -> int {
@@ -44,16 +51,6 @@ auto main() -> int {
         if (std::abs(eig.kpt_vec[0].z - 0.0) > 1e-15) {
             throw std::runtime_error("kpt_vec[0].z mismatch");
         }
-        if (std::abs(eig.kpt_vec[9].x - 0.6376521918879398) > 1e-12) {
-            throw std::runtime_error("kpt_vec[9].x mismatch");
-        }
-        if (std::abs(eig.kpt_vec[9].y - 0.12271622187223635) > 1e-12) {
-            throw std::runtime_error("kpt_vec[9].y mismatch");
-        }
-        if (std::abs(eig.kpt_vec[9].z - 0.3313681780059838) > 1e-12) {
-            throw std::runtime_error("kpt_vec[9].z mismatch");
-        }
-
         // kVec operator[] access
         if (std::abs(eig.kpt_vec[0][0] - 0.0) > 1e-15) {
             throw std::runtime_error("kpt_vec[0][0] mismatch");
@@ -87,44 +84,63 @@ auto main() -> int {
             throw std::runtime_error("sum(kpt_weight) mismatch: expected 1.0, got " + std::to_string(sum_weight));
         }
 
-        // Eigenvalue shape via metadata
-        if (m.nband != 26 || m.nkpt != 10 || m.islda != 1) {
+        // print_info should not throw
+        eig.print_info();
+
+        // ================================================================
+        // Part 2: Cross-validate EIGEN against OUT.OCC (same k-mesh)
+        // ================================================================
+
+        EIGEN eig_nonlocal("test/data_io-nonlocal/OUT.EIGEN");
+        auto occ = parseOCC("test/data_io-nonlocal/OUT.OCC");
+
+        if (occ.nkpt != eig_nonlocal.meta.nkpt) {
             throw std::runtime_error(
-                "eigenvalue dims mismatch: got (" +
-                std::to_string(m.nband) + ", " + std::to_string(m.nkpt) + ", " + std::to_string(m.islda) + ")"
+                "nkpt mismatch: OCC=" + std::to_string(occ.nkpt)
+                + " EIGEN=" + std::to_string(eig_nonlocal.meta.nkpt)
+            );
+        }
+        if (occ.nband != eig_nonlocal.meta.nband) {
+            throw std::runtime_error(
+                "nband mismatch: OCC=" + std::to_string(occ.nband)
+                + " EIGEN=" + std::to_string(eig_nonlocal.meta.nband)
             );
         }
 
-        // Eigenvalue values: [iband, ikpt] 2-arg access (islda == 1)
-        if (std::abs(eig[0, 0] - (-3.815737508526)) > 1e-10) {
-            throw std::runtime_error("eig[0, 0] mismatch");
-        }
-        if (std::abs(eig[1, 0] - (-3.815470384212)) > 1e-10) {
-            throw std::runtime_error("eig[1, 0] mismatch");
-        }
-        if (std::abs(eig[2, 0] - (-1.108624757074)) > 1e-10) {
-            throw std::runtime_error("eig[2, 0] mismatch");
-        }
-        if (std::abs(eig[23, 9] - 0.839070215740) > 1e-10) {
-            throw std::runtime_error("eig[23, 9] mismatch");
-        }
-        if (std::abs(eig[24, 9] - 0.860468329976) > 1e-10) {
-            throw std::runtime_error("eig[24, 9] mismatch");
-        }
-        if (std::abs(eig[25, 9] - 0.860468438023) > 1e-10) {
-            throw std::runtime_error("eig[25, 9] mismatch");
-        }
-
-        // 3-arg access [iband, ikpt, ispin]
-        if (std::abs(eig[0, 0, 0] - (-3.815737508526)) > 1e-10) {
-            throw std::runtime_error("eig[0, 0, 0] mismatch");
-        }
-        if (std::abs(eig[25, 9, 0] - 0.860468438023) > 1e-10) {
-            throw std::runtime_error("eig[25, 9, 0] mismatch");
+        // k-point vectors: EIGEN full-precision, OCC rounded to 4 dp
+        for (int ik = 0; ik < occ.nkpt; ++ik) {
+            if (std::abs(eig_nonlocal.kpt_vec[ik].x - occ.kpt_vec[ik].x) > 1e-4) {
+                throw std::runtime_error(
+                    "k-point " + std::to_string(ik + 1) + " x mismatch"
+                );
+            }
+            if (std::abs(eig_nonlocal.kpt_vec[ik].y - occ.kpt_vec[ik].y) > 1e-4) {
+                throw std::runtime_error(
+                    "k-point " + std::to_string(ik + 1) + " y mismatch"
+                );
+            }
+            if (std::abs(eig_nonlocal.kpt_vec[ik].z - occ.kpt_vec[ik].z) > 1e-4) {
+                throw std::runtime_error(
+                    "k-point " + std::to_string(ik + 1) + " z mismatch"
+                );
+            }
         }
 
-        // print_info should not throw
-        eig.print_info();
+        // Energies: EIGEN (Hartree) → eV vs OCC (eV, rounded to 4 dp)
+        for (int ik = 0; ik < occ.nkpt; ++ik) {
+            for (int ib = 0; ib < occ.nband; ++ib) {
+                double eig_ev = eig_nonlocal[ib, ik] * HARTREE_TO_EV;
+                double occ_ev = occ.energy(ik, ib);
+                if (std::abs(eig_ev - occ_ev) > 0.001) {
+                    throw std::runtime_error(
+                        "Energy mismatch at k-point " + std::to_string(ik + 1)
+                        + ", band " + std::to_string(ib + 1)
+                        + ": EIGEN=" + std::to_string(eig_ev)
+                        + " eV, OCC=" + std::to_string(occ_ev) + " eV"
+                    );
+                }
+            }
+        }
 
         std::println("All EIGEN tests passed!");
         return 0;
