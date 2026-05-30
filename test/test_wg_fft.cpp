@@ -26,13 +26,15 @@ auto computeGspaceNorm(std::span<const std::complex<double>> wfc, double vol) ->
 
 auto main() -> int {
     try {
-        std::println("=== WG FFT Normalization Test ===");
+        // =========================================================================
+        // 0. Open data files
+        // =========================================================================
+        WG   wg("test/data_io-nonlocal/OUT.WG");
+        GKK  gkk("test/data_io-nonlocal/OUT.GKK");
+        RHO  rho("test/data_io-nonlocal/OUT.RHO");
+        EIGEN eigen("test/data_io-nonlocal/OUT.EIGEN");
 
-        WG wg("test/data_io-nonlocal/OUT.WG");
-        GKK gkk("test/data_io-nonlocal/OUT.GKK");
-        RHO rho("test/data_io-nonlocal/OUT.RHO");
-
-        // consistency of FFT grid dimensions and lattice volume
+        // --- grid & volume consistency ---
         check(wg.meta.n1 == gkk.meta.n1 && gkk.meta.n1 == rho.meta.n1, "n1 consistency");
         check(wg.meta.n2 == gkk.meta.n2 && gkk.meta.n2 == rho.meta.n2, "n2 consistency");
         check(wg.meta.n3 == gkk.meta.n3 && gkk.meta.n3 == rho.meta.n3, "n3 consistency");
@@ -44,16 +46,16 @@ auto main() -> int {
         double vol_rho = rho.lattice.volume();
         check(near(vol_wg, vol_gkk) && near(vol_gkk, vol_rho), "volume consistency");
         double vol = vol_rho;
+        std::println("  grid: {} x {} x {}  volume = {:.6f} Bohr³", n1, n2, n3, vol);
 
-        std::println("  grid: {} x {} x {}, volume = {:.6f} Bohr³", n1, n2, n3, vol);
-
-        // Load EIGEN for k-point comparison
-        EIGEN eigen("test/data_io-nonlocal/OUT.EIGEN");
+        // --- metadata ---
         check(eigen.meta.nkpt == wg.meta.nkpt, "EIGEN/WG nkpt consistency");
         check(eigen.meta.nband == wg.meta.mx, "EIGEN/WG nband consistency");
 
-        // Compare infer_k with EIGEN k-points.
-        // EIGEN stores k in Cartesian (Bohr^-1). Convert to fractional via A·k/(2π).
+        // =========================================================================
+        // 1. GKK.inferCurrent_k  vs  EIGEN k-points
+        // =========================================================================
+        std::println("\n--- GKK.inferCurrent_k  vs  EIGEN ---");
         auto Alat = gkk.meta.lattice.A();
         constexpr double TWO_PI = 2.0 * std::numbers::pi;
         auto cartToFrac = [&](double kx, double ky, double kz) -> std::array<double, 3> {
@@ -62,8 +64,6 @@ auto main() -> int {
                 f[d] = (Alat[d][0]*kx + Alat[d][1]*ky + Alat[d][2]*kz) / TWO_PI;
             return f;
         };
-
-        std::println("  infer_k vs EIGEN k-point comparison:");
         for (int ikpt = 0; ikpt < wg.meta.nkpt; ++ikpt) {
             gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
             auto kv = gkk.loadKPoint(ikpt);
@@ -72,69 +72,56 @@ auto main() -> int {
             auto ef = cartToFrac(ek.x, ek.y, ek.z);
             double dk = std::sqrt(
                 (ik[0]-ef[0])*(ik[0]-ef[0]) + (ik[1]-ef[1])*(ik[1]-ef[1]) + (ik[2]-ef[2])*(ik[2]-ef[2]));
-            std::println("    kpt={:2d}: infer_k=({:.12f},{:.12f},{:.12f})  "
-                         "eigen_frac=({:.12f},{:.12f},{:.12f})  dk={:.2e}",
-                         ikpt, ik[0], ik[1], ik[2], ef[0], ef[1], ef[2], dk);
             check(dk < 1e-12,
                   std::format("kpt={}: infer_k matches EIGEN k-point", ikpt));
         }
 
-        // Normalization check: sum|W|^2 * volume should be 1.0
-        std::println("  Normalization (sum|W|^2 * volume == 1.0):");
+        // =========================================================================
+        // 2. G-space normalization:  Σ|W_g|² · Ω = 1  for every band
+        // =========================================================================
+        std::println("\n--- G-space normalization  Σ|W_g|² · Ω == 1 ---");
         int n_norm_fail = 0;
         for (int ikpt = 0; ikpt < wg.meta.nkpt; ++ikpt) {
             gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
-            auto kvecs2 = gkk.loadKPoint(ikpt);
-            int ng2 = static_cast<int>(kvecs2.iG.size());
+            auto& kvecs = gkk.loadKPoint(ikpt);
+            int ng = static_cast<int>(kvecs.iG.size());
 
             for (int iband = 0; iband < wg.meta.mx; ++iband) {
                 auto coeffs = wg.loadBand(ikpt, iband);
-                check(static_cast<int>(coeffs.up.size()) == ng2,
+                check(static_cast<int>(coeffs.up.size()) == ng,
                       std::format("kpt={} band={}: WG/GKK G-vector count match", ikpt, iband));
 
                 double norm_g = computeGspaceNorm(coeffs.up, vol);
                 if (!near(norm_g, 1.0)) {
-                    std::println("    kpt={:2d} band={:2d}: FAIL norm = {:.6f}", ikpt, iband, norm_g);
+                    std::println("    kpt={:2d} band={:2d}: norm = {:.6f}", ikpt, iband, norm_g);
                     ++n_norm_fail;
                 }
             }
         }
-        if (n_norm_fail > 0) {
-            throw std::runtime_error(
-                std::format("Normalization: {} bands deviate from 1.0", n_norm_fail));
-        }
-        std::println("  Normalization: all bands = 1.0");
+        if (n_norm_fail > 0)
+            throw std::runtime_error(std::format("{} bands deviate from 1.0", n_norm_fail));
 
-        // Full FFT roundtrip for band 0 (reload kpt=0 to ensure valid references)
+        // =========================================================================
+        // 3. Parseval: G-space ↔ R-space  for one band
+        // =========================================================================
+        std::println("\n--- Parseval  G ↔ R (kpt=0 band=0) ---");
         gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
-        auto kvecs0 = gkk.loadKPoint(0);
+        auto& kvecs0 = gkk.loadKPoint(0);
         int ng0 = static_cast<int>(kvecs0.iG.size());
 
         auto coeffs = wg.loadBand(0, 0);
         double norm_g0 = computeGspaceNorm(coeffs.up, vol);
 
-        // Build full FFT grid from sparse G-vector coefficients
         std::vector<std::complex<double>> grid(static_cast<std::size_t>(n123), 0.0);
-
         for (int ig = 0; ig < ng0; ++ig) {
-            int i = kvecs0.iG[ig];
-            int j = kvecs0.jG[ig];
-            int k = kvecs0.kG[ig];
-
-            int i_idx = ((i % n1) + n1) % n1;
-            int j_idx = ((j % n2) + n2) % n2;
-            int k_idx = ((k % n3) + n3) % n3;
-
+            int i_idx = ((kvecs0.iG[ig] % n1) + n1) % n1;
+            int j_idx = ((kvecs0.jG[ig] % n2) + n2) % n2;
+            int k_idx = ((kvecs0.kG[ig] % n3) + n3) % n3;
             grid[static_cast<std::size_t>(i_idx) * n2 * n3
                + static_cast<std::size_t>(j_idx) * n3
                + static_cast<std::size_t>(k_idx)] = coeffs.up[ig];
         }
 
-        // FFT G → R (unnormalized inverse DFT)
-        // Physical wavefunction: ψ(r) = IFFT[W_g]
-        // By Parseval: sum_r |ψ|² = N_tot * sum_g |W_g|²
-        // So: sum_r |ψ|² * vol / N_tot = sum_g |W_g|² * vol = norm_g0
-        // G-space and R-space normalization should be identical.
         FFT3D fft(n1, n2, n3);
         fft(grid, G2R);
 
@@ -142,9 +129,176 @@ auto main() -> int {
         for (auto& v : grid) sum_r += std::norm(v);
         double norm_r = sum_r * vol / static_cast<double>(n123);
 
-        std::println("  G-space (band 0): sum|W_g|^2 * volume            = {:.6f}", norm_g0);
-        std::println("  R-space (band 0): sum|W_r|^2 * volume/(n1*n2*n3) = {:.6f} (via G2R)", norm_r);
+        std::println("  G-space: Σ|W_g|²·Ω              = {:.6f}", norm_g0);
+        std::println("  R-space: Σ|ψ(r)|²·Ω/(n1·n2·n3) = {:.6f}", norm_r);
         check(near(norm_g0, norm_r), "G-space ↔ R-space Parseval consistency");
+
+        // =========================================================================
+        // 4. Single-band |ψ|²  vs  PWmat OUT.WG2RHO reference
+        // =========================================================================
+
+        // --- 4a.  Γ-point  (kpt=0, band=15)  →  OUT.WG2RHO_1_16 ---
+        std::println("\n--- Single-band density: kpt=0 band=15  vs  OUT.WG2RHO_1_16 ---");
+        gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
+        auto& kv_gamma = gkk.loadKPoint(0);
+        int ng_gamma = static_cast<int>(kv_gamma.iG.size());
+
+        auto coeffs_gamma = wg.loadBand(0, 15);
+        check(static_cast<int>(coeffs_gamma.up.size()) == ng_gamma,
+              "kpt=0 band=15: WG/GKK G-vector count match");
+
+        std::vector<std::complex<double>> gr_gamma(static_cast<std::size_t>(n123), 0.0);
+        for (int ig = 0; ig < ng_gamma; ++ig) {
+            int i_idx = ((kv_gamma.iG[ig] % n1) + n1) % n1;
+            int j_idx = ((kv_gamma.jG[ig] % n2) + n2) % n2;
+            int k_idx = ((kv_gamma.kG[ig] % n3) + n3) % n3;
+            gr_gamma[static_cast<std::size_t>(i_idx) * n2 * n3
+                   + static_cast<std::size_t>(j_idx) * n3
+                   + static_cast<std::size_t>(k_idx)] = coeffs_gamma.up[ig];
+        }
+        FFT3D fft_gamma(n1, n2, n3);
+        fft_gamma(gr_gamma, G2R);
+
+        std::vector<double> rho_gamma(static_cast<std::size_t>(n123));
+        for (int i = 0; i < n123; ++i) rho_gamma[i] = std::norm(gr_gamma[i]);
+
+        RHO rho_gamma_ref("test/data_io-nonlocal/OUT.WG2RHO_1_16");
+        check(rho_gamma_ref.meta.n1 == n1 && rho_gamma_ref.meta.n2 == n2 && rho_gamma_ref.meta.n3 == n3,
+              "OUT.WG2RHO_1_16 grid match");
+        check(rho_gamma_ref.meta.nstate == 1, "OUT.WG2RHO_1_16 nstate == 1");
+        {
+            double max_d = 0.0;
+            for (int i = 0; i < n1; ++i)
+                for (int j = 0; j < n2; ++j)
+                    for (int k = 0; k < n3; ++k) {
+                        auto idx = static_cast<std::size_t>(i) * n2 * n3
+                                 + static_cast<std::size_t>(j) * n3 + k;
+                        double d = std::abs(rho_gamma[idx] - rho_gamma_ref[i, j, k]);
+                        if (d > max_d) max_d = d;
+                    }
+            std::println("  max |comp - ref| = {:.4e}", max_d);
+            check(max_d < 1e-10, "|ψ|² matches OUT.WG2RHO_1_16");
+        }
+
+        // --- 4b.  non-Γ  (kpt=7, band=16)  →  OUT.WG2RHO_8_17 ---
+        std::println("\n--- Single-band density: kpt=7 band=16  vs  OUT.WG2RHO_8_17 ---");
+        gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
+        auto& kv_k7 = gkk.loadKPoint(7);
+        int ng_k7 = static_cast<int>(kv_k7.iG.size());
+
+        auto coeffs_k7 = wg.loadBand(7, 16);
+        check(static_cast<int>(coeffs_k7.up.size()) == ng_k7,
+              "kpt=7 band=16: WG/GKK G-vector count match");
+
+        std::vector<std::complex<double>> gr_k7(static_cast<std::size_t>(n123), 0.0);
+        for (int ig = 0; ig < ng_k7; ++ig) {
+            int i_idx = ((kv_k7.iG[ig] % n1) + n1) % n1;
+            int j_idx = ((kv_k7.jG[ig] % n2) + n2) % n2;
+            int k_idx = ((kv_k7.kG[ig] % n3) + n3) % n3;
+            gr_k7[static_cast<std::size_t>(i_idx) * n2 * n3
+                + static_cast<std::size_t>(j_idx) * n3
+                + static_cast<std::size_t>(k_idx)] = coeffs_k7.up[ig];
+        }
+        FFT3D fft_k7(n1, n2, n3);
+        fft_k7(gr_k7, G2R);
+
+        std::vector<double> rho_k7(static_cast<std::size_t>(n123));
+        for (int i = 0; i < n123; ++i) rho_k7[i] = std::norm(gr_k7[i]);
+
+        RHO rho_k7_ref("test/data_io-nonlocal/OUT.WG2RHO_8_17");
+        check(rho_k7_ref.meta.n1 == n1 && rho_k7_ref.meta.n2 == n2 && rho_k7_ref.meta.n3 == n3,
+              "OUT.WG2RHO_8_17 grid match");
+        check(rho_k7_ref.meta.nstate == 1, "OUT.WG2RHO_8_17 nstate == 1");
+        {
+            double max_d = 0.0;
+            for (int i = 0; i < n1; ++i)
+                for (int j = 0; j < n2; ++j)
+                    for (int k = 0; k < n3; ++k) {
+                        auto idx = static_cast<std::size_t>(i) * n2 * n3
+                                 + static_cast<std::size_t>(j) * n3 + k;
+                        double d = std::abs(rho_k7[idx] - rho_k7_ref[i, j, k]);
+                        if (d > max_d) max_d = d;
+                    }
+            std::println("  max |comp - ref| = {:.4e}", max_d);
+            check(max_d < 1e-10, "|ψ|² matches OUT.WG2RHO_8_17");
+        }
+
+        // =========================================================================
+        // 5. Charge density reconstruction:  Σ occ·|ψ|²  vs  OUT.RHO
+        // =========================================================================
+        std::println("\n--- Charge density  Σ occ·|ψ|²  vs  OUT.RHO ---");
+
+        auto occ = parseOCC("test/data_io-nonlocal/OUT.OCC");
+        check(occ.nkpt == wg.meta.nkpt, "OCC/WG nkpt consistency");
+        check(occ.nband == wg.meta.mx, "OCC/WG nband consistency");
+
+        std::vector<double>              rho_acc(static_cast<std::size_t>(n123), 0.0);
+        std::vector<std::complex<double>> buf(static_cast<std::size_t>(n123));
+        FFT3D fft_acc(n1, n2, n3);
+
+        int nband = wg.meta.mx;
+        double total_occ = 0.0;
+        for (int ikpt = 0; ikpt < wg.meta.nkpt; ++ikpt) {
+            gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
+            auto& kv = gkk.loadKPoint(ikpt);
+            int ng = static_cast<int>(kv.iG.size());
+
+            for (int iband = 0; iband < nband; ++iband) {
+                double occ_val = occ.occupation(ikpt, iband);
+                if (occ_val == 0.0) continue;
+                total_occ += occ_val;
+
+                auto coeffs = wg.loadBand(ikpt, iband);
+                check(static_cast<int>(coeffs.up.size()) == ng,
+                      std::format("kpt={} band={}: WG/GKK G-vector count match", ikpt, iband));
+
+                std::fill(buf.begin(), buf.end(), 0.0);
+                for (int ig = 0; ig < ng; ++ig) {
+                    int i_idx = ((kv.iG[ig] % n1) + n1) % n1;
+                    int j_idx = ((kv.jG[ig] % n2) + n2) % n2;
+                    int k_idx = ((kv.kG[ig] % n3) + n3) % n3;
+                    buf[static_cast<std::size_t>(i_idx) * n2 * n3
+                      + static_cast<std::size_t>(j_idx) * n3
+                      + static_cast<std::size_t>(k_idx)] = coeffs.up[ig];
+                }
+                fft_acc(buf, G2R);
+                for (int ir = 0; ir < n123; ++ir)
+                    rho_acc[ir] += occ_val * std::norm(buf[ir]);
+            }
+        }
+
+        // --- integrate OUT.RHO for comparison ---
+        double rho_int = 0.0;
+        for (int i = 0; i < n1; ++i)
+            for (int j = 0; j < n2; ++j)
+                for (int k = 0; k < n3; ++k)
+                    rho_int += rho[i, j, k];
+        rho_int *= vol / static_cast<double>(n123);
+
+        std::println("  Σ occ_val        = {:.6f}", total_occ);
+        std::println("  ∫ OUT.RHO d³r    = {:.6f}", rho_int);
+
+        // --- point-by-point error ---
+        {
+            double max_d = 0.0, sum_sq = 0.0, sum_abs_ref = 0.0;
+            for (int i = 0; i < n1; ++i)
+                for (int j = 0; j < n2; ++j)
+                    for (int k = 0; k < n3; ++k) {
+                        auto idx = static_cast<std::size_t>(i) * n2 * n3
+                                 + static_cast<std::size_t>(j) * n3 + k;
+                        double d = rho_acc[idx] - rho[i, j, k];
+                        sum_sq += d * d;
+                        sum_abs_ref += std::abs(rho[i, j, k]);
+                        double ad = std::abs(d);
+                        if (ad > max_d) max_d = ad;
+                    }
+            double rmse    = std::sqrt(sum_sq / static_cast<double>(n123));
+            double avg_abs = sum_abs_ref / static_cast<double>(n123);
+            std::println("  max  |comp - ref| = {:.4e}", max_d);
+            std::println("  RMSE              = {:.4e}  ({:.2f}% of avg|ref|)",
+                         rmse, rmse / avg_abs * 100.0);
+            check(rmse < 1e-2, "Charge density matches OUT.RHO   RMSE < 1e-2");
+        }
 
         std::println("\nAll tests passed!");
         return 0;

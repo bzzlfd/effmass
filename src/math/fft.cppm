@@ -8,14 +8,16 @@ import std;
 
 
 export {
-    constexpr bool R2G = true;
-    constexpr bool G2R = false;
+    enum class FFTDirection { FORWARD = true, BACKWARD = false };
+    constexpr FFTDirection R2G = FFTDirection::FORWARD;
+    constexpr FFTDirection G2R = FFTDirection::BACKWARD;
+
     class FFT3D;
 }
 
 class FFT1D {
 public:
-    auto operator()(std::span<std::complex<double>> data, bool forward) const -> void {
+    auto operator()(std::span<std::complex<double>> data, FFTDirection forward) const -> void {
         auto sz = data.size();
         if (sz > static_cast<std::size_t>(std::numeric_limits<int>::max()))
             throw std::runtime_error("FFT1D: span size exceeds int max");
@@ -32,7 +34,7 @@ public:
         auto& plan = it->second;
 
         auto* buf = reinterpret_cast<double*>(data.data());
-        if (forward) {
+        if (forward == FFTDirection::FORWARD) {
             cfft_forward(plan.get(), buf, 1.0 / n);
         } else {
             cfft_backward(plan.get(), buf, 1.0);
@@ -55,7 +57,7 @@ public:
     FFT3D(FFT3D&&) noexcept = default;
     auto operator=(FFT3D&&) noexcept -> FFT3D& = default;
 
-    auto operator()(std::span<std::complex<double>> grid, bool forward) const -> void {
+    auto operator()(std::span<std::complex<double>> grid, FFTDirection forward) const -> void {
         int s23 = n2_ * n3_;
         int s3  = n3_;
 

@@ -56,10 +56,10 @@ auto view = KVecsView::Cartesian | KVecsView::Spherical;
 
 ```cpp
 export struct KVecs {
-    // Cartesian representation: K = G - k
-    std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, G_x-k_x, G_y-k_y, G_z-k_z
+    // Cartesian: semantically interpreted as -K = -(G+k)
+    std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, -(G_x+k_x), -(G_y+k_y), -(G_z+k_z)
     
-    // Spherical representation of K = G - k
+    // Spherical representation of -K
     std::span<const double> q, theta, phi;        // |K|, polar angle [0,π], azimuthal angle [-π,π]
 
     // Integer indices of G vector in reciprocal lattice basis
@@ -70,9 +70,9 @@ export struct KVecs {
 };
 ```
 
-- **Cartesian**（始终可加载）：`kinetic` 为 `|G+k|²/2`，`Kx/Ky/Kz` 为 `G-k` 的 Cartesian 分量。
+- **Cartesian**（始终可加载）：`kinetic` 为 $|G+k|^2/2$，`Kx/Ky/Kz` 语义解释为 $-(G+k)$ 的 Cartesian 分量。
 - **Spherical**：由 `Kx/Ky/Kz` 转换而来，`q = |K|`，`theta = acos(Kz/q)`，`phi = atan2(Ky, Kx)`。
-- **Integer**：利用 `inferCurrent_k()` 推断 k 点分数坐标，通过公式 `(iG,jG,kG) = round(A^T * K_cart / (2π) + k_frac)` 计算 G 向量的整数米勒指数。同时填充该 k 点相关的全局元数据：
+- **Integer**：使用点取反恢复 $G+k$ 后，通过公式 `iG = round(A^T·(G+k) / (2π) - k_frac)` 计算 G 向量的整数米勒指数。同时填充该 k 点相关的全局元数据：
   - `kPoint`：当前 k 点的分数坐标（由 `inferCurrent_k()` 推断，范围 `(-0.5, 0.5]`）
   - `reciprocalLattice`：倒格子矩阵（行向量 `b1, b2, b3`，单位 Bohr⁻¹），由 `Lattice::B()` 在每次调用时动态计算。
 
@@ -167,7 +167,7 @@ KVecsView currentView() const;                                   // 查询当前
 const KVecs& loadKPoint(int ikpt);                               // 加载指定 k 点数据（带缓存）
 int current_ikpt() const;                                        // 当前缓存的 k 点索引
 const KVecs& currentData() const;                                // 当前缓存的数据视图（按 currentView 过滤）
-std::array<double, 3> inferCurrent_k() const;                    // 从 K=G-k 数据推断 k 点分数坐标 (fractional coordinate)
+std::array<double, 3> inferCurrent_k() const;                    // 从 -K = -(G+k) 数据推断 k 点分数坐标
 ```
 
 - `setDataView`

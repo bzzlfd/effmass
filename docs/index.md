@@ -13,11 +13,12 @@
 - `note/fortran_record_format.md`：Fortran unformatted binary 的 record 格式
 - `note/file_formats.md`：OUT.GKK、OUT.WG、OUT.EIGEN、OUT.KPT 的文件格式解析
 - `note/upf_format.md`：UPF v.2 赝势格式的字段含义、变量说明、束缚态波函数归一化条件
+- `note/plane_wave_sign_conventions.md`：平面波波矢相关符号约定。涉及 GKK；FFT forward/backward，及其归一化系数约定；PWmat WG2RHO 程序、数据分析与参考。
 - `note/clangd_cpp23_modules.md`：clangd 如何通过 `compile_commands.json` 自动解析 `import std`，无需硬编码 `std.pcm` 路径
 
 ## 设计决策（design/）
 
-- `design/conventions.md`：**[Convention-001/002]** 晶格矢量索引约定与倒空间物理量命名规范
+- `design/conventions.md`：**[Convention-001/002]** 晶格矢量索引约定/物理量命名规范
 - `design/physical_constants.md`：物理常量命名规范与 `constexpr` 使用约定
 - `design/io_module.md`：`io` 总模块及子模块 `io.GKK`、`io.WG`、`io.EIGEN`、`io.lattice` 的接口设计与实现细节
 - `design/pseudo_module.md`：赝势读取模块的接口设计、`NCPPUPF` 类结构与 UPF 文件 tag 的映射

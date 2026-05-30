@@ -53,10 +53,10 @@ constexpr auto hasView(KVecsView flags, KVecsView view) -> bool {
 
 // k-point G-vector data view - non-owning spans to contiguous memory
 struct KVecs {
-    // Cartesian representation: K = G - k
-    std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, G_x-k_x, G_y-k_y, G_z-k_z
-    
-    // Spherical representation of K = G - k
+    // Cartesian: data represents -K = -(G+k), negated at load time vs PWmat file convention
+    std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, -(G_x+k_x), -(G_y+k_y), -(G_z+k_z)
+
+    // Spherical representation of -K
     std::span<const double> q, theta, phi;        // |K|, polar angle [0,π], azimuthal angle [-π,π]
 
     // Integer indices of G vector in reciprocal lattice basis
@@ -453,19 +453,21 @@ auto GKK::computeIntegerIndices(std::size_t ng) -> void {
     constexpr double TWO_PI = 2.0 * std::numbers::pi;
     auto A_mat = meta.lattice.A();
     for (std::size_t ig = 0; ig < ng; ++ig) {
-        const double kx = Kx_buf_[ig];
-        const double ky = Ky_buf_[ig];
-        const double kz = Kz_buf_[ig];
+        const double Kx = - Kx_buf_[ig];
+        const double Ky = - Ky_buf_[ig];
+        const double Kz = - Kz_buf_[ig];
 
         // c[n] = A[n][0] * Kx + A[n][1] * Ky + A[n][2] * Kz
         // (iG,jG,kG) = round(c / (2π) + k_frac)
-        double cx = A_mat[0][0] * kx + A_mat[0][1] * ky + A_mat[0][2] * kz;
-        double cy = A_mat[1][0] * kx + A_mat[1][1] * ky + A_mat[1][2] * kz;
-        double cz = A_mat[2][0] * kx + A_mat[2][1] * ky + A_mat[2][2] * kz;
+        // note: Data is read as -K = -(G+k), so A·(-K)/(2π) = -(iG + k_frac).
+        //       iG = round(-A·(-K)/(2π) - k_frac) = round(iG + k_frac - k_frac) = iG.
+        double cx = (A_mat[0][0] * Kx + A_mat[0][1] * Ky + A_mat[0][2] * Kz);
+        double cy = (A_mat[1][0] * Kx + A_mat[1][1] * Ky + A_mat[1][2] * Kz);
+        double cz = (A_mat[2][0] * Kx + A_mat[2][1] * Ky + A_mat[2][2] * Kz);
 
-        iG_buf_[ig] = static_cast<int>(std::lround(cx / TWO_PI + k_frac[0]));
-        jG_buf_[ig] = static_cast<int>(std::lround(cy / TWO_PI + k_frac[1]));
-        kG_buf_[ig] = static_cast<int>(std::lround(cz / TWO_PI + k_frac[2]));
+        iG_buf_[ig] = static_cast<int>(std::lround(cx / TWO_PI - k_frac[0]));
+        jG_buf_[ig] = static_cast<int>(std::lround(cy / TWO_PI - k_frac[1]));
+        kG_buf_[ig] = static_cast<int>(std::lround(cz / TWO_PI - k_frac[2]));
     }
 }
 
@@ -607,16 +609,15 @@ auto GKK::inferCurrent_k() const -> std::array<double, 3> {
         double sum_sin = 0.0;
 
         for (std::size_t ig = 0; ig < ng; ++ig) {
-            // v = G - k (Cartesian, in Bohr^-1, consistent with AL in Bohr)
-            const double Kx = data.Kx[ig];
-            const double Ky = data.Ky[ig];
-            const double Kz = data.Kz[ig];
+            // Data is interpreted as -K = -(G+k) in Bohr^-1.
+            const double Kx = - data.Kx[ig];
+            const double Ky = - data.Ky[ig];
+            const double Kz = - data.Kz[ig];
 
-            // c = a_dim · v / (2π), fractional coordinate in reciprocal basis
+            // A·(K) / (2π) = A·(G+k) / (2π) = iG + k_frac  (no leading minus needed)
             const double c = (A_mat[dim][0] * Kx + A_mat[dim][1] * Ky + A_mat[dim][2] * Kz) / TWO_PI;
 
-            // c = n - k_frac, thus c mod 1 = (-k_frac) mod 1
-            // Use circular mean on [0,1) to robustly handle wrap-around at 0/1 boundary
+            // d = k_frac mod 1 (fractional part of iG + k_frac is just k_frac)
             const double d = c - std::floor(c);   // [0, 1)
             const double theta = d * TWO_PI;
             sum_cos += std::cos(theta);
@@ -629,11 +630,9 @@ auto GKK::inferCurrent_k() const -> std::array<double, 3> {
         }
         const double d_avg = avg_theta / TWO_PI;   // [0, 1)
 
-        // k = wrap(-d_avg) into (-0.5, 0.5]
-        double k = -d_avg;
-        k = std::fmod(k, 1.0);
-        if (k <= -0.5) k += 1.0;
-        if (k > 0.5)   k -= 1.0;
+        // wrap d_avg into (-0.5, 0.5]
+        double k = d_avg;
+        if (k > 0.5) k -= 1.0;
         k_frac[dim] = k;
     }
 

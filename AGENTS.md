@@ -101,7 +101,7 @@ auto function_name(args...) -> ReturnType;
 详见 `docs/design/conventions.md`：
 
 - **晶格矢量索引（Convention-001）**：`AL[n][c]` 中 `n` 为晶格矢量编号，`c` 为分量，`AL[n]` 内存连续。
-- **倒空间物理量命名（Convention-002）**：`k`（分数坐标）、`G`（倒格子矢量）、`K = G - k`（`Kx/Ky/Kz`）、`kinetic`（`|G+k|²/2`）；整数索引前缀 `ikpt`/`iband`/`inode`/`ig`。
+- **倒空间物理量命名（Convention-002）**：`k`（分数坐标）、`G`（倒格子矢量）、`Kx/Ky/Kz` 语义解释为 `-K = -(G+k)`、`kinetic`（$|G+k|^2/2$）；整数索引前缀 `ikpt`/`iband`/`inode`/`ig`。
 
 ## 模块级设计约定
 
