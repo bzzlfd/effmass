@@ -5,6 +5,7 @@ import std;
 auto main() -> int {
     try {
         NCPPUPF upf("test/data_io_ncpp/Ge-spd-high.PD04.PBE.UPF");
+        NCPP ncpp(upf);
 
         const auto& h = upf.header();
 
@@ -177,14 +178,14 @@ auto main() -> int {
         }
 
         // Mesh type inference
-        auto mt = upf.meshType();
+        auto mt = ncpp.meshType();
         if (mt == MeshType::Unknown) {
             throw std::runtime_error("meshType should not be Unknown for Ge-spd-high");
         }
 
         // nonlocalByL tests
         // Ge-spd-high has lll = {0, 0, 1, 1, 2, 2}
-        auto nl0 = upf.nonlocalByL(0);
+        auto nl0 = ncpp.nonlocalByL(0);
         if (nl0.beta.size() != 2) {
             throw std::runtime_error("nonlocalByL(0) beta count mismatch: expected 2, got " +
                 std::to_string(nl0.beta.size()));
@@ -196,7 +197,7 @@ auto main() -> int {
             throw std::runtime_error("nonlocalByL(0) dion data size mismatch");
         }
 
-        auto nl1 = upf.nonlocalByL(1);
+        auto nl1 = ncpp.nonlocalByL(1);
         if (nl1.beta.size() != 2) {
             throw std::runtime_error("nonlocalByL(1) beta count mismatch: expected 2, got " +
                 std::to_string(nl1.beta.size()));
@@ -205,7 +206,7 @@ auto main() -> int {
             throw std::runtime_error("nonlocalByL(1) dion size mismatch: expected 2x2");
         }
 
-        auto nl2 = upf.nonlocalByL(2);
+        auto nl2 = ncpp.nonlocalByL(2);
         if (nl2.beta.size() != 2) {
             throw std::runtime_error("nonlocalByL(2) beta count mismatch: expected 2, got " +
                 std::to_string(nl2.beta.size()));
@@ -214,7 +215,7 @@ auto main() -> int {
             throw std::runtime_error("nonlocalByL(2) dion size mismatch: expected 2x2");
         }
 
-        auto nl3 = upf.nonlocalByL(3);
+        auto nl3 = ncpp.nonlocalByL(3);
         if (nl3.beta.size() != 0) {
             throw std::runtime_error("nonlocalByL(3) beta count mismatch: expected 0, got " +
                 std::to_string(nl3.beta.size()));

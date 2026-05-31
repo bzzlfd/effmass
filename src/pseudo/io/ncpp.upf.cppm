@@ -10,9 +10,7 @@ export {
     class NCPPUPF;
         struct NCPPUPFHeader;
         struct NCPPUPFMesh;
-            enum class MeshType : int;
         struct NCPPUPFNonlocal;
-            struct NCPPUPFNonlocalByL;
         struct NCPPUPFWavefunction;
 }
 
@@ -81,21 +79,6 @@ struct NCPPUPFNonlocal {
 };
 
 
-// === Mesh type enumeration ===
-enum class MeshType {
-    Uniform,
-    Exponential,
-    Unknown
-};
-
-
-// === Nonlocal data filtered by angular momentum l ===
-struct NCPPUPFNonlocalByL {
-    std::vector<std::vector<double>> beta;  // [n_beta_l][mesh]
-    Matrix dion;                             // D_ij submatrix for this l
-};
-
-
 // === Wavefunction data (pseudo atomic orbitals) ===
 struct NCPPUPFWavefunction {
     std::vector<std::vector<double>> chi;   // [nwfc][effective_mesh]
@@ -118,9 +101,6 @@ public:
     auto wavefunctions() const -> const NCPPUPFWavefunction& { return wfc_; }
     auto rhoAtom() const -> std::span<const double> { return rho_at_; }
 
-    auto meshType() const -> MeshType;
-    auto nonlocalByL(int l) const -> NCPPUPFNonlocalByL;
-
 private:
     NCPPUPFHeader header_;
     NCPPUPFMesh mesh_;
@@ -138,68 +118,64 @@ private:
 };
 
 
-// --- helper: trim whitespace ---
-static auto trimWhitespace(const std::string& s) -> std::string {
-    auto start = s.find_first_not_of(" \t\n\r");
-    if (start == std::string::npos) return "";
-    auto end = s.find_last_not_of(" \t\n\r");
-    return s.substr(start, end - start + 1);
-}
+namespace {
+    auto trimWhitespace(const std::string& s) -> std::string {
+        auto start = s.find_first_not_of(" \t\n\r");
+        if (start == std::string::npos) return "";
+        auto end = s.find_last_not_of(" \t\n\r");
+        return s.substr(start, end - start + 1);
+    }
 
-// --- helper: parse text content to vector of doubles ---
-static auto parseTextToVector(const std::string& text) -> std::vector<double> {
-    std::vector<double> data;
-    std::istringstream iss(text);
-    std::string token;
-    while (iss >> token) {
-        if (token == "...") continue;
-        try {
-            std::size_t pos = 0;
-            double val = std::stod(token, &pos);
-            if (pos == token.size()) {
-                data.push_back(val);
+    auto parseTextToVector(const std::string& text) -> std::vector<double> {
+        std::vector<double> data;
+        std::istringstream iss(text);
+        std::string token;
+        while (iss >> token) {
+            if (token == "...") continue;
+            try {
+                std::size_t pos = 0;
+                double val = std::stod(token, &pos);
+                if (pos == token.size()) {
+                    data.push_back(val);
+                }
+            } catch (...) {
+                // skip non-numeric tokens
             }
-        } catch (...) {
-            // skip non-numeric tokens
+        }
+        return data;
+    }
+
+    auto getAttrString(const pugi::xml_node& node, const char* name) -> std::string {
+        pugi::xml_attribute attr = node.attribute(name);
+        if (!attr) {
+            throw std::runtime_error(std::string("UPF: missing attribute '") + name + "'");
+        }
+        return trimWhitespace(attr.value());
+    }
+
+    auto getAttrBool(const pugi::xml_node& node, const char* name) -> bool {
+        std::string value = getAttrString(node, name);
+        if (value == "T" || value == "t" || value == "true" || value == "TRUE") return true;
+        if (value == "F" || value == "f" || value == "false" || value == "FALSE") return false;
+        throw std::runtime_error(std::string("UPF: invalid boolean attribute '") + name + "' = '" + value + "'");
+    }
+
+    auto getAttrDouble(const pugi::xml_node& node, const char* name) -> double {
+        std::string value = getAttrString(node, name);
+        try {
+            return std::stod(value);
+        } catch (const std::exception&) {
+            throw std::runtime_error(std::string("UPF: invalid double attribute '") + name + "' = '" + value + "'");
         }
     }
-    return data;
-}
 
-// --- helper: read string attribute ---
-static auto getAttrString(const pugi::xml_node& node, const char* name) -> std::string {
-    pugi::xml_attribute attr = node.attribute(name);
-    if (!attr) {
-        throw std::runtime_error(std::string("UPF: missing attribute '") + name + "'");
-    }
-    return trimWhitespace(attr.value());
-}
-
-// --- helper: read bool attribute (T/F) ---
-static auto getAttrBool(const pugi::xml_node& node, const char* name) -> bool {
-    std::string value = getAttrString(node, name);
-    if (value == "T" || value == "t" || value == "true" || value == "TRUE") return true;
-    if (value == "F" || value == "f" || value == "false" || value == "FALSE") return false;
-    throw std::runtime_error(std::string("UPF: invalid boolean attribute '") + name + "' = '" + value + "'");
-}
-
-// --- helper: read double attribute ---
-static auto getAttrDouble(const pugi::xml_node& node, const char* name) -> double {
-    std::string value = getAttrString(node, name);
-    try {
-        return std::stod(value);
-    } catch (const std::exception&) {
-        throw std::runtime_error(std::string("UPF: invalid double attribute '") + name + "' = '" + value + "'");
-    }
-}
-
-// --- helper: read int attribute ---
-static auto getAttrInt(const pugi::xml_node& node, const char* name) -> int {
-    std::string value = getAttrString(node, name);
-    try {
-        return std::stoi(value);
-    } catch (const std::exception&) {
-        throw std::runtime_error(std::string("UPF: invalid int attribute '") + name + "' = '" + value + "'");
+    auto getAttrInt(const pugi::xml_node& node, const char* name) -> int {
+        std::string value = getAttrString(node, name);
+        try {
+            return std::stoi(value);
+        } catch (const std::exception&) {
+            throw std::runtime_error(std::string("UPF: invalid int attribute '") + name + "' = '" + value + "'");
+        }
     }
 }
 
@@ -394,85 +370,4 @@ auto NCPPUPF::readRhoAtom(const pugi::xml_node& root) -> void {
     if (rho_at_.size() != static_cast<std::size_t>(header_.mesh_size)) {
         throw std::runtime_error("UPF: <PP_RHOATOM> size mismatch");
     }
-}
-
-
-auto NCPPUPF::meshType() const -> MeshType {
-    const auto& r = mesh_.r;
-    const auto& rab = mesh_.rab;
-    const int n = static_cast<int>(r.size());
-    if (n < 2) return MeshType::Unknown;
-
-    // Check uniform: r[i] - r[i-1] ≈ constant
-    double drSum = 0.0;
-    for (int i = 1; i < n; ++i) {
-        drSum += r[i] - r[i - 1];
-    }
-    double drMean = drSum / (n - 1);
-    bool isUniform = true;
-    for (int i = 1; i < n; ++i) {
-        if (std::abs((r[i] - r[i - 1]) - drMean) > 1e-6 * std::max(std::abs(drMean), 1e-10)) {
-            isUniform = false;
-            break;
-        }
-    }
-    if (isUniform) return MeshType::Uniform;
-
-    // Check exponential: rab[i] / r[i] ≈ constant (skip r == 0)
-    int firstNonZero = 0;
-    while (firstNonZero < n && r[firstNonZero] == 0.0) ++firstNonZero;
-    if (firstNonZero >= n - 1) return MeshType::Unknown;
-
-    double ratioSum = 0.0;
-    int ratioCount = 0;
-    for (int i = firstNonZero; i < n; ++i) {
-        if (r[i] != 0.0) {
-            ratioSum += rab[i] / r[i];
-            ++ratioCount;
-        }
-    }
-    if (ratioCount < 2) return MeshType::Unknown;
-    double ratioMean = ratioSum / ratioCount;
-
-    bool isExponential = true;
-    for (int i = firstNonZero; i < n; ++i) {
-        if (r[i] != 0.0) {
-            if (std::abs(rab[i] / r[i] - ratioMean) > 1e-6 * std::max(std::abs(ratioMean), 1e-10)) {
-                isExponential = false;
-                break;
-            }
-        }
-    }
-    if (isExponential) return MeshType::Exponential;
-
-    return MeshType::Unknown;
-}
-
-
-auto NCPPUPF::nonlocalByL(int l) const -> NCPPUPFNonlocalByL {
-    std::vector<int> indices;
-    const int nb = header_.number_of_proj;
-    for (int i = 0; i < nb; ++i) {
-        if (nonlocal_.lll[i] == l) {
-            indices.push_back(i);
-        }
-    }
-
-    NCPPUPFNonlocalByL result;
-    const int nbl = static_cast<int>(indices.size());
-    result.beta.resize(nbl);
-    for (int i = 0; i < nbl; ++i) {
-        result.beta[i] = nonlocal_.beta[indices[i]];
-    }
-
-    result.dion.rows = nbl;
-    result.dion.cols = nbl;
-    result.dion.data.resize(static_cast<std::size_t>(nbl * nbl));
-    for (int i = 0; i < nbl; ++i) {
-        for (int j = 0; j < nbl; ++j) {
-            result.dion[i, j] = nonlocal_.dion[indices[i], indices[j]];
-        }
-    }
-
-    return result;
 }

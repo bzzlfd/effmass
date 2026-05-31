@@ -36,7 +36,7 @@ my_WG2RHO[i, j, k] == PWmat_WG2RHO[-i, -j, -k]
     - 所以 `R2G`（forward）系数 $1/n$，`G2R`（backward）系数 $1$
 
 
-
+目前来看，这个约定只影响 FFT 时与 PWmat 生成数据的比对，其余情况从 GKK 读到 $q$ 平面波就当作 $\exp(iqr)$ 计算，管你正的负的。
 
 
 
