@@ -54,6 +54,7 @@ target_sources(math
             src/math/sph_harmonics.cppm
             src/math/fft.cppm
             src/math/fourier_bessel.cppm
+            src/math/linalg.cppm
     PRIVATE
         vendor/pocketfft/pocketfft.c
 )
