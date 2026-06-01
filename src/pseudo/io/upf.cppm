@@ -13,6 +13,7 @@ export {
         struct UPFMesh;
         struct UPFNonlocal;
         struct UPFWavefunction;
+        struct UPFSOC;
 }
 
 
@@ -54,23 +55,30 @@ struct UPFMesh {
 
 // === Nonlocal data (beta projectors + D_ij) ===
 struct UPFNonlocal {
-    std::vector<std::vector<double>> beta;  // [nbeta][mesh]
-    std::vector<int> lll;                    // [nbeta] angular momentum
-    std::vector<double> jjj;                 // [nbeta] total angular momentum (0.0 if scalar)
-    std::vector<int> kbeta;                  // [nbeta] cutoff radius index
-    std::vector<double> rcut;                // [nbeta] cutoff radius
-    DenseMatrix<double> dion;                // D_ij matrix
+    std::vector<std::vector<double>> beta;
+    std::vector<int> lll;
+    std::vector<int> kbeta;
+    std::vector<double> rcut;
+    DenseMatrix<double> dion;
 };
 
 
 // === Wavefunction data (pseudo atomic orbitals) ===
 struct UPFWavefunction {
-    std::vector<std::vector<double>> chi;   // [nwfc][effective_mesh]
-    std::vector<int> kchi;                   // [nwfc] effective length (truncated trailing zeros)
-    std::vector<int> lchi;                   // [nwfc] angular momentum
-    std::vector<double> jchi;                // [nwfc] total angular momentum (0.0 if scalar)
-    std::vector<double> oc;                  // [nwfc] occupation
-    std::vector<std::string> labels;         // [nwfc] label
+    std::vector<std::vector<double>> chi;
+    std::vector<int> lchi;
+    std::vector<double> oc;
+    std::vector<std::string> labels;
+};
+
+
+// === SOC extension data (only populated when has_so == true) ===
+struct UPFSOC {
+    enum class Format { pp_spin_orb, ps_library };
+
+    Format format = Format::pp_spin_orb;
+    std::vector<double> jjj;   // [nbeta] total angular momentum
+    std::vector<double> jchi;  // [nwfc]  total angular momentum
 };
 
 
@@ -85,6 +93,7 @@ public:
     auto nonlocal() const -> const UPFNonlocal& { return nonlocal_; }
     auto wavefunctions() const -> const UPFWavefunction& { return wfc_; }
     auto rhoAtom() const -> std::span<const double> { return rho_at_; }
+    auto socData() const -> const UPFSOC* { return header_.has_so ? &soc_ : nullptr; }
 
 private:
     UPFHeader header_;
@@ -93,6 +102,7 @@ private:
     UPFNonlocal nonlocal_;
     UPFWavefunction wfc_;
     std::vector<double> rho_at_;
+    UPFSOC soc_;
 
     auto readSpinOrbit(const pugi::xml_node& root) -> void;
     auto readHeader(const pugi::xml_node& root) -> void;
@@ -283,7 +293,6 @@ auto UPF::readNonlocal(const pugi::xml_node& root) -> void {
 
     nonlocal_.beta.resize(nb, std::vector<double>(mesh));
     nonlocal_.lll.resize(nb);
-    nonlocal_.jjj.assign(nb, 0.0);
     nonlocal_.kbeta.resize(nb);
     nonlocal_.rcut.resize(nb);
 
@@ -302,12 +311,6 @@ auto UPF::readNonlocal(const pugi::xml_node& root) -> void {
         if (data.size() != static_cast<std::size_t>(mesh)) {
             throw std::runtime_error("UPF: <" + tag + "> size mismatch");
         }
-        // Truncate trailing zeros using cutoff_radius_index (1-based in UPF)
-        int cutoff = nonlocal_.kbeta[i];
-        if (cutoff < 0 || cutoff > mesh) {
-            throw std::runtime_error("UPF: <" + tag + "> invalid cutoff_radius_index");
-        }
-        data.resize(static_cast<std::size_t>(cutoff));
         nonlocal_.beta[i] = std::move(data);
     }
 
@@ -332,9 +335,7 @@ auto UPF::readWavefunctions(const pugi::xml_node& root) -> void {
     const int mesh = header_.mesh_size;
 
     wfc_.chi.resize(nw, std::vector<double>(mesh));
-    wfc_.kchi.resize(nw);
     wfc_.lchi.resize(nw);
-    wfc_.jchi.assign(nw, 0.0);
     wfc_.oc.resize(nw);
     wfc_.labels.resize(nw);
 
@@ -353,13 +354,6 @@ auto UPF::readWavefunctions(const pugi::xml_node& root) -> void {
         if (data.size() != static_cast<std::size_t>(mesh)) {
             throw std::runtime_error("UPF: <" + tag + "> size mismatch");
         }
-        // Truncate trailing zeros
-        int cutoff = mesh;
-        while (cutoff > 0 && data[static_cast<std::size_t>(cutoff) - 1] == 0.0) {
-            --cutoff;
-        }
-        data.resize(static_cast<std::size_t>(cutoff));
-        wfc_.kchi[i] = cutoff;
         wfc_.chi[i] = std::move(data);
     }
 }
@@ -376,26 +370,69 @@ auto UPF::readRhoAtom(const pugi::xml_node& root) -> void {
 
 
 auto UPF::readSpinOrbit(const pugi::xml_node& root) -> void {
+    const int nb = header_.number_of_proj;
+    const int nw = header_.number_of_wfc;
+
+    soc_.jjj .resize(nb);
+    soc_.jchi.resize(nw);
+
     pugi::xml_node so = root.child("PP_SPIN_ORB");
-    if (!so) {
-        throw std::runtime_error("UPF: missing <PP_SPIN_ORB> for SOC pseudopotential");
-    }
 
-    for (int i = 0; i < header_.number_of_proj; ++i) {
-        std::string tag = "PP_RELBETA." + std::to_string(i + 1);
-        pugi::xml_node rb = so.child(tag.c_str());
-        if (!rb) {
-            throw std::runtime_error("UPF: missing <" + tag + "> in PP_SPIN_ORB");
-        }
-        nonlocal_.jjj[i] = getAttrDouble(rb, "jjj");
-    }
+    if (so) {
+        // PseudoDojo format: jjj/jchi in PP_SPIN_ORB/PP_RELBETA.* and PP_RELWFC.*
+        soc_.format = UPFSOC::Format::pp_spin_orb;
 
-    for (int i = 0; i < header_.number_of_wfc; ++i) {
-        std::string tag = "PP_RELWFC." + std::to_string(i + 1);
-        pugi::xml_node rw = so.child(tag.c_str());
-        if (!rw) {
-            throw std::runtime_error("UPF: missing <" + tag + "> in PP_SPIN_ORB");
+        for (int i = 0; i < nb; ++i) {
+            std::string tag = "PP_RELBETA." + std::to_string(i + 1);
+            pugi::xml_node rb = so.child(tag.c_str());
+            if (!rb) {
+                throw std::runtime_error("UPF: missing <" + tag + "> in PP_SPIN_ORB");
+            }
+            soc_.jjj[i] = getAttrDouble(rb, "jjj");
         }
-        wfc_.jchi[i] = getAttrDouble(rw, "jchi");
+
+        for (int i = 0; i < nw; ++i) {
+            std::string tag = "PP_RELWFC." + std::to_string(i + 1);
+            pugi::xml_node rw = so.child(tag.c_str());
+            if (!rw) {
+                throw std::runtime_error("UPF: missing <" + tag + "> in PP_SPIN_ORB");
+            }
+            soc_.jchi[i] = getAttrDouble(rw, "jchi");
+        }
+    } else {
+        // PSlibrary format: jjj on PP_BETA.* / jchi on PP_CHI.*
+        soc_.format = UPFSOC::Format::ps_library;
+
+        pugi::xml_node pp_nonlocal = root.child("PP_NONLOCAL");
+        if (!pp_nonlocal) {
+            throw std::runtime_error("UPF: missing <PP_NONLOCAL> for SOC pseudopotential");
+        }
+        for (int i = 0; i < nb; ++i) {
+            std::string tag = "PP_BETA." + std::to_string(i + 1);
+            pugi::xml_node beta_node = pp_nonlocal.child(tag.c_str());
+            if (!beta_node) {
+                throw std::runtime_error("UPF: missing <" + tag + ">");
+            }
+            if (!beta_node.attribute("jjj")) {
+                throw std::runtime_error("UPF: missing jjj attribute on <" + tag + ">");
+            }
+            soc_.jjj[i] = getAttrDouble(beta_node, "jjj");
+        }
+
+        pugi::xml_node pp_pswfc = root.child("PP_PSWFC");
+        if (!pp_pswfc) {
+            throw std::runtime_error("UPF: missing <PP_PSWFC> for SOC pseudopotential");
+        }
+        for (int i = 0; i < nw; ++i) {
+            std::string tag = "PP_CHI." + std::to_string(i + 1);
+            pugi::xml_node chi_node = pp_pswfc.child(tag.c_str());
+            if (!chi_node) {
+                throw std::runtime_error("UPF: missing <" + tag + ">");
+            }
+            if (!chi_node.attribute("jchi")) {
+                throw std::runtime_error("UPF: missing jchi attribute on <" + tag + ">");
+            }
+            soc_.jchi[i] = getAttrDouble(chi_node, "jchi");
+        }
     }
 }
