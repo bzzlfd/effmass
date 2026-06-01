@@ -36,6 +36,10 @@ add_executable(test-pseudo-io-soc-upf pseudo/io/test_soc_upf.cpp)
 target_link_libraries(test-pseudo-io-soc-upf PRIVATE pseudo)
 add_test(NAME test-pseudo-io-soc-upf COMMAND test-pseudo-io-soc-upf WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test-pseudo-ncpp-upf2upfSO pseudo/test_ncpp_upf2upfSO.cpp)
+target_link_libraries(test-pseudo-ncpp-upf2upfSO PRIVATE pseudo)
+add_test(NAME test-pseudo-ncpp-upf2upfSO COMMAND test-pseudo-ncpp-upf2upfSO WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Math tests
 add_executable(test-math-sph-bessel math/test_sph_bessel.cpp)
 target_link_libraries(test-math-sph-bessel PRIVATE math)

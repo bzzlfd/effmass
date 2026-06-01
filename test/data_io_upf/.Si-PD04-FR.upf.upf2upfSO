@@ -1,0 +1,24 @@
+> upf2upfSO.x Si-PD04-FR.upf
+
+ input the upf file name(with SO)
+Si-PD04-FR.upf
+ opening the file: Si-PD04-FR.upf
+ original nbeta,nwfc,lmax          10           3           2
+ L,isign1,2,w           1           1           1           1
+ sumj_m=beta(j,m)*wave(aveJ);sumj_mT=beta(j,m)*beta(aveJ,m)
+ Ref: wave(aveJ) for betaSO(L); beta(aveJ,m) for beta0(L,m)
+ sum1_1, sum2_1    0.346373192616696       0.346975225276466
+ sum1_1T,sum2_1T   0.999949339492921       0.999965943898931
+ sum1_2, sum2_2    7.481474578029135E-002  7.217298099579499E-002
+ sum1_2T,sum2_2T   0.999858695971787       0.999901304045253
+ L,isign1,2,w           2           1           1          -1
+ sumj_m=beta(j,m)*wave(aveJ);sumj_mT=beta(j,m)*beta(aveJ,m)
+ Ref: wave(aveJ) for betaSO(L); beta(aveJ,m) for beta0(L,m)
+ sum1_1, sum2_1    8.706039534628238E-003  8.706046296874843E-003
+ sum1_1T,sum2_1T    1.00000025103498        1.00000025252479
+ sum1_2, sum2_2    2.379323396495538E-002  2.378370911032233E-002
+ sum1_2T,sum2_2T    1.00000255512007        1.00000255896166
+ NEW:nbeta,nwfc,lmax=           8           2           2
+ output PP file in UPF format : Si-PD04-FR.upf.SO
+ Pseudopotential successfully written
+

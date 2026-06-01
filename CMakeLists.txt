@@ -48,7 +48,7 @@ target_sources(pseudo
             src/pseudo/io/upf.cppm
             src/pseudo/ncpp.cppm
 )
-target_link_libraries(pseudo PRIVATE pugixml::pugixml utils)
+target_link_libraries(pseudo PRIVATE pugixml::pugixml utils math)
 
 # Library target for math module
 add_library(math)
