@@ -4,7 +4,7 @@ module;
 export module pseudo.io.upf;
 
 import std;
-import utils.matrix;
+import utils.array2d;
 
 
 export {
@@ -59,7 +59,7 @@ struct UPFNonlocal {
     std::vector<int> lll;
     std::vector<int> kbeta;
     std::vector<double> rcut;
-    DenseMatrix<double> dion;
+    array2d<double> dion;
 };
 
 

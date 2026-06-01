@@ -36,7 +36,7 @@ add_library(utils)
 target_sources(utils
     PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-            src/utils/matrix.cppm
+            src/utils/array2d.cppm
 )
 
 # Library target for pseudo-potential module
@@ -69,6 +69,7 @@ set_source_files_properties(vendor/pocketfft/pocketfft.c PROPERTIES
     COMPILE_DEFINITIONS "restrict=__restrict__"
 )
 target_include_directories(math PRIVATE vendor/pocketfft)
+target_link_libraries(math PRIVATE utils)
 
 # Tests
 enable_testing()

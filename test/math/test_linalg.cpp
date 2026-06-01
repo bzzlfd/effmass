@@ -43,10 +43,10 @@ auto test_2x2() -> void {
     // Check A * v = λ * v
     auto& v = res.eigenvectors;
     for (int j = 0; j < 2; ++j) {
-        double lhs0 = a[0] * v[0 * 2 + j] + a[2] * v[1 * 2 + j];
-        double lhs1 = a[1] * v[0 * 2 + j] + a[3] * v[1 * 2 + j];
-        double rhs0 = res.eigenvalues[j] * v[0 * 2 + j];
-        double rhs1 = res.eigenvalues[j] * v[1 * 2 + j];
+        double lhs0 = a[0] * v[j][0] + a[2] * v[j][1];
+        double lhs1 = a[1] * v[j][0] + a[3] * v[j][1];
+        double rhs0 = res.eigenvalues[j] * v[j][0];
+        double rhs1 = res.eigenvalues[j] * v[j][1];
         check(near(lhs0, rhs0, eps) && near(lhs1, rhs1, eps),
               std::format("eigenvector {} satisfies A*v = λ*v", j));
     }
@@ -73,9 +73,9 @@ auto test_3x3() -> void {
         for (int i = 0; i < 3; ++i) {
             double lhs = 0.0;
             for (int k = 0; k < 3; ++k) {
-                lhs += a[i * 3 + k] * v[k * 3 + j];
+                lhs += a[i * 3 + k] * v[j][k];
             }
-            double rhs = res.eigenvalues[j] * v[i * 3 + j];
+            double rhs = res.eigenvalues[j] * v[j][i];
             check(near(lhs, rhs, eps),
                   std::format("A*v{} = λ*v{} at row {}", j, j, i));
         }
@@ -101,9 +101,9 @@ auto test_random_5x5() -> void {
         for (int i = 0; i < n; ++i) {
             double lhs = 0.0;
             for (int k = 0; k < n; ++k) {
-                lhs += a[i * n + k] * v[k * n + j];
+                lhs += a[i * n + k] * v[j][k];
             }
-            double rhs = res.eigenvalues[j] * v[i * n + j];
+            double rhs = res.eigenvalues[j] * v[j][i];
             max_err = std::max(max_err, std::abs(lhs - rhs));
         }
         check(max_err < eps, std::format("eigenvector {} residual < 1e-12 (max_err={:.2e})", j, max_err));
@@ -114,7 +114,7 @@ auto test_random_5x5() -> void {
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
             double dot = 0.0;
-            for (int k = 0; k < n; ++k) dot += v[k * n + i] * v[k * n + j];
+            for (int k = 0; k < n; ++k) dot += v[i][k] * v[j][k];
             double expected = (i == j) ? 1.0 : 0.0;
             ortho_err = std::max(ortho_err, std::abs(dot - expected));
         }
@@ -130,7 +130,7 @@ auto test_1x1() -> void {
     auto res = diagonalize_jacobi(a, 1);
 
     check(near(res.eigenvalues[0], 42.0, eps), "λ = 42");
-    check(near(res.eigenvectors[0], 1.0, eps), "V = 1");
+    check(near(res.eigenvectors[0, 0], 1.0, eps), "V = 1");
 }
 
 auto test_convergence() -> void {

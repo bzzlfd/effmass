@@ -1,11 +1,12 @@
 export module math.linalg;
 
 import std;
+export import utils.array2d;
 
 export {
     struct DiagonalizeResult {
         std::vector<double> eigenvalues;
-        std::vector<double> eigenvectors;   // column-major, column j ↔ eigenvalues[j]
+        array2d<double> eigenvectors;   // row i ↔ eigenvector i
         bool converged = false;
     };
 
@@ -93,13 +94,13 @@ auto diagonalize_jacobi(std::span<const double> matrix, int n) -> DiagonalizeRes
     });
 
     std::vector<double> eigenvalues(n_sz);
-    std::vector<double> sorted_v(n_sz * n_sz);
+    array2d<double> eigvecs(n_sz, n_sz);
     for (std::size_t j = 0; j < n_sz; ++j) {
         eigenvalues[j] = a[idx[j] * n_sz + idx[j]];
         for (std::size_t i = 0; i < n_sz; ++i) {
-            sorted_v[i * n_sz + j] = v[i * n_sz + idx[j]];
+            eigvecs[j, i] = v[i * n_sz + idx[j]];
         }
     }
 
-    return {std::move(eigenvalues), std::move(sorted_v), conv};
+    return {std::move(eigenvalues), std::move(eigvecs), conv};
 }

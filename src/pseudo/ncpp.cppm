@@ -1,7 +1,7 @@
 export module pseudo.ncpp;
 
 import std;
-import utils.matrix;
+import utils.array2d;
 import math.linalg;
 import pseudo.io.upf;
 
@@ -39,7 +39,7 @@ enum class PseudoType {
 
 struct ProjectorBlock {
     std::vector<std::vector<double>> beta;
-    DenseMatrix<double> B;
+    array2d<double> B;
 };
 
 
@@ -74,7 +74,7 @@ public:
         std::vector<int> angular_momentum;
         std::vector<int> cutoff_index;
         std::vector<double> cutoff_radius;
-        DenseMatrix<double> B;
+        array2d<double> B;
         std::vector<double> jjj;  // total angular momentum j (SOC only)
     };
 
@@ -104,8 +104,8 @@ public:
 
     public:
         // D/B 矩阵 (UPF: dion)
-        auto dion()       -> DenseMatrix<double>&       { return p.nonlocal.B; }
-        auto dion() const -> const DenseMatrix<double>& { return p.nonlocal.B; }
+        auto dion()       -> array2d<double>&       { return p.nonlocal.B; }
+        auto dion() const -> const array2d<double>& { return p.nonlocal.B; }
 
         // 局域势 (UPF: vloc)
         auto vloc()       -> std::vector<double>&       { return p.local; }
@@ -136,8 +136,8 @@ public:
         auto oc() const -> const std::vector<double>& { return p.pseudoWfc.occupation; }
 
         // 文献/通用别名
-        auto D()           -> DenseMatrix<double>&       { return p.nonlocal.B; }
-        auto D() const     -> const DenseMatrix<double>& { return p.nonlocal.B; }
+        auto D()           -> array2d<double>&       { return p.nonlocal.B; }
+        auto D() const     -> const array2d<double>& { return p.nonlocal.B; }
         auto projectors()       -> std::vector<std::vector<double>>&       { return p.nonlocal.beta; }
         auto projectors() const -> const std::vector<std::vector<double>>& { return p.nonlocal.beta; }
         auto radialGrid()       -> std::vector<double>&       { return p.mesh.r; }
@@ -365,7 +365,7 @@ auto NCPP::Advance::diagonalizeNonlocal() -> void {
     }
 
     // beta_new[k][r] = sum_i beta[i][r] * U[i][k]
-    // eigenvectors column-major, column j <-> eigenvalue j -> U[i][k] = eigvec[i*n + k]
+    // eigenvectors row-major, row k <-> eigenvector k -> U[i][k] = eigvec[k, i]
     int max_cutoff = 0;
     for (const auto& b : p.nonlocal.beta) {
         max_cutoff = std::max(max_cutoff, static_cast<int>(b.size()));
@@ -376,7 +376,7 @@ auto NCPP::Advance::diagonalizeNonlocal() -> void {
     for (int k = 0; k < n; ++k) {
         p.nonlocal.beta[k].assign(max_cutoff, 0.0);
         for (int i = 0; i < n; ++i) {
-            double u_ik = result.eigenvectors[static_cast<std::size_t>(i) * n + k];
+            double u_ik = result.eigenvectors[k][i];
             const auto& beta_i = beta_old[i];
             for (int r = 0; r < static_cast<int>(beta_i.size()); ++r) {
                 p.nonlocal.beta[k][r] += beta_i[r] * u_ik;
@@ -616,7 +616,7 @@ auto NCPP::Advance::upf2upfSO() -> void {
 
     std::vector<std::vector<double>> new_beta(nbeta_new, std::vector<double>(n, 0.0));
     std::vector<int> new_lll(nbeta_new, 0);
-    DenseMatrix<double> new_D;
+    array2d<double> new_D;
     new_D.rows = nbeta_new;
     new_D.cols = nbeta_new;
     new_D.data.assign(static_cast<std::size_t>(nbeta_new * nbeta_new), 0.0);
