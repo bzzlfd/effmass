@@ -24,13 +24,17 @@ target_link_libraries(test-io-lattice PRIVATE io)
 add_test(NAME test-io-lattice COMMAND test-io-lattice WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Pseudopotential tests
-add_executable(test-pseudo-io-ncpp-upf pseudo/io/test_ncpp_upf.cpp)
-target_link_libraries(test-pseudo-io-ncpp-upf PRIVATE pseudo)
-add_test(NAME test-pseudo-io-ncpp-upf COMMAND test-pseudo-io-ncpp-upf WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_executable(test-pseudo-io-upf pseudo/io/test_ncpp_upf.cpp)
+target_link_libraries(test-pseudo-io-upf PRIVATE pseudo)
+add_test(NAME test-pseudo-io-upf COMMAND test-pseudo-io-upf WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test-pseudo-ncpp pseudo/test_ncpp.cpp)
 target_link_libraries(test-pseudo-ncpp PRIVATE pseudo)
 add_test(NAME test-pseudo-ncpp COMMAND test-pseudo-ncpp WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test-pseudo-io-soc-upf pseudo/io/test_soc_upf.cpp)
+target_link_libraries(test-pseudo-io-soc-upf PRIVATE pseudo)
+add_test(NAME test-pseudo-io-soc-upf COMMAND test-pseudo-io-soc-upf WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Math tests
 add_executable(test-math-sph-bessel math/test_sph_bessel.cpp)

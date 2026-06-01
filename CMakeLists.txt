@@ -45,9 +45,7 @@ target_sources(pseudo
     PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
             src/pseudo.cppm
-            src/pseudo/io/ncpp.upf.cppm
-            src/pseudo/io/uspp.upf.cppm
-            src/pseudo/io/paw.upf.cppm
+            src/pseudo/io/upf.cppm
             src/pseudo/ncpp.cppm
 )
 target_link_libraries(pseudo PRIVATE pugixml::pugixml utils)

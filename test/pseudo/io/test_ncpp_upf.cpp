@@ -4,7 +4,7 @@ import std;
 
 auto main() -> int {
     try {
-        NCPPUPF upf("test/data_io_ncpp/Ge-spd-high.PD04.PBE.UPF");
+        UPF upf("test/data_io_upf/Ge-spd-high.PD04.PBE.UPF");
         NCPP ncpp(upf);
 
         const auto& h = upf.header();
@@ -258,7 +258,7 @@ auto main() -> int {
             throw std::runtime_error("nonlocalByL(2) dion[1,1] mismatch");
         }
 
-        std::println("All NCPPUPF tests passed!");
+        std::println("All UPF tests passed!");
         return 0;
     } catch (const std::exception& e) {
         std::println(std::cerr, "Test failed: {}", e.what());

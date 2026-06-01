@@ -1,23 +1,23 @@
 module;
 #include "pugixml.hpp"
 
-export module pseudo.io.ncpp_upf;
+export module pseudo.io.upf;
 
 import std;
 import utils.matrix;
 
 
 export {
-    class NCPPUPF;
-        struct NCPPUPFHeader;
-        struct NCPPUPFMesh;
-        struct NCPPUPFNonlocal;
-        struct NCPPUPFWavefunction;
+    class UPF;
+        struct UPFHeader;
+        struct UPFMesh;
+        struct UPFNonlocal;
+        struct UPFWavefunction;
 }
 
 
-// === NCPPUPF Header structure ===
-struct NCPPUPFHeader {
+// === UPF Header structure ===
+struct UPFHeader {
     std::string generated;
     std::string author;
     std::string date;
@@ -46,16 +46,17 @@ struct NCPPUPFHeader {
 
 
 // === Mesh data ===
-struct NCPPUPFMesh {
+struct UPFMesh {
     std::vector<double> r;
     std::vector<double> rab;
 };
 
 
 // === Nonlocal data (beta projectors + D_ij) ===
-struct NCPPUPFNonlocal {
+struct UPFNonlocal {
     std::vector<std::vector<double>> beta;  // [nbeta][mesh]
     std::vector<int> lll;                    // [nbeta] angular momentum
+    std::vector<double> jjj;                 // [nbeta] total angular momentum (0.0 if scalar)
     std::vector<int> kbeta;                  // [nbeta] cutoff radius index
     std::vector<double> rcut;                // [nbeta] cutoff radius
     DenseMatrix<double> dion;                // D_ij matrix
@@ -63,35 +64,37 @@ struct NCPPUPFNonlocal {
 
 
 // === Wavefunction data (pseudo atomic orbitals) ===
-struct NCPPUPFWavefunction {
+struct UPFWavefunction {
     std::vector<std::vector<double>> chi;   // [nwfc][effective_mesh]
     std::vector<int> kchi;                   // [nwfc] effective length (truncated trailing zeros)
     std::vector<int> lchi;                   // [nwfc] angular momentum
+    std::vector<double> jchi;                // [nwfc] total angular momentum (0.0 if scalar)
     std::vector<double> oc;                  // [nwfc] occupation
     std::vector<std::string> labels;         // [nwfc] label
 };
 
 
-// === NCPPUPF class ===
-class NCPPUPF {
+// === UPF class ===
+class UPF {
 public:
-    explicit NCPPUPF(const std::string& filename);
+    explicit UPF(const std::string& filename);
 
-    auto header() const -> const NCPPUPFHeader& { return header_; }
-    auto mesh() const -> const NCPPUPFMesh& { return mesh_; }
+    auto header() const -> const UPFHeader& { return header_; }
+    auto mesh() const -> const UPFMesh& { return mesh_; }
     auto localPotential() const -> std::span<const double> { return vloc_; }
-    auto nonlocal() const -> const NCPPUPFNonlocal& { return nonlocal_; }
-    auto wavefunctions() const -> const NCPPUPFWavefunction& { return wfc_; }
+    auto nonlocal() const -> const UPFNonlocal& { return nonlocal_; }
+    auto wavefunctions() const -> const UPFWavefunction& { return wfc_; }
     auto rhoAtom() const -> std::span<const double> { return rho_at_; }
 
 private:
-    NCPPUPFHeader header_;
-    NCPPUPFMesh mesh_;
+    UPFHeader header_;
+    UPFMesh mesh_;
     std::vector<double> vloc_;
-    NCPPUPFNonlocal nonlocal_;
-    NCPPUPFWavefunction wfc_;
+    UPFNonlocal nonlocal_;
+    UPFWavefunction wfc_;
     std::vector<double> rho_at_;
 
+    auto readSpinOrbit(const pugi::xml_node& root) -> void;
     auto readHeader(const pugi::xml_node& root) -> void;
     auto readMesh(const pugi::xml_node& root) -> void;
     auto readLocalPotential(const pugi::xml_node& root) -> void;
@@ -162,9 +165,9 @@ namespace {
     }
 }
 
-// Implementation of NCPPUPF
+// Implementation of UPF
 
-NCPPUPF::NCPPUPF(const std::string& filename) {
+UPF::UPF(const std::string& filename) {
     pugi::xml_document doc;
     pugi::xml_parse_result result = doc.load_file(filename.c_str());
     if (!result) {
@@ -177,15 +180,27 @@ NCPPUPF::NCPPUPF(const std::string& filename) {
     }
 
     readHeader(root);
+
+    if (header_.is_ultrasoft) {
+        throw std::runtime_error("UPF: USPP reader not yet implemented");
+    }
+    if (header_.is_paw) {
+        throw std::runtime_error("UPF: PAW reader not yet implemented");
+    }
+
     readMesh(root);
     readLocalPotential(root);
     readNonlocal(root);
     readWavefunctions(root);
     readRhoAtom(root);
+
+    if (header_.has_so) {
+        readSpinOrbit(root);
+    }
 }
 
 
-auto NCPPUPF::readHeader(const pugi::xml_node& root) -> void {
+auto UPF::readHeader(const pugi::xml_node& root) -> void {
     pugi::xml_node pp_header = root.child("PP_HEADER");
     if (!pp_header) {
         throw std::runtime_error("UPF: missing <PP_HEADER>");
@@ -208,7 +223,9 @@ auto NCPPUPF::readHeader(const pugi::xml_node& root) -> void {
     header_.functional      = getAttrString(pp_header, "functional");
     header_.z_valence       = getAttrDouble(pp_header, "z_valence");
     header_.total_psenergy  = getAttrDouble(pp_header, "total_psenergy");
-    header_.wfc_cutoff      = getAttrDouble(pp_header, "wfc_cutoff");
+    if (pp_header.attribute("wfc_cutoff")) {
+        header_.wfc_cutoff = getAttrDouble(pp_header, "wfc_cutoff");
+    }
     header_.rho_cutoff      = getAttrDouble(pp_header, "rho_cutoff");
     header_.l_max           = getAttrInt(pp_header, "l_max");
     header_.l_local         = getAttrInt(pp_header, "l_local");
@@ -218,7 +235,7 @@ auto NCPPUPF::readHeader(const pugi::xml_node& root) -> void {
 }
 
 
-auto NCPPUPF::readMesh(const pugi::xml_node& root) -> void {
+auto UPF::readMesh(const pugi::xml_node& root) -> void {
     pugi::xml_node pp_mesh = root.child("PP_MESH");
     if (!pp_mesh) {
         throw std::runtime_error("UPF: missing <PP_MESH>");
@@ -240,7 +257,7 @@ auto NCPPUPF::readMesh(const pugi::xml_node& root) -> void {
 }
 
 
-auto NCPPUPF::readLocalPotential(const pugi::xml_node& root) -> void {
+auto UPF::readLocalPotential(const pugi::xml_node& root) -> void {
     if (header_.is_coulomb) {
         // Coulomb pseudopotential has no local potential
         return;
@@ -255,7 +272,7 @@ auto NCPPUPF::readLocalPotential(const pugi::xml_node& root) -> void {
 }
 
 
-auto NCPPUPF::readNonlocal(const pugi::xml_node& root) -> void {
+auto UPF::readNonlocal(const pugi::xml_node& root) -> void {
     pugi::xml_node pp_nonlocal = root.child("PP_NONLOCAL");
     if (!pp_nonlocal) {
         throw std::runtime_error("UPF: missing <PP_NONLOCAL>");
@@ -266,6 +283,7 @@ auto NCPPUPF::readNonlocal(const pugi::xml_node& root) -> void {
 
     nonlocal_.beta.resize(nb, std::vector<double>(mesh));
     nonlocal_.lll.resize(nb);
+    nonlocal_.jjj.assign(nb, 0.0);
     nonlocal_.kbeta.resize(nb);
     nonlocal_.rcut.resize(nb);
 
@@ -304,7 +322,7 @@ auto NCPPUPF::readNonlocal(const pugi::xml_node& root) -> void {
 }
 
 
-auto NCPPUPF::readWavefunctions(const pugi::xml_node& root) -> void {
+auto UPF::readWavefunctions(const pugi::xml_node& root) -> void {
     pugi::xml_node pp_pswfc = root.child("PP_PSWFC");
     if (!pp_pswfc) {
         throw std::runtime_error("UPF: missing <PP_PSWFC>");
@@ -316,6 +334,7 @@ auto NCPPUPF::readWavefunctions(const pugi::xml_node& root) -> void {
     wfc_.chi.resize(nw, std::vector<double>(mesh));
     wfc_.kchi.resize(nw);
     wfc_.lchi.resize(nw);
+    wfc_.jchi.assign(nw, 0.0);
     wfc_.oc.resize(nw);
     wfc_.labels.resize(nw);
 
@@ -346,11 +365,37 @@ auto NCPPUPF::readWavefunctions(const pugi::xml_node& root) -> void {
 }
 
 
-auto NCPPUPF::readRhoAtom(const pugi::xml_node& root) -> void {
+auto UPF::readRhoAtom(const pugi::xml_node& root) -> void {
     pugi::xml_node rho_node = root.child("PP_RHOATOM");
     if (!rho_node) throw std::runtime_error("UPF: missing <PP_RHOATOM>");
     rho_at_ = parseTextToVector(rho_node.child_value());
     if (rho_at_.size() != static_cast<std::size_t>(header_.mesh_size)) {
         throw std::runtime_error("UPF: <PP_RHOATOM> size mismatch");
+    }
+}
+
+
+auto UPF::readSpinOrbit(const pugi::xml_node& root) -> void {
+    pugi::xml_node so = root.child("PP_SPIN_ORB");
+    if (!so) {
+        throw std::runtime_error("UPF: missing <PP_SPIN_ORB> for SOC pseudopotential");
+    }
+
+    for (int i = 0; i < header_.number_of_proj; ++i) {
+        std::string tag = "PP_RELBETA." + std::to_string(i + 1);
+        pugi::xml_node rb = so.child(tag.c_str());
+        if (!rb) {
+            throw std::runtime_error("UPF: missing <" + tag + "> in PP_SPIN_ORB");
+        }
+        nonlocal_.jjj[i] = getAttrDouble(rb, "jjj");
+    }
+
+    for (int i = 0; i < header_.number_of_wfc; ++i) {
+        std::string tag = "PP_RELWFC." + std::to_string(i + 1);
+        pugi::xml_node rw = so.child(tag.c_str());
+        if (!rw) {
+            throw std::runtime_error("UPF: missing <" + tag + "> in PP_SPIN_ORB");
+        }
+        wfc_.jchi[i] = getAttrDouble(rw, "jchi");
     }
 }

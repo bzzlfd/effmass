@@ -2,7 +2,7 @@ export module pseudo.ncpp;
 
 import std;
 import utils.matrix;
-import pseudo.io.ncpp_upf;
+import pseudo.io.upf;
 
 export {
     class NCPP;
@@ -26,27 +26,27 @@ struct NonlocalByL {
 
 class NCPP {
 public:
-    explicit NCPP(const NCPPUPF& upf);
+    explicit NCPP(const UPF& upf);
 
     // Access raw UPF data
-    auto header() const -> const NCPPUPFHeader& { return upf_.header(); }
-    auto mesh() const -> const NCPPUPFMesh& { return upf_.mesh(); }
+    auto header() const -> const UPFHeader& { return upf_.header(); }
+    auto mesh() const -> const UPFMesh& { return upf_.mesh(); }
     auto localPotential() const -> std::span<const double> { return upf_.localPotential(); }
-    auto nonlocal() const -> const NCPPUPFNonlocal& { return upf_.nonlocal(); }
-    auto wavefunctions() const -> const NCPPUPFWavefunction& { return upf_.wavefunctions(); }
+    auto nonlocal() const -> const UPFNonlocal& { return upf_.nonlocal(); }
+    auto wavefunctions() const -> const UPFWavefunction& { return upf_.wavefunctions(); }
     auto rhoAtom() const -> std::span<const double> { return upf_.rhoAtom(); }
-    auto upfData() const -> const NCPPUPF& { return upf_; }
+    auto upfData() const -> const UPF& { return upf_; }
 
     // Higher-level interfaces
     auto meshType() const -> MeshType;
     auto nonlocalByL(int l) const -> NonlocalByL;
 
 private:
-    NCPPUPF upf_;
+    UPF upf_;
 };
 
 
-NCPP::NCPP(const NCPPUPF& upf) : upf_(upf) {}
+NCPP::NCPP(const UPF& upf) : upf_(upf) {}
 
 
 auto NCPP::meshType() const -> MeshType {
