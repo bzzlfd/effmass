@@ -165,6 +165,7 @@ public:
 
 private:
     auto checkSemilocal(const UPF& upf) -> void;
+    auto checkConsistency() -> void;
 };
 
 
@@ -173,6 +174,13 @@ NCPP::NCPP(const UPF& upf) {
 
     const auto& h = upf.header();
 
+    if (h.pseudo_type != "NC") {
+        throw std::runtime_error("NCPP: expected NC pseudopotential, got " + h.pseudo_type);
+    }
+
+    const auto& nl = upf.nonlocal();
+    const auto& wf = upf.wavefunctions();
+
     meta.element    = h.element;
     meta.z_valence  = h.z_valence;
     meta.functional = h.functional;
@@ -180,10 +188,6 @@ NCPP::NCPP(const UPF& upf) {
     if (h.relativistic == "no")         meta.relativistic = Relativistic::None;
     else if (h.relativistic == "scalar")   meta.relativistic = Relativistic::Scalar;
     else if (h.relativistic == "full")     meta.relativistic = Relativistic::Full;
-
-    if (h.pseudo_type != "NC") {
-        throw std::runtime_error("NCPP: expected NC pseudopotential, got " + h.pseudo_type);
-    }
 
     meta.l_max            = h.l_max;
     meta.mesh_size        = h.mesh_size;
@@ -201,7 +205,6 @@ NCPP::NCPP(const UPF& upf) {
     const auto vloc_src = upf.localPotential();
     local.assign(vloc_src.begin(), vloc_src.end());
 
-    const auto& nl = upf.nonlocal();
     nonlocal.beta             = nl.beta;
     nonlocal.angular_momentum = nl.lll;
     nonlocal.cutoff_index     = nl.kbeta;
@@ -214,7 +217,6 @@ NCPP::NCPP(const UPF& upf) {
         nonlocal.beta[i].resize(static_cast<std::size_t>(cutoff));
     }
 
-    const auto& wf = upf.wavefunctions();
     pseudoWfc.angular_momentum = wf.lchi;
     pseudoWfc.occupation       = wf.oc;
     pseudoWfc.label            = wf.labels;
@@ -238,11 +240,11 @@ NCPP::NCPP(const UPF& upf) {
 
     if (h.has_so) {
         const auto* soc = upf.socData();
-        if (soc) {
-            nonlocal.jjj = soc->jjj;
-            pseudoWfc.jchi = soc->jchi;
-        }
+        nonlocal.jjj = soc->jjj;
+        pseudoWfc.jchi = soc->jchi;
     }
+
+    checkConsistency();
 }
 
 
@@ -250,6 +252,76 @@ auto NCPP::checkSemilocal(const UPF& upf) -> void {
     if (upf.header().pseudo_type == "SL") {
         throw std::runtime_error(
             "NCPP: semilocal NC pseudopotential not yet supported");
+    }
+}
+
+auto NCPP::checkConsistency() -> void {
+    int ms = meta.mesh_size;
+    int nb = meta.number_of_proj;
+    int nw = meta.number_of_wfc;
+
+    if (ms <= 0)
+        throw std::runtime_error("NCPP: mesh_size (" + std::to_string(ms) + ") must be positive");
+
+    if (nb < 0)
+        throw std::runtime_error("NCPP: number_of_proj (" + std::to_string(nb) + ") must be non-negative");
+    if (nw < 0)
+        throw std::runtime_error("NCPP: number_of_wfc (" + std::to_string(nw) + ") must be non-negative");
+
+    if (static_cast<int>(mesh.r.size()) != ms)
+        throw std::runtime_error("NCPP: mesh.r size (" + std::to_string(mesh.r.size())
+            + ") != mesh_size (" + std::to_string(ms) + ")");
+    if (static_cast<int>(mesh.rab.size()) != ms)
+        throw std::runtime_error("NCPP: mesh.rab size != mesh_size");
+    if (static_cast<int>(local.size()) != ms)
+        throw std::runtime_error("NCPP: local potential size != mesh_size");
+    if (static_cast<int>(rho_atom.size()) != ms)
+        throw std::runtime_error("NCPP: rho_atom size != mesh_size");
+
+    if (nb > 0) {
+        int bsz = static_cast<int>(nonlocal.beta.size());
+        if (bsz != nb)
+            throw std::runtime_error("NCPP: beta.size() (" + std::to_string(bsz)
+                + ") != number_of_proj (" + std::to_string(nb) + ")");
+        if (static_cast<int>(nonlocal.angular_momentum.size()) != nb)
+            throw std::runtime_error("NCPP: angular_momentum.size() != number_of_proj");
+        if (static_cast<int>(nonlocal.cutoff_index.size()) != nb)
+            throw std::runtime_error("NCPP: cutoff_index.size() != number_of_proj");
+        if (static_cast<int>(nonlocal.cutoff_radius.size()) != nb)
+            throw std::runtime_error("NCPP: cutoff_radius.size() != number_of_proj");
+        if (nonlocal.B.rows != nb || nonlocal.B.cols != nb)
+            throw std::runtime_error("NCPP: B matrix (" + std::to_string(nonlocal.B.rows)
+                + "x" + std::to_string(nonlocal.B.cols) + ") != " + std::to_string(nb) + "x" + std::to_string(nb));
+
+        for (int i = 0; i < nb; ++i) {
+            int ci = nonlocal.cutoff_index[i];
+            if (ci < 0 || ci > ms)
+                throw std::runtime_error("NCPP: cutoff_index[" + std::to_string(i) + "] = "
+                    + std::to_string(ci) + " out of range [0, " + std::to_string(ms) + "]");
+            if (static_cast<int>(nonlocal.beta[i].size()) != ci)
+                throw std::runtime_error("NCPP: beta[" + std::to_string(i) + "] size ("
+                    + std::to_string(nonlocal.beta[i].size()) + ") != cutoff_index (" + std::to_string(ci) + ")");
+        }
+    }
+
+    if (nw > 0) {
+        if (static_cast<int>(pseudoWfc.chi.size()) != nw)
+            throw std::runtime_error("NCPP: chi.size() != number_of_wfc");
+        if (static_cast<int>(pseudoWfc.angular_momentum.size()) != nw)
+            throw std::runtime_error("NCPP: angular_momentum(lchi).size() != number_of_wfc");
+        if (static_cast<int>(pseudoWfc.occupation.size()) != nw)
+            throw std::runtime_error("NCPP: occupation.size() != number_of_wfc");
+        if (static_cast<int>(pseudoWfc.label.size()) != nw)
+            throw std::runtime_error("NCPP: label.size() != number_of_wfc");
+    }
+
+    if (meta.has_so) {
+        if (static_cast<int>(nonlocal.jjj.size()) != nb)
+            throw std::runtime_error("NCPP: jjj.size() (" + std::to_string(nonlocal.jjj.size())
+                + ") != number_of_proj (" + std::to_string(nb) + ")");
+        if (static_cast<int>(pseudoWfc.jchi.size()) != nw)
+            throw std::runtime_error("NCPP: jchi.size() (" + std::to_string(pseudoWfc.jchi.size())
+                + ") != number_of_wfc (" + std::to_string(nw) + ")");
     }
 }
 
