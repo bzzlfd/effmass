@@ -31,6 +31,14 @@ target_sources(io
             src/io/lattice.cppm
 )
 
+# Utility types
+add_library(utils)
+target_sources(utils
+    PUBLIC
+        FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            src/utils/matrix.cppm
+)
+
 # Library target for pseudo-potential module
 add_library(pseudo)
 target_sources(pseudo
@@ -42,7 +50,7 @@ target_sources(pseudo
             src/pseudo/io/paw.upf.cppm
             src/pseudo/ncpp.cppm
 )
-target_link_libraries(pseudo PRIVATE pugixml::pugixml)
+target_link_libraries(pseudo PRIVATE pugixml::pugixml utils)
 
 # Library target for math module
 add_library(math)

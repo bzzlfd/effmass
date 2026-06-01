@@ -1,6 +1,7 @@
 export module pseudo.ncpp;
 
 import std;
+import utils.matrix;
 import pseudo.io.ncpp_upf;
 
 export {
@@ -8,24 +9,6 @@ export {
     enum class MeshType : int;
     struct NonlocalByL;
 }
-
-
-// === Simple dense matrix (flat storage) ===
-struct DenseMatrix {
-    std::vector<double> data;
-    int rows = 0;
-    int cols = 0;
-
-    auto operator[](int i, int j) const -> const double& {
-        return data[static_cast<std::size_t>(i) * cols + j];
-    }
-    auto operator[](int i, int j) -> double& {
-        return data[static_cast<std::size_t>(i) * cols + j];
-    }
-
-    [[nodiscard]] auto size() const -> std::size_t { return data.size(); }
-    [[nodiscard]] auto empty() const -> bool { return data.empty(); }
-};
 
 
 enum class MeshType {
@@ -37,7 +20,7 @@ enum class MeshType {
 
 struct NonlocalByL {
     std::vector<std::vector<double>> beta;
-    DenseMatrix dion;
+    DenseMatrix<double> dion;
 };
 
 

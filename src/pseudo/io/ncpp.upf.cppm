@@ -4,6 +4,7 @@ module;
 export module pseudo.io.ncpp_upf;
 
 import std;
+import utils.matrix;
 
 
 export {
@@ -13,24 +14,6 @@ export {
         struct NCPPUPFNonlocal;
         struct NCPPUPFWavefunction;
 }
-
-
-// === Simple dense matrix (flat storage) ===
-struct Matrix {
-    std::vector<double> data;
-    int rows = 0;
-    int cols = 0;
-
-    auto operator[](int i, int j) const -> const double& {
-        return data[static_cast<std::size_t>(i) * cols + j];
-    }
-    auto operator[](int i, int j) -> double& {
-        return data[static_cast<std::size_t>(i) * cols + j];
-    }
-
-    [[nodiscard]] auto size() const -> std::size_t { return data.size(); }
-    [[nodiscard]] auto empty() const -> bool { return data.empty(); }
-};
 
 
 // === NCPPUPF Header structure ===
@@ -75,7 +58,7 @@ struct NCPPUPFNonlocal {
     std::vector<int> lll;                    // [nbeta] angular momentum
     std::vector<int> kbeta;                  // [nbeta] cutoff radius index
     std::vector<double> rcut;                // [nbeta] cutoff radius
-    Matrix dion;                             // D_ij matrix
+    DenseMatrix<double> dion;                // D_ij matrix
 };
 
 
