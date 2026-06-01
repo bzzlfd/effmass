@@ -74,6 +74,7 @@ public:
         std::vector<int> cutoff_index;
         std::vector<double> cutoff_radius;
         DenseMatrix<double> B;
+        std::vector<double> jjj;  // total angular momentum j (SOC only)
     };
 
     struct PseudoWfc {
@@ -83,6 +84,7 @@ public:
         std::vector<double> cutoff_radius;
         std::vector<double> occupation;
         std::vector<std::string> label;
+        std::vector<double> jchi;  // total angular momentum j (SOC only)
     };
 
     Meta meta;
@@ -91,6 +93,57 @@ public:
     VNonlocal nonlocal;
     PseudoWfc pseudoWfc;
     std::vector<double> rho_atom;
+
+    // === 别名系统 (Alias) 参见 docs/proposal/005.md ===
+    struct Alias {
+    private:
+        NCPP& p;
+        friend class NCPP;
+        explicit Alias(NCPP& pp) : p(pp) {}
+
+    public:
+        // D/B 矩阵 (UPF: dion)
+        auto dion()       -> DenseMatrix<double>&       { return p.nonlocal.B; }
+        auto dion() const -> const DenseMatrix<double>& { return p.nonlocal.B; }
+
+        // 局域势 (UPF: vloc)
+        auto vloc()       -> std::vector<double>&       { return p.local; }
+        auto vloc() const -> const std::vector<double>& { return p.local; }
+
+        // 投影子 (UPF: beta)
+        auto beta()       -> std::vector<std::vector<double>>&       { return p.nonlocal.beta; }
+        auto beta() const -> const std::vector<std::vector<double>>& { return p.nonlocal.beta; }
+        auto lll()        -> std::vector<int>&       { return p.nonlocal.angular_momentum; }
+        auto lll() const  -> const std::vector<int>& { return p.nonlocal.angular_momentum; }
+        auto jjj()        -> std::vector<double>&       { return p.nonlocal.jjj; }
+        auto jjj() const  -> const std::vector<double>& { return p.nonlocal.jjj; }
+        auto kbeta()       -> std::vector<int>&       { return p.nonlocal.cutoff_index; }
+        auto kbeta() const -> const std::vector<int>& { return p.nonlocal.cutoff_index; }
+        auto rcut()       -> std::vector<double>&       { return p.nonlocal.cutoff_radius; }
+        auto rcut() const -> const std::vector<double>& { return p.nonlocal.cutoff_radius; }
+
+        // 赝波函数 (UPF: chi / wfc)
+        auto chi()       -> std::vector<std::vector<double>>&       { return p.pseudoWfc.chi; }
+        auto chi() const -> const std::vector<std::vector<double>>& { return p.pseudoWfc.chi; }
+        auto wfc()       -> std::vector<std::vector<double>>&       { return p.pseudoWfc.chi; }
+        auto wfc() const -> const std::vector<std::vector<double>>& { return p.pseudoWfc.chi; }
+        auto lchi()       -> std::vector<int>&       { return p.pseudoWfc.angular_momentum; }
+        auto lchi() const -> const std::vector<int>& { return p.pseudoWfc.angular_momentum; }
+        auto jchi()       -> std::vector<double>&       { return p.pseudoWfc.jchi; }
+        auto jchi() const -> const std::vector<double>& { return p.pseudoWfc.jchi; }
+        auto oc()       -> std::vector<double>&       { return p.pseudoWfc.occupation; }
+        auto oc() const -> const std::vector<double>& { return p.pseudoWfc.occupation; }
+
+        // 文献/通用别名
+        auto D()           -> DenseMatrix<double>&       { return p.nonlocal.B; }
+        auto D() const     -> const DenseMatrix<double>& { return p.nonlocal.B; }
+        auto projectors()       -> std::vector<std::vector<double>>&       { return p.nonlocal.beta; }
+        auto projectors() const -> const std::vector<std::vector<double>>& { return p.nonlocal.beta; }
+        auto radialGrid()       -> std::vector<double>&       { return p.mesh.r; }
+        auto radialGrid() const -> const std::vector<double>& { return p.mesh.r; }
+    };
+
+    Alias alias{*this};
 
     explicit NCPP(const UPF& upf);
 
@@ -169,6 +222,14 @@ NCPP::NCPP(const UPF& upf) {
 
     const auto rho_src = upf.rhoAtom();
     rho_atom.assign(rho_src.begin(), rho_src.end());
+
+    if (h.has_so) {
+        const auto* soc = upf.socData();
+        if (soc) {
+            nonlocal.jjj = soc->jjj;
+            pseudoWfc.jchi = soc->jchi;
+        }
+    }
 }
 
 

@@ -16,6 +16,7 @@
 1. 不使用 ncpp.upf.cppm 中变量命名方式，而是使用更贴近其含义的命名
   1. D 矩阵（Dion）在ncpp中改名为B矩阵，这是Vanderbilt论文中的命名方式
 2. NCPP 类除了有对应的数据接口，还应提供若干便利的成员函数
+3. NCPP 类嵌入 `Alias` 结构体提供 UPF 命名别名（见 docs/proposal/005.md）
 
 **每个 accessor 返回标准 C++ 类型**：`string_view`, `span<const double>`, `int`, `double`, `bool`。不返回格式相关的复合类型。
 
