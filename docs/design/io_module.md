@@ -191,9 +191,9 @@ std::array<double, 3> inferCurrent_k() const;                    // 从 -K = -(G
 #### 缓冲区复用/惰性分配
 
 类在构造时根据 `mg_nx * nnodes` 预分配 **Cartesian** 必需的缓冲区：
-- `kinetic_buf_`, `Kx_buf_`, `Ky_buf_`, `Kz_buf_`
+- `kinetic_`, `Kx_`, `Ky_`, `Kz_`
 
-**Spherical** 和 **Integer** 的缓冲区（`q_buf_`、`theta_buf_`、`phi_buf_`、`iG_buf_`、`jG_buf_`、`kG_buf_`）采用**惰性分配**：仅在 `setDataView` 启用对应视图时分配，禁用时通过 `clear()` + `shrink_to_fit()` 释放堆内存。
+**Spherical** 和 **Integer** 的缓冲区（`q_`、`theta_`、`phi_`、`iG_`、`jG_`、`kG_`）采用**惰性分配**：仅在 `setDataView` 启用对应视图时分配，禁用时通过 `clear()` + `shrink_to_fit()` 释放堆内存。
 
 
 ## 错误处理
@@ -226,12 +226,12 @@ export struct WGMetadata {
 };
 ```
 
-#### `WGCoeffs`
+#### `WGCoeffsView`
 
-存储单个 k 点、单个能带的波函数系数视图：
+存储单个 k 点、单个能带的波函数系数视图（非 owning，`std::span`）：
 
 ```cpp
-export struct WGCoeffs {
+export struct WGCoeffsView {
     std::span<const std::complex<double>> up;     // 自旋向上分量
     std::span<const std::complex<double>> down;   // 仅在 is_SO == 1 时有效
 };
@@ -241,10 +241,10 @@ export struct WGCoeffs {
 
 ```cpp
 WGMetadata meta;                                          // 元数据（公有成员）
-const WGCoeffs& loadBand(int ikpt, int iband);            // 加载指定 k 点、指定能带（带缓存）
+const WGCoeffsView& loadBand(int ikpt, int iband);            // 加载指定 k 点、指定能带（带缓存）
 int current_ikpt() const;
 int current_iband() const;
-const WGCoeffs& currentData() const;
+const WGCoeffsView& currentData() const;
 ```
 
 ### 与 `GKK` 的差异
@@ -259,15 +259,15 @@ const WGCoeffs& currentData() const;
    `WG` 支持缓存**多个** `(k-point, band)` 组合，数量由构造函数参数 `cache_capacity` 控制（默认 `4`）。
 
    缓存实现要点：
-   - **独立存储**：每个缓存条目（`CacheEntry`）拥有独立的 `std::vector<std::complex<double>>`，存储该 band 完整的 up/down 系数数据，以及一个 `WGCoeffs` 视图（`std::span`）指向自身数据。
-   - **地址稳定**：使用 `std::vector<std::unique_ptr<CacheEntry>>` 管理条目。`unique_ptr` 保证 `CacheEntry` 对象地址在容器重新分配时不发生变化，因此 `WGCoeffs` 内部的 `std::span` 始终有效。
+   - **独立存储**：每个缓存条目（`CachedState`）拥有独立的 `std::vector<std::complex<double>>`，存储该 band 完整的 up/down 系数数据，以及一个 `WGCoeffsView` 视图（`std::span`）指向自身数据。
+   - **地址稳定**：使用 `std::vector<std::unique_ptr<CachedState>>` 管理条目。`unique_ptr` 保证 `CachedState` 对象地址在容器重新分配时不发生变化，因此 `WGCoeffsView` 内部的 `std::span` 始终有效。
    - **替换策略**：采用 **FIFO 环形替换**。当缓存已满且未命中时，复用 `cache_next_slot_` 指向的旧槽位，然后该索引循环前进。
    - **缓存命中**：`loadBand` 先在缓存中线性查找；命中后直接返回对应条目的视图，避免文件 IO。
 
-   这意味着遍历同一 k 点的多个能带时，只要在缓存容量范围内，就不会重复读取磁盘。返回的 `const WGCoeffs&` 只要该 band 未被逐出缓存就保持有效。
+   这意味着遍历同一 k 点的多个能带时，只要在缓存容量范围内，就不会重复读取磁盘。返回的 `const WGCoeffsView&` 只要该 band 未被逐出缓存就保持有效。
 
 4. **移动语义简化**：
-   由于每个 `CacheEntry` 通过 `unique_ptr` 拥有独立堆内存，移动 `WG` 时各条目地址不变，内部 `std::span` 无需像 `GKK` 那样手动修复指针。移动构造/赋值只需直接转移 `unique_ptr` 所有权即可。
+   由于每个 `CachedState` 通过 `unique_ptr` 拥有独立堆内存，移动 `WG` 时各条目地址不变，内部 `std::span` 无需像 `GKK` 那样手动修复指针。移动构造/赋值只需直接转移 `unique_ptr` 所有权即可。
 
 ### 元数据一致性
 
