@@ -10,8 +10,8 @@ export {
 
 
 enum class RadialMeshType {
-    General,
     Uniform,
+    General,
 };
 
 constexpr double FOUR_PI = 4.0 * std::numbers::pi;
