@@ -4,6 +4,7 @@ module;
 export module io.lattice;
 
 import std;
+import utils.array2d;
 
 
 export {
@@ -34,12 +35,7 @@ public:
     auto volume() const -> double;
 
 private:
-    struct array2d {
-        std::array<double, 9> data{};
-        auto operator[](int i, int j) -> double& { return data[i * 3 + j]; }
-        auto operator[](int i, int j) const -> const double& { return data[i * 3 + j]; }
-    };
-    array2d A_{};
+    array2d<double, 3, 3> A_{};
 
     auto setLatticeFromFlat(std::span<const double, 9> flat, LengthUnit unit) -> void;
     auto computeReciprocalLattice() const -> std::array<std::array<double, 3>, 3>;

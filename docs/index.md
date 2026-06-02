@@ -24,6 +24,7 @@
 - `design/pseudo_module.md`：赝势读取模块的接口设计、`NCPPUPF` 类结构与 UPF 文件 tag 的映射
 - `design/upf_vs_binary_io.md`：UPF（pugixml）与二进制 IO（GKK/WG/RHO/EIGEN）文件生命周期管理的对比分析
 - `design/cpp_conventions.md`：C++ 编码约定（命名规范、函数返回类型写法等）
+- `design/utils_types.md`：通用工具类型 `array2d`（动态/静态 2D 数组）和 `vector3d`（3 维向量）的设计与接口
 
 ## 实现的模块
 

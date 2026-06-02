@@ -65,8 +65,8 @@ export struct KVecs {
     // Integer indices of G vector in reciprocal lattice basis
     std::span<const int>    iG, jG, kG;           // G = iG*b1 + jG*b2 + kG*b3
     // Per-k-point metadata (valid whenever Integer view is enabled)
-    std::array<double, 3>               kPoint{};            // fractional coordinate of current k-point
-    std::array<std::array<double, 3>, 3> reciprocalLattice{}; // reciprocal lattice vectors: row n = b_n
+    vector3d<double>                    kPoint{};            // fractional coordinate of current k-point
+    array2d<double, 3, 3>               reciprocalLattice{}; // reciprocal lattice vectors: row n = b_n
 };
 ```
 

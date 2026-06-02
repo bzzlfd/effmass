@@ -5,12 +5,13 @@ module;
 export module io.EIGEN;
 
 import std;
+import utils.vector3d;
 
 
 export {
     class EIGEN;
         struct EIGENMetadata;
-        struct kVec;
+        using kVec = vector3d<double>;
 }
 
 
@@ -22,25 +23,6 @@ struct EIGENMetadata {
     int natom;
     int nnode;
     int is_SO;
-};
-
-
-struct kVec {
-    double x{}, y{}, z{};
-
-    auto operator[](int i) -> double& {
-        if (i < 0 || i > 2) {
-            throw std::out_of_range("kVec index out of range");
-        }
-        return i == 0 ? x : (i == 1 ? y : z);
-    }
-
-    auto operator[](int i) const -> double {
-        if (i < 0 || i > 2) {
-            throw std::out_of_range("kVec index out of range");
-        }
-        return i == 0 ? x : (i == 1 ? y : z);
-    }
 };
 
 

@@ -30,6 +30,7 @@ target_sources(io
             src/io/VR.cppm
             src/io/lattice.cppm
 )
+target_link_libraries(io PRIVATE utils)
 
 # Utility types
 add_library(utils)
@@ -37,6 +38,7 @@ target_sources(utils
     PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
             src/utils/array2d.cppm
+            src/utils/vector3d.cppm
 )
 
 # Library target for pseudo-potential module
