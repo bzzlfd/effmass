@@ -212,7 +212,86 @@ auto realSphericalHarmonics(double theta, double phi, int l_max, std::span<doubl
 }
 
 
-} // namespace archived
+} // namespace archived (realSphericalHarmonic, realSphericalHarmonics)
+
+
+// -------------------------------------------------------------------
+// Normalized associated Legendre recurrence (Q_l^m = N_l^m · P_l^m).
+//
+// The main class stores raw (unnormalized) P_l^m in top_p_ and
+// multiplies by N_l^m at assembly time.  For l up to ~10 this is safe
+// (P_m^m ~ 10⁹, well below double overflow at ~10³⁰⁸).  For l > 50
+// the unnormalized P grows as O((2m-1)!!) and would overflow.
+//
+// The alternative below absorbs N_l^m into the recurrence — every
+// intermediate Q_l^m stays O(1).  Seed and step formulas simplify
+// dramatically due to cancellations:
+//
+//   Q_0^0       = 1/(2√π)
+//   Q_m^m       = Q_{m-1}^{m-1} · sqrt((2m+1)/(2m)) · sinθ
+//   Q_{m+1}^m   = sqrt(2m+3) · cosθ · Q_m^m            (the (2m+1) cancels)
+//   Q_l^m (l≥m+2):
+//     c1 = sqrt((2l-1)(2l+1)(l-m)/(l+m))
+//     c2 = (l+m-1) · sqrt((2l+1)(l-m)(l-m-1)/((2l-3)(l+m)(l+m-1)))
+//     Q_l^m = (cosθ · c1 · Q_{l-1}^m - c2 · Q_{l-2}^m) / (l-m)
+//
+// Not in active use because:
+//   - Physical l_max ≤ 10 is far from overflow
+//   - sqrt() coefficients add runtime at every step (not constant)
+//   - Switching would require top_p_ to store Q instead of P,
+//     breaking the reset(expand) contract
+// -------------------------------------------------------------------
+namespace normalized {
+
+auto Q_lm(int l, int m_abs, double theta) -> double {
+    if (m_abs < 0 || m_abs > l) return 0.0;
+
+    double cos_t = std::cos(theta);
+    double sin_t = std::sin(theta);
+
+    // Q_m^m via upward recurrence from Q_0^0
+    double q = 1.0 / (2.0 * std::sqrt(std::numbers::pi));
+    for (int k = 1; k <= m_abs; ++k) {
+        q *= std::sqrt(static_cast<double>(2 * k + 1) / static_cast<double>(2 * k)) * sin_t;
+    }
+    if (l == m_abs) return q;
+
+    // Q_{m+1}^m = sqrt(2m+3) · cosθ · Q_m^m   (the (2m+1) cancels out)
+    double q_prev = q;
+    q = std::sqrt(2.0 * m_abs + 3.0) * cos_t * q;
+    if (l == m_abs + 1) return q;
+
+    // Three-term recurrence with normalized coefficients
+    for (int n = m_abs + 2; n <= l; ++n) {
+        double r1 = std::sqrt(static_cast<double>((2 * n - 1) * (2 * n + 1) * (n - m_abs))
+                             / static_cast<double>(n + m_abs));
+        double r2 = (n + m_abs - 1.0)
+                  * std::sqrt(static_cast<double>((2 * n + 1) * (n - m_abs) * (n - m_abs - 1))
+                             / static_cast<double>((2 * n - 3) * (n + m_abs) * (n + m_abs - 1)));
+        double q_next = (cos_t * r1 * q - r2 * q_prev) / static_cast<double>(n - m_abs);
+        q_prev = q;
+        q = q_next;
+    }
+    return q;
+}
+
+auto realSphericalHarmonic(int l, int m, double theta, double phi) -> double {
+    if (l < 0 || std::abs(m) > l) return 0.0;
+
+    int m_abs = std::abs(m);
+    double q = Q_lm(l, m_abs, theta);  // already includes N_l^m
+
+    if (m == 0) {
+        return q;
+    } else if (m > 0) {
+        return std::sqrt(2.0) * q * std::cos(m * phi);
+    } else {
+        return std::sqrt(2.0) * q * std::sin(m_abs * phi);
+    }
+}
+
+} // namespace normalized
+// -------------------------------------------------------------------
 
 
 // Vectorized spherical harmonics evaluator over K-point G-vectors.
