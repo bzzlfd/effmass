@@ -1,3 +1,6 @@
+module;
+#include "../physical_constants.hpp"
+
 export module pseudo.ncpp;
 
 import std;
@@ -59,8 +62,8 @@ public:
         bool has_so = false;
         bool core_correction = false;
         double total_psenergy = 0.0;
-        double suggested_ecutwfc_min = 0.0;  // Ry
-        double suggested_ecutrho_min = 0.0;  // Ry
+        double suggested_ecutwfc_min = 0.0;
+        double suggested_ecutrho_min = 0.0;
     };
 
     struct RadialMesh {
@@ -195,21 +198,23 @@ NCPP::NCPP(const UPF& upf) {
     meta.number_of_proj   = h.number_of_proj;
     meta.has_so           = h.has_so;
     meta.core_correction  = h.core_correction;
-    meta.total_psenergy   = h.total_psenergy;
-    meta.suggested_ecutwfc_min = h.wfc_cutoff;
-    meta.suggested_ecutrho_min = h.rho_cutoff;
+    meta.total_psenergy   = convertEnergy(h.total_psenergy, EnergyUnit::Rydberg, EnergyUnit::Hartree);
+    meta.suggested_ecutwfc_min = convertEnergy(h.wfc_cutoff, EnergyUnit::Rydberg, EnergyUnit::Hartree);
+    meta.suggested_ecutrho_min = convertEnergy(h.rho_cutoff, EnergyUnit::Rydberg, EnergyUnit::Hartree);
 
     mesh.r   = upf.mesh().r;
     mesh.rab = upf.mesh().rab;
 
     const auto vloc_src = upf.localPotential();
     local.assign(vloc_src.begin(), vloc_src.end());
+    for (auto& v : local) v = convertEnergy(v, EnergyUnit::Rydberg, EnergyUnit::Hartree);
 
     nonlocal.beta             = nl.beta;
     nonlocal.angular_momentum = nl.lll;
     nonlocal.cutoff_index     = nl.kbeta;
     nonlocal.cutoff_radius    = nl.rcut;
     nonlocal.B                = nl.dion;
+    for (auto& d : nonlocal.B.data) d = convertEnergy(d, EnergyUnit::Rydberg, EnergyUnit::Hartree);
 
     // Truncate beta to effective length (cutoff_radius_index)
     for (int i = 0; i < meta.number_of_proj; ++i) {

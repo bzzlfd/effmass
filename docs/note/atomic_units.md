@@ -21,6 +21,18 @@
 | 长度（晶格矢量 `A`） | Å（Angstrom） | Bohr |
 | 能量 | — | Hartree |
 | 波矢 $|G+k|^2/2$ | — | Hartree（因为 $\hbar = 1, m_e = 1$） |
+| 赝势（UPF 文件） | Ry（Rydberg） | 读取后在 `NCPP` 构造时自动转换为 Hartree |
+
+### 赝势的 Rydberg → Hartree 转换
+
+UPF 格式使用 Rydberg 原子单位制（$e^2 = 2$, $m = 1/2$, $\hbar = 1$），
+而项目内部使用 Hartree 原子单位制。`NCPP` 从 `UPF` 构造时对以下能量量纲的字段做 $\div 2$ 转换：
+
+- `total_psenergy`、`wfc_cutoff`、`rho_cutoff`（元数据）
+- `vloc`（局域势）
+- `dion` / `B`（非局域势 D 矩阵）
+
+径向量（`r`、`rab`、`beta` 投影函数、`chi` 波函数）和电荷密度 `rho_atom` 不受影响。
 
 ## 单位转换
 
