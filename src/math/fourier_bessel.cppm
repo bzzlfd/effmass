@@ -208,7 +208,7 @@ auto lagrangeCubicDerivative(
 namespace archived {
 
 // Single-q Fourier-Bessel transform of a radial beta function.
-// Returns: 4*pi * integral_0^R  beta(r) * r * j_l(q*r) * dr
+// Returns: 4*pi * integral_0^R  beta(r) * r * j_l(q*r) * dr  (without (-i)^l)
 auto fourierBesselBeta(
     std::span<const double> r,
     std::span<const double> rab,
