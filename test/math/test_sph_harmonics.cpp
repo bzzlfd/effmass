@@ -22,7 +22,7 @@ auto test_spherical_harmonics() -> void {
     // Y_{00} = 1/(2*sqrt(pi))
     {
         double theta = 0.0, phi = 0.0;
-        SphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1)};
+        RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1), 3};
         auto y00 = sh(0, 0);
         check(near(y00[0], 1.0 / (2.0 * std::sqrt(std::numbers::pi)), eps), "Y_00 constant");
     }
@@ -30,7 +30,7 @@ auto test_spherical_harmonics() -> void {
     // Y_{10}(theta) = sqrt(3/(4pi)) * cos(theta)
     {
         double theta0 = 0.5, phi0 = 0.0;
-        SphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1)};
+        RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
         auto y10 = sh(1, 0);
         double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::cos(theta0);
         check(near(y10[0], expected, eps), "Y_10(theta)");
@@ -39,7 +39,7 @@ auto test_spherical_harmonics() -> void {
     // Y_{1,1} = sqrt(3/(4pi)) * sin(theta) * cos(phi)
     {
         double theta0 = 0.5, phi0 = 0.3;
-        SphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1)};
+        RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
         auto y11 = sh(1, 1);
         double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::cos(phi0);
         check(near(y11[0], expected, eps), "Y_11(theta,phi)");
@@ -48,7 +48,7 @@ auto test_spherical_harmonics() -> void {
     // Y_{1,-1} = sqrt(3/(4pi)) * sin(theta) * sin(phi)
     {
         double theta0 = 0.5, phi0 = 0.3;
-        SphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1)};
+        RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
         auto y1m1 = sh(1, -1);
         double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::sin(phi0);
         check(near(y1m1[0], expected, eps), "Y_1,-1(theta,phi)");
@@ -57,7 +57,7 @@ auto test_spherical_harmonics() -> void {
     // m > l should return 0
     {
         double theta0 = 0.5, phi0 = 0.3;
-        SphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1)};
+        RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
         try {
             auto y23 = sh(2, 3);
             check(false, "Y_{2,3} should have thrown");
@@ -76,7 +76,7 @@ auto test_spherical_harmonics_batch() -> void {
     int l_max = 4;
     int n = (l_max + 1) * (l_max + 1);
 
-    SphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1)};
+    RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1), 4};
 
     for (int l = 0; l <= l_max; ++l) {
         for (int m = -l; m <= l; ++m) {

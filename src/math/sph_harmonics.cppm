@@ -6,7 +6,7 @@ export module math.sph_harmonics;
 import std;
 
 export {
-    class SphericalHarmonics;
+    class RealSphericalHarmonics;
 }
 
 
@@ -217,125 +217,174 @@ auto realSphericalHarmonics(double theta, double phi, int l_max, std::span<doubl
 
 
 // Vectorized spherical harmonics evaluator over K-point G-vectors.
-// Precomputes all Y_lm for l <= MAX_L_TINY on construction;
-// computes larger l on demand via recurrence, caching P_l^m state.
-class SphericalHarmonics {
+// Precomputes all Y_lm for l <= l_max_resident on construction
+// (or after a reset() call); computes larger l on demand via
+// recurrence, caching P_l^m state.
+class RealSphericalHarmonics {
 public:
-    explicit SphericalHarmonics(std::span<const double> theta, std::span<const double> phi)
+    explicit RealSphericalHarmonics(std::span<const double> theta, std::span<const double> phi, int l_max_resident)
         : theta_(theta), phi_(phi), ng_(theta_.size())
     {
         if (theta_.empty()) {
             throw std::invalid_argument(
-                "SphericalHarmonics: theta and phi must be non-empty");
+                "RealSphericalHarmonics: theta and phi must be non-empty");
         }
 
-        // Precompute cos(theta), sin(theta)
+        // Precompute cos(theta), sin(theta), cos(phi), sin(phi)
+        // (immutable for these spans)
         cos_theta_.resize(ng_);
         sin_theta_.resize(ng_);
+        cos_phi_.resize(ng_);
+        sin_phi_.resize(ng_);
         for (std::size_t i = 0; i < ng_; ++i) {
             cos_theta_[i] = std::cos(theta_[i]);
             sin_theta_[i] = std::sin(theta_[i]);
         }
-
-        // Precompute cos(m*phi), sin(m*phi) for m = 0..MAX_L_TINY
-        int nm = MAX_L_TINY + 1;
-        cos_mphi_.resize(ng_ * static_cast<std::size_t>(nm));
-        sin_mphi_.resize(ng_ * static_cast<std::size_t>(nm));
-
         for (std::size_t i = 0; i < ng_; ++i) {
-            double c0 = std::cos(phi_[i]);
-            double s0 = std::sin(phi_[i]);
-            cos_mphi_[0 * ng_ + i] = 1.0;
-            sin_mphi_[0 * ng_ + i] = 0.0;
-            cos_mphi_[1 * ng_ + i] = c0;
-            sin_mphi_[1 * ng_ + i] = s0;
-            for (int m = 2; m <= MAX_L_TINY; ++m) {
-                double prev_c = cos_mphi_[static_cast<std::size_t>(m - 1) * ng_ + i];
-                double prev_s = sin_mphi_[static_cast<std::size_t>(m - 1) * ng_ + i];
-                cos_mphi_[static_cast<std::size_t>(m) * ng_ + i] = prev_c * c0 - prev_s * s0;
-                sin_mphi_[static_cast<std::size_t>(m) * ng_ + i] = prev_s * c0 + prev_c * s0;
-            }
+            cos_phi_[i] = std::cos(phi_[i]);
+            sin_phi_[i] = std::sin(phi_[i]);
         }
 
-        // Precompute all Y_lm for l = 0..MAX_L_TINY
-        int n_blocks = nm * nm;
-        cache_.resize(static_cast<std::size_t>(n_blocks) * ng_);
+        buildYlm(l_max_resident);
+    }
 
-        for (int m = 0; m <= MAX_L_TINY; ++m) {
-            // P_l^m for all l = m..MAX_L_TINY, flat: [idx * ng_ + ig]
-            int n_l = MAX_L_TINY - m + 1;
-            std::vector<double> p_buf(static_cast<std::size_t>(n_l) * ng_);
+    // Reinitialize with a different resident l_max.
+    // On shrink: just truncates internal buffers, no recomputation.
+    // On expand: extends buffers and continues the Legendre recurrence
+    //   from the saved top state, computing only the new Y_lm blocks.
+    // On equal: no-op.
+    auto reset(int l_max_resident) -> void {
+        if (l_max_resident < 0) {
+            throw std::invalid_argument(
+                "RealSphericalHarmonics::reset: l_max_resident must be non-negative");
+        }
+        if (l_max_resident == l_max_resident_) return;
 
-            // P_m^m
+        state_.clear();
+
+        int old_nm = l_max_resident_ + 1;
+        int new_nm = l_max_resident + 1;
+
+        if (l_max_resident < l_max_resident_) {
+            // -- Shrink: just truncate, existing data stays valid --
+            y_lm_.resize(static_cast<std::size_t>(new_nm * new_nm));
+            top_p_.resize(new_nm);
+            l_max_resident_ = l_max_resident;
+            return;
+        }
+
+        // -- Expand: extend buffers and fill only the new (l,m) blocks --
+
+        // Extend top_p_ for new m values
+        top_p_.resize(new_nm);
+        for (int m = l_max_resident_ + 1; m <= l_max_resident; ++m) {
+            top_p_[m].prev.resize(ng_);
+            top_p_[m].curr.resize(ng_);
+            double df = 1.0;
+            for (int k = 1; k <= m; ++k) df *= 2.0 * k - 1.0;
+            for (std::size_t i = 0; i < ng_; ++i)
+                top_p_[m].curr[i] = df * std::pow(sin_theta_[i], m);
+            top_p_[m].prev = top_p_[m].curr;
+        }
+
+        // Extend cache and fill new blocks
+        std::size_t new_n_blocks = static_cast<std::size_t>(new_nm * new_nm);
+        y_lm_.resize(new_n_blocks);
+        for (auto& v : y_lm_) v.resize(ng_);
+
+        auto assemble = [&](int l, int m, const std::vector<double>& p, std::size_t off,
+                             const std::vector<double>& cm, const std::vector<double>& sm) {
+            int block = l * l + l;
+            double norm = normFactor(l, m);
             if (m == 0) {
-                for (std::size_t i = 0; i < ng_; ++i) p_buf[i] = 1.0;
+                for (std::size_t i = 0; i < ng_; ++i)
+                    y_lm_[block][i] = norm * p[off + i];
             } else {
-                double df = 1.0;
-                for (int k = 1; k <= m; ++k) df *= 2.0 * k - 1.0;
-                for (std::size_t i = 0; i < ng_; ++i)
-                    p_buf[i] = df * std::pow(sin_theta_[i], m);
-            }
-
-            // P_{m+1}^m
-            if (m < MAX_L_TINY) {
-                for (std::size_t i = 0; i < ng_; ++i)
-                    p_buf[ng_ + i] = (2.0 * static_cast<double>(m) + 1.0) * cos_theta_[i] * p_buf[i];
-            }
-
-            // P_l^m for l >= m+2 via three-term recurrence
-            for (int l = m + 2; l <= MAX_L_TINY; ++l) {
-                int idx = l - m;
-                for (std::size_t i = 0; i < ng_; ++i)
-                    p_buf[static_cast<std::size_t>(idx) * ng_ + i] =
-                        ((2.0 * static_cast<double>(l) - 1.0) * cos_theta_[i] * p_buf[static_cast<std::size_t>(idx - 1) * ng_ + i]
-                      - static_cast<double>(l + m - 1) * p_buf[static_cast<std::size_t>(idx - 2) * ng_ + i])
-                      / static_cast<double>(l - m);
-            }
-
-            // Assemble Y_lm from P_l^m
-            for (int l = m; l <= MAX_L_TINY; ++l) {
-                int idx = l - m;
-                int block = l * l + l;
-                double norm = NORM_TABLE[l][m];
-
-                if (m == 0) {
-                    for (std::size_t i = 0; i < ng_; ++i)
-                        cache_[static_cast<std::size_t>(block) * ng_ + i] = norm * p_buf[static_cast<std::size_t>(idx) * ng_ + i];
-                } else {
-                    for (std::size_t i = 0; i < ng_; ++i) {
-                        double val = std::sqrt(2.0) * norm * p_buf[static_cast<std::size_t>(idx) * ng_ + i];
-                        cache_[static_cast<std::size_t>(block - m) * ng_ + i] = val * sin_mphi_[static_cast<std::size_t>(m) * ng_ + i];
-                        cache_[static_cast<std::size_t>(block + m) * ng_ + i] = val * cos_mphi_[static_cast<std::size_t>(m) * ng_ + i];
-                    }
+                double sf = std::sqrt(2.0) * norm;
+                for (std::size_t i = 0; i < ng_; ++i) {
+                    double val = sf * p[off + i];
+                    y_lm_[block - m][i] = val * sm[i];
+                    y_lm_[block + m][i] = val * cm[i];
                 }
             }
+        };
+
+        std::vector<double> cm(ng_, 1.0), sm(ng_, 0.0);  // cos(m*phi), sin(m*phi) for current m
+
+        for (int m = 0; m <= l_max_resident; ++m) {
+            if (m == l_max_resident) continue;  // P_{new}^{new} already at top
+
+            auto& tp = top_p_[m];
+            int start_l;  // first new l to compute
+
+            if (m > l_max_resident_) {
+                // New m: seeded P_m^m in top_p_, compute P_{m+1}^m and up
+                start_l = m + 1;
+            } else if (l_max_resident_ == m) {
+                // Existing m at P_m^m only: compute P_{m+1}^m and up
+                start_l = m + 1;
+            } else {
+                // Existing m at P_{old}^{m} with valid prev: general recurrence
+                start_l = l_max_resident_ + 1;
+            }
+
+            if (start_l == m + 1 && m < l_max_resident) {
+                // Special first step: P_{m+1}^m = (2m+1) * cos(theta) * P_m^m
+                for (std::size_t i = 0; i < ng_; ++i) {
+                    double next = (2.0 * m + 1.0) * cos_theta_[i] * tp.curr[i];
+                    tp.prev[i] = tp.curr[i];
+                    tp.curr[i] = next;
+                }
+                assemble(m + 1, m, tp.curr, 0, cm, sm);
+                start_l = m + 2;
+            }
+
+            // General recurrence for remaining new l
+            for (int l = start_l; l <= l_max_resident; ++l) {
+                for (std::size_t i = 0; i < ng_; ++i) {
+                    double next = ((2.0 * l - 1.0) * cos_theta_[i] * tp.curr[i]
+                                 - static_cast<double>(l + m - 1) * tp.prev[i])
+                                 / static_cast<double>(l - m);
+                    tp.prev[i] = tp.curr[i];
+                    tp.curr[i] = next;
+                }
+                assemble(l, m, tp.curr, 0, cm, sm);
+            }
+
+            // Advance cos(m*phi), sin(m*phi) to m+1 for next iteration
+            for (std::size_t i = 0; i < ng_; ++i) {
+                double old_cm = cm[i];
+                cm[i] = cm[i] * cos_phi_[i] - sm[i] * sin_phi_[i];
+                sm[i] = sm[i] * cos_phi_[i] + old_cm * sin_phi_[i];
+            }
         }
+
+        l_max_resident_ = l_max_resident;
     }
 
     // Return Y_lm for all G-vectors as a vector.
-    // For l <= MAX_L_TINY: returns a copy from the precomputed cache.
-    // For l >  MAX_L_TINY: computes on demand via recurrence;
+    // For l <= l_max_resident_: returns a copy from the precomputed cache.
+    // For l >  l_max_resident_: computes on demand via recurrence;
     //   intermediate P vectors for the requested m_abs are kept
     //   to enable further upward recurrence.
     auto operator()(int l, int m) -> std::vector<double> {
         if (l < 0 || std::abs(m) > l) {
             throw std::invalid_argument(
-                std::format("SphericalHarmonics: invalid quantum numbers (l={}, m={})", l, m));
+                std::format("RealSphericalHarmonics: invalid quantum numbers (l={}, m={})", l, m));
         }
 
         int m_abs = std::abs(m);
 
-        // Cached path: l <= MAX_L_TINY
-        if (l <= MAX_L_TINY) {
+        // Cached path: l <= l_max_resident_
+        if (l <= l_max_resident_) {
             int block = l * l + (m + l);
-            auto* src = cache_.data() + static_cast<std::ptrdiff_t>(block) * static_cast<std::ptrdiff_t>(ng_);
-            return std::vector<double>(src, src + static_cast<std::ptrdiff_t>(ng_));
+            return y_lm_[block];
         }
 
-        // On-demand path: l > MAX_L_TINY
+        // On-demand path: l > l_max_resident_
         std::fprintf(stderr,
-            "SphericalHarmonics: warning - l=%d exceeds MAX_L_TINY (%d), computing on demand\n",
-            l, MAX_L_TINY);
+            "RealSphericalHarmonics: warning - l=%d exceeds resident l_max=%d, computing on demand\n",
+            l, l_max_resident_);
 
         // Advance Legendre recurrence to target l
         auto plm = advanceP(l, m_abs);
@@ -378,11 +427,12 @@ private:
     std::span<const double> theta_;
     std::span<const double> phi_;
     std::size_t ng_;
+    int l_max_resident_;
     std::vector<double> cos_theta_;
     std::vector<double> sin_theta_;
-    std::vector<double> cos_mphi_;
-    std::vector<double> sin_mphi_;
-    std::vector<double> cache_;
+    std::vector<double> cos_phi_;
+    std::vector<double> sin_phi_;
+    std::vector<std::vector<double>> y_lm_;
 
     // Per-m_abs recurrence state for associated Legendre polynomials.
     // p_curr = P_{l_state}^{m_abs},  p_prev = P_{l_state-1}^{m_abs}
@@ -392,6 +442,109 @@ private:
         int l_state = -1;
     };
     std::unordered_map<int, RecurState> state_;
+
+    // Top P_l^m state for each m, saved so reset() expansion can
+    // continue the recurrence without recomputing from scratch.
+    // top_p_[m].curr = P_{l_max_resident_}^{m},
+    // top_p_[m].prev = P_{l_max_resident_-1}^{m} (or = curr if l_max_resident_ == m).
+    struct TopP {
+        std::vector<double> prev;
+        std::vector<double> curr;
+    };
+    std::vector<TopP> top_p_;
+
+    // Full Y_lm build for l = 0..l_max_resident from scratch.
+    // Used by the constructor; reset() extends incrementally via top_p_.
+    auto buildYlm(int l_max_resident) -> void {
+        l_max_resident_ = l_max_resident;
+
+        int nm = l_max_resident_ + 1;
+
+        // Precompute all Y_lm for l = 0..l_max_resident_
+        int n_blocks = nm * nm;
+        y_lm_.resize(static_cast<std::size_t>(n_blocks));
+        for (auto& v : y_lm_) v.resize(ng_);
+
+        top_p_.resize(l_max_resident_ + 1);
+
+        std::vector<double> cm(ng_, 1.0), sm(ng_, 0.0);  // cos(m*phi), sin(m*phi) for current m
+
+        for (int m = 0; m <= l_max_resident_; ++m) {
+            // cm, sm are cos(m*phi), sin(m*phi) here
+
+            // P_l^m for all l = m..l_max_resident_, flat: [idx * ng_ + ig]
+            int n_l = l_max_resident_ - m + 1;
+            std::vector<double> p_buf(static_cast<std::size_t>(n_l) * ng_);
+
+            // P_m^m
+            if (m == 0) {
+                for (std::size_t i = 0; i < ng_; ++i) p_buf[i] = 1.0;
+            } else {
+                double df = 1.0;
+                for (int k = 1; k <= m; ++k) df *= 2.0 * k - 1.0;
+                for (std::size_t i = 0; i < ng_; ++i)
+                    p_buf[i] = df * std::pow(sin_theta_[i], m);
+            }
+
+            // P_{m+1}^m
+            if (m < l_max_resident_) {
+                for (std::size_t i = 0; i < ng_; ++i)
+                    p_buf[ng_ + i] = (2.0 * static_cast<double>(m) + 1.0) * cos_theta_[i] * p_buf[i];
+            }
+
+            // P_l^m for l >= m+2 via three-term recurrence
+            for (int l = m + 2; l <= l_max_resident_; ++l) {
+                int idx = l - m;
+                for (std::size_t i = 0; i < ng_; ++i)
+                    p_buf[static_cast<std::size_t>(idx) * ng_ + i] =
+                        ((2.0 * static_cast<double>(l) - 1.0) * cos_theta_[i] * p_buf[static_cast<std::size_t>(idx - 1) * ng_ + i]
+                      - static_cast<double>(l + m - 1) * p_buf[static_cast<std::size_t>(idx - 2) * ng_ + i])
+                      / static_cast<double>(l - m);
+            }
+
+            // Save top P_l^m state for incremental reset
+            {
+                int top_idx = l_max_resident_ - m;
+                top_p_[m].curr.assign(
+                    p_buf.begin() + static_cast<std::ptrdiff_t>(top_idx) * static_cast<std::ptrdiff_t>(ng_),
+                    p_buf.end());
+                if (l_max_resident_ > m) {
+                    top_p_[m].prev.assign(
+                        p_buf.begin() + static_cast<std::ptrdiff_t>(top_idx - 1) * static_cast<std::ptrdiff_t>(ng_),
+                        p_buf.begin() + static_cast<std::ptrdiff_t>(top_idx) * static_cast<std::ptrdiff_t>(ng_));
+                } else {
+                    top_p_[m].prev = top_p_[m].curr;
+                }
+            }
+
+            // Assemble Y_lm from P_l^m
+            for (int l = m; l <= l_max_resident_; ++l) {
+                int idx = l - m;
+                int block = l * l + l;
+                double norm = normFactor(l, m);
+
+                if (m == 0) {
+                    for (std::size_t i = 0; i < ng_; ++i)
+                        y_lm_[block][i] = norm * p_buf[static_cast<std::size_t>(idx) * ng_ + i];
+                } else {
+                    for (std::size_t i = 0; i < ng_; ++i) {
+                        double val = std::sqrt(2.0) * norm * p_buf[static_cast<std::size_t>(idx) * ng_ + i];
+                        y_lm_[block - m][i] = val * sm[i];
+                        y_lm_[block + m][i] = val * cm[i];
+                    }
+                }
+            }
+
+            // Advance cos(m*phi), sin(m*phi) to m+1 via recurrence
+            if (m < l_max_resident_) {
+                for (std::size_t i = 0; i < ng_; ++i) {
+                    double old_cm = cm[i];
+                    cm[i] = cm[i] * cos_phi_[i] - sm[i] * sin_phi_[i];
+                    sm[i] = sm[i] * cos_phi_[i] + old_cm * sin_phi_[i];
+                }
+            }
+        }
+    }
 
     // Advance Legendre recurrence for m_abs up to target_l.
     auto advanceP(int target_l, int m_abs) -> std::span<const double> {
