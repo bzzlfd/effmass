@@ -35,7 +35,7 @@ struct GKKMetadata {
 enum class KVecsView : unsigned int {
     Cartesian = 1 << 0,  // kinetic, Kx, Ky, Kz
     Spherical = 1 << 1,  // q, theta, phi
-    Integer   = 1 << 2,  // iG, jG, kG, kPoint, reciprocalLattice
+    Integer   = 1 << 2,  // g_idx, kPoint, reciprocalLattice
 };
 
 
@@ -61,8 +61,8 @@ struct KVecs {
     // Spherical representation of -K
     std::span<const double> q, theta, phi;        // |K|, polar angle [0,π], azimuthal angle [-π,π]
 
-    // Integer indices of G vector in reciprocal lattice basis
-    std::span<const int>    iG, jG, kG;           // G = iG*b1 + jG*b2 + kG*b3
+    // Integer indices of G vector in reciprocal lattice basis: G = g_idx.x*b1 + g_idx.y*b2 + g_idx.z*b3
+    std::span<const vector3d<int>>  g_idx;
     // Per-k-point metadata (valid whenever Integer view is enabled)
     vector3d<double>                    kPoint{};            // fractional coordinate of current k-point
     array2d<double, 3, 3>               reciprocalLattice{}; // reciprocal lattice vectors: row n = b_n
@@ -122,7 +122,7 @@ private:
     // buffers: working arrays (contiguous)
     std::vector<double> kinetic_, Kx_, Ky_, Kz_;
     std::vector<double> q_, theta_, phi_;
-    std::vector<int>    iG_, jG_, kG_;
+    std::vector<vector3d<int>>  g_idx_;
     KVecs current_data_;  // data view
 };
 
@@ -178,9 +178,7 @@ GKK::GKK(GKK&& other) noexcept
     , q_(std::move(other.q_))
     , theta_(std::move(other.theta_))
     , phi_(std::move(other.phi_))
-    , iG_(std::move(other.iG_))
-    , jG_(std::move(other.jG_))
-    , kG_(std::move(other.kG_))
+    , g_idx_(std::move(other.g_idx_))
     , current_data_(other.current_data_)
 {
     other.fp_ = nullptr;
@@ -197,10 +195,8 @@ GKK::GKK(GKK&& other) noexcept
             current_data_.theta = std::span<const double>(theta_.data(), ng);
             current_data_.phi   = std::span<const double>(phi_.data(), ng);
         }
-        if (!current_data_.iG.empty()) {
-            current_data_.iG    = std::span<const int>(iG_.data(), ng);
-            current_data_.jG    = std::span<const int>(jG_.data(), ng);
-            current_data_.kG    = std::span<const int>(kG_.data(), ng);
+        if (!current_data_.g_idx.empty()) {
+            current_data_.g_idx = std::span<const vector3d<int>>(g_idx_.data(), ng);
         }
     }
 }
@@ -226,9 +222,7 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
         q_ = std::move(other.q_);
         theta_ = std::move(other.theta_);
         phi_ = std::move(other.phi_);
-        iG_ = std::move(other.iG_);
-        jG_ = std::move(other.jG_);
-        kG_ = std::move(other.kG_);
+        g_idx_ = std::move(other.g_idx_);
         current_data_ = other.current_data_;
 
         other.fp_ = nullptr;
@@ -246,10 +240,8 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
                 current_data_.theta = std::span<const double>(theta_.data(), ng);
                 current_data_.phi   = std::span<const double>(phi_.data(), ng);
             }
-            if (!current_data_.iG.empty()) {
-                current_data_.iG    = std::span<const int>(iG_.data(), ng);
-                current_data_.jG    = std::span<const int>(jG_.data(), ng);
-                current_data_.kG    = std::span<const int>(kG_.data(), ng);
+            if (!current_data_.g_idx.empty()) {
+                current_data_.g_idx = std::span<const vector3d<int>>(g_idx_.data(), ng);
             }
         }
     }
@@ -426,11 +418,9 @@ auto GKK::updateDataSpans(std::size_t ng) -> void {
     }
 
     if (hasView(desired_views_, KVecsView::Integer) && hasView(ready_views_, KVecsView::Integer)) {
-        current_data_.iG = std::span<const int>(iG_.data(), ng);
-        current_data_.jG = std::span<const int>(jG_.data(), ng);
-        current_data_.kG = std::span<const int>(kG_.data(), ng);
+        current_data_.g_idx = std::span<const vector3d<int>>(g_idx_.data(), ng);
     } else {
-        current_data_.iG = current_data_.jG = current_data_.kG = {};
+        current_data_.g_idx = {};
     }
 }
 
@@ -467,9 +457,9 @@ auto GKK::computeIntegerIndices(std::size_t ng) -> void {
         double cy = (A_mat[1][0] * Kx + A_mat[1][1] * Ky + A_mat[1][2] * Kz);
         double cz = (A_mat[2][0] * Kx + A_mat[2][1] * Ky + A_mat[2][2] * Kz);
 
-        iG_[ig] = static_cast<int>(std::lround(cx / TWO_PI - k_frac[0]));
-        jG_[ig] = static_cast<int>(std::lround(cy / TWO_PI - k_frac[1]));
-        kG_[ig] = static_cast<int>(std::lround(cz / TWO_PI - k_frac[2]));
+        g_idx_[ig].x = static_cast<int>(std::lround(cx / TWO_PI - k_frac[0]));
+        g_idx_[ig].y = static_cast<int>(std::lround(cy / TWO_PI - k_frac[1]));
+        g_idx_[ig].z = static_cast<int>(std::lround(cz / TWO_PI - k_frac[2]));
     }
 }
 
@@ -497,18 +487,12 @@ auto GKK::setDataView(KVecsView view) -> void {
 
     // If new view does not need Integer, release buffers and clear cached state
     if (!hasView(view, KVecsView::Integer)) {
-        iG_.clear();
-        iG_.shrink_to_fit();
-        jG_.clear();
-        jG_.shrink_to_fit();
-        kG_.clear();
-        kG_.shrink_to_fit();
-        current_data_.iG = current_data_.jG = current_data_.kG = {};
+        g_idx_.clear();
+        g_idx_.shrink_to_fit();
+        current_data_.g_idx = {};
         ready_views_ = ready_views_ & ~KVecsView::Integer;
-    } else if (iG_.empty()) {
-        iG_.resize(max_ng_);
-        jG_.resize(max_ng_);
-        kG_.resize(max_ng_);
+    } else if (g_idx_.empty()) {
+        g_idx_.resize(max_ng_);
     }
 
     desired_views_ = view;

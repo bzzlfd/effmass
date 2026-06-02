@@ -40,7 +40,7 @@ export struct GKKMetadata {
 export enum class KVecsView : unsigned int {
     Cartesian = 1 << 0,  // kinetic, Kx, Ky, Kz
     Spherical = 1 << 1,  // q, theta, phi
-    Integer   = 1 << 2,  // iG, jG, kG, kPoint, reciprocalLattice
+    Integer   = 1 << 2,  // g_idx, kPoint, reciprocalLattice
 };
 ```
 
@@ -62,8 +62,8 @@ export struct KVecs {
     // Spherical representation of -K
     std::span<const double> q, theta, phi;        // |K|, polar angle [0,π], azimuthal angle [-π,π]
 
-    // Integer indices of G vector in reciprocal lattice basis
-    std::span<const int>    iG, jG, kG;           // G = iG*b1 + jG*b2 + kG*b3
+    // Integer indices of G vector in reciprocal lattice basis: G = g_idx.x*b1 + g_idx.y*b2 + g_idx.z*b3
+    std::span<const vector3d<int>>  g_idx;
     // Per-k-point metadata (valid whenever Integer view is enabled)
     vector3d<double>                    kPoint{};            // fractional coordinate of current k-point
     array2d<double, 3, 3>               reciprocalLattice{}; // reciprocal lattice vectors: row n = b_n
@@ -72,7 +72,7 @@ export struct KVecs {
 
 - **Cartesian**（始终可加载）：`kinetic` 为 $|G+k|^2/2$，`Kx/Ky/Kz` 语义解释为 $-(G+k)$ 的 Cartesian 分量。
 - **Spherical**：由 `Kx/Ky/Kz` 转换而来，`q = |K|`，`theta = acos(Kz/q)`，`phi = atan2(Ky, Kx)`。
-- **Integer**：使用点取反恢复 $G+k$ 后，通过公式 `iG = round(A^T·(G+k) / (2π) - k_frac)` 计算 G 向量的整数米勒指数。同时填充该 k 点相关的全局元数据：
+- **Integer**：使用点取反恢复 $G+k$ 后，通过公式 `(g_idx.x, g_idx.y, g_idx.z) = round(A^T·(G+k) / (2π) - k_frac)` 计算 G 向量的整数米勒指数。同时填充该 k 点相关的全局元数据：
   - `kPoint`：当前 k 点的分数坐标（由 `inferCurrent_k()` 推断，范围 `(-0.5, 0.5]`）
   - `reciprocalLattice`：倒格子矩阵（行向量 `b1, b2, b3`，单位 Bohr⁻¹），由 `Lattice::B()` 在每次调用时动态计算。
 
@@ -193,7 +193,7 @@ std::array<double, 3> inferCurrent_k() const;                    // 从 -K = -(G
 类在构造时根据 `mg_nx * nnodes` 预分配 **Cartesian** 必需的缓冲区：
 - `kinetic_`, `Kx_`, `Ky_`, `Kz_`
 
-**Spherical** 和 **Integer** 的缓冲区（`q_`、`theta_`、`phi_`、`iG_`、`jG_`、`kG_`）采用**惰性分配**：仅在 `setDataView` 启用对应视图时分配，禁用时通过 `clear()` + `shrink_to_fit()` 释放堆内存。
+**Spherical** 和 **Integer** 的缓冲区（`q_`、`theta_`、`phi_`、`g_idx_`）采用**惰性分配**：仅在 `setDataView` 启用对应视图时分配，禁用时通过 `clear()` + `shrink_to_fit()` 释放堆内存。
 
 
 ## 错误处理

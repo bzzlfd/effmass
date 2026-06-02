@@ -89,7 +89,7 @@ auto main() -> int {
         if (!kv0.q.empty() || !kv0.theta.empty() || !kv0.phi.empty()) {
             throw std::runtime_error("Spherical data should not be available without setDataView");
         }
-        if (!kv0.iG.empty() || !kv0.jG.empty() || !kv0.kG.empty()) {
+        if (!kv0.g_idx.empty()) {
             throw std::runtime_error("Integer data should not be available without setDataView");
         }
 
@@ -126,11 +126,11 @@ auto main() -> int {
         // Test Integer view
         gkk.setDataView(KVecsView::Cartesian | KVecsView::Spherical | KVecsView::Integer);
         const auto& kv_int = gkk.loadKPoint(0);
-        if (kv_int.iG.empty() || kv_int.jG.empty() || kv_int.kG.empty()) {
+        if (kv_int.g_idx.empty()) {
             throw std::runtime_error("Integer data should be available after setDataView");
         }
-        if (kv_int.iG.size() != 1737) {
-            throw std::runtime_error("integer iG size mismatch");
+        if (kv_int.g_idx.size() != 1737) {
+            throw std::runtime_error("integer g_idx size mismatch");
         }
         // Per-k-point metadata available in Integer view
         // kpt=0 is Gamma (0,0,0)

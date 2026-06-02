@@ -84,7 +84,7 @@ auto main() -> int {
         for (int ikpt = 0; ikpt < wg.meta.nkpt; ++ikpt) {
             gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
             auto& kvecs = gkk.loadKPoint(ikpt);
-            int ng = static_cast<int>(kvecs.iG.size());
+            int ng = static_cast<int>(kvecs.g_idx.size());
 
             for (int iband = 0; iband < wg.meta.mx; ++iband) {
                 auto coeffs = wg.loadBand(ikpt, iband);
@@ -107,16 +107,16 @@ auto main() -> int {
         std::println("\n--- Parseval  G ↔ R (kpt=0 band=0) ---");
         gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
         auto& kvecs0 = gkk.loadKPoint(0);
-        int ng0 = static_cast<int>(kvecs0.iG.size());
+        int ng0 = static_cast<int>(kvecs0.g_idx.size());
 
         auto coeffs = wg.loadBand(0, 0);
         double norm_g0 = computeGspaceNorm(coeffs.up, vol);
 
         std::vector<std::complex<double>> grid(static_cast<std::size_t>(n123), 0.0);
         for (int ig = 0; ig < ng0; ++ig) {
-            int i_idx = ((kvecs0.iG[ig] % n1) + n1) % n1;
-            int j_idx = ((kvecs0.jG[ig] % n2) + n2) % n2;
-            int k_idx = ((kvecs0.kG[ig] % n3) + n3) % n3;
+            int i_idx = ((kvecs0.g_idx[ig].x % n1) + n1) % n1;
+            int j_idx = ((kvecs0.g_idx[ig].y % n2) + n2) % n2;
+            int k_idx = ((kvecs0.g_idx[ig].z % n3) + n3) % n3;
             grid[static_cast<std::size_t>(i_idx) * n2 * n3
                + static_cast<std::size_t>(j_idx) * n3
                + static_cast<std::size_t>(k_idx)] = coeffs.up[ig];
@@ -141,7 +141,7 @@ auto main() -> int {
         std::println("\n--- Single-band density: kpt=0 band=15  vs  OUT.WG2RHO_1_16 ---");
         gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
         auto& kv_gamma = gkk.loadKPoint(0);
-        int ng_gamma = static_cast<int>(kv_gamma.iG.size());
+        int ng_gamma = static_cast<int>(kv_gamma.g_idx.size());
 
         auto coeffs_gamma = wg.loadBand(0, 15);
         check(static_cast<int>(coeffs_gamma.up.size()) == ng_gamma,
@@ -149,9 +149,9 @@ auto main() -> int {
 
         std::vector<std::complex<double>> gr_gamma(static_cast<std::size_t>(n123), 0.0);
         for (int ig = 0; ig < ng_gamma; ++ig) {
-            int i_idx = ((kv_gamma.iG[ig] % n1) + n1) % n1;
-            int j_idx = ((kv_gamma.jG[ig] % n2) + n2) % n2;
-            int k_idx = ((kv_gamma.kG[ig] % n3) + n3) % n3;
+            int i_idx = ((kv_gamma.g_idx[ig].x % n1) + n1) % n1;
+            int j_idx = ((kv_gamma.g_idx[ig].y % n2) + n2) % n2;
+            int k_idx = ((kv_gamma.g_idx[ig].z % n3) + n3) % n3;
             gr_gamma[static_cast<std::size_t>(i_idx) * n2 * n3
                    + static_cast<std::size_t>(j_idx) * n3
                    + static_cast<std::size_t>(k_idx)] = coeffs_gamma.up[ig];
@@ -184,7 +184,7 @@ auto main() -> int {
         std::println("\n--- Single-band density: kpt=7 band=16  vs  OUT.WG2RHO_8_17 ---");
         gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
         auto& kv_k7 = gkk.loadKPoint(7);
-        int ng_k7 = static_cast<int>(kv_k7.iG.size());
+        int ng_k7 = static_cast<int>(kv_k7.g_idx.size());
 
         auto coeffs_k7 = wg.loadBand(7, 16);
         check(static_cast<int>(coeffs_k7.up.size()) == ng_k7,
@@ -192,9 +192,9 @@ auto main() -> int {
 
         std::vector<std::complex<double>> gr_k7(static_cast<std::size_t>(n123), 0.0);
         for (int ig = 0; ig < ng_k7; ++ig) {
-            int i_idx = ((kv_k7.iG[ig] % n1) + n1) % n1;
-            int j_idx = ((kv_k7.jG[ig] % n2) + n2) % n2;
-            int k_idx = ((kv_k7.kG[ig] % n3) + n3) % n3;
+            int i_idx = ((kv_k7.g_idx[ig].x % n1) + n1) % n1;
+            int j_idx = ((kv_k7.g_idx[ig].y % n2) + n2) % n2;
+            int k_idx = ((kv_k7.g_idx[ig].z % n3) + n3) % n3;
             gr_k7[static_cast<std::size_t>(i_idx) * n2 * n3
                 + static_cast<std::size_t>(j_idx) * n3
                 + static_cast<std::size_t>(k_idx)] = coeffs_k7.up[ig];
@@ -241,7 +241,7 @@ auto main() -> int {
         for (int ikpt = 0; ikpt < wg.meta.nkpt; ++ikpt) {
             gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);
             auto& kv = gkk.loadKPoint(ikpt);
-            int ng = static_cast<int>(kv.iG.size());
+            int ng = static_cast<int>(kv.g_idx.size());
 
             for (int iband = 0; iband < nband; ++iband) {
                 double occ_val = occ.occupation(ikpt, iband);
@@ -254,9 +254,9 @@ auto main() -> int {
 
                 std::fill(buf.begin(), buf.end(), 0.0);
                 for (int ig = 0; ig < ng; ++ig) {
-                    int i_idx = ((kv.iG[ig] % n1) + n1) % n1;
-                    int j_idx = ((kv.jG[ig] % n2) + n2) % n2;
-                    int k_idx = ((kv.kG[ig] % n3) + n3) % n3;
+                    int i_idx = ((kv.g_idx[ig].x % n1) + n1) % n1;
+                    int j_idx = ((kv.g_idx[ig].y % n2) + n2) % n2;
+                    int k_idx = ((kv.g_idx[ig].z % n3) + n3) % n3;
                     buf[static_cast<std::size_t>(i_idx) * n2 * n3
                       + static_cast<std::size_t>(j_idx) * n3
                       + static_cast<std::size_t>(k_idx)] = coeffs.up[ig];

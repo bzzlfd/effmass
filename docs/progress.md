@@ -74,6 +74,11 @@ for(ityp: ATOM.eachtype())
 我们会增加 $H^{\alpha} \psi$ 和 $H^{\alpha\beta} \psi$，alpha和beta指的是对于  以 k 为参数的哈密顿量 H(k)，对于 k_alpha 和 k_beta 分量的一阶偏导数和二阶偏导数
 - [ ] 命名
 
+# GKK `vector3d<int> {iG, jG, kG}` ✅
+Kx, Ky, Kz 与内部数据关联，改动带来的计算负担好像不能抵消数据转换。
+q, theta, phi 在数据使用过程中是分离变量的，分开保存就好。
+(iG, jG, kG) 的使用场景（FFT，structure_factor）都是连续使用它们，绑定存储有利于连续读取。而且它本身需要计算得到，不可避免计算成本，这个改动不会减小这部分开销，但可以增加后续的便利。
+已完成：`KVecs::iG/jG/kG` 三独立 `span<const int>` 改为 `span<const vector3d<int>> g_idx`，内部存储对应使用 `vector<vector3d<int>> g_idx_`。
 
 
 # 球谐函数
