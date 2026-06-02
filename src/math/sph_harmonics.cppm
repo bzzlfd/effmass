@@ -215,83 +215,6 @@ auto realSphericalHarmonics(double theta, double phi, int l_max, std::span<doubl
 } // namespace archived (realSphericalHarmonic, realSphericalHarmonics)
 
 
-// -------------------------------------------------------------------
-// Normalized associated Legendre recurrence (Q_l^m = N_l^m · P_l^m).
-//
-// The main class stores raw (unnormalized) P_l^m in top_p_ and
-// multiplies by N_l^m at assembly time.  For l up to ~10 this is safe
-// (P_m^m ~ 10⁹, well below double overflow at ~10³⁰⁸).  For l > 50
-// the unnormalized P grows as O((2m-1)!!) and would overflow.
-//
-// The alternative below absorbs N_l^m into the recurrence — every
-// intermediate Q_l^m stays O(1).  Seed and step formulas simplify
-// dramatically due to cancellations:
-//
-//   Q_0^0       = 1/(2√π)
-//   Q_m^m       = Q_{m-1}^{m-1} · sqrt((2m+1)/(2m)) · sinθ
-//   Q_{m+1}^m   = sqrt(2m+3) · cosθ · Q_m^m            (the (2m+1) cancels)
-//   Q_l^m (l≥m+2):
-//     c1 = sqrt((2l-1)(2l+1)(l-m)/(l+m))
-//     c2 = (l+m-1) · sqrt((2l+1)(l-m)(l-m-1)/((2l-3)(l+m)(l+m-1)))
-//     Q_l^m = (cosθ · c1 · Q_{l-1}^m - c2 · Q_{l-2}^m) / (l-m)
-//
-// Not in active use because:
-//   - Physical l_max ≤ 10 is far from overflow
-//   - sqrt() coefficients add runtime at every step (not constant)
-//   - Switching would require top_p_ to store Q instead of P,
-//     breaking the reset(expand) contract
-// -------------------------------------------------------------------
-namespace normalized {
-
-auto Q_lm(int l, int m_abs, double theta) -> double {
-    if (m_abs < 0 || m_abs > l) return 0.0;
-
-    double cos_t = std::cos(theta);
-    double sin_t = std::sin(theta);
-
-    // Q_m^m via upward recurrence from Q_0^0
-    double q = 1.0 / (2.0 * std::sqrt(std::numbers::pi));
-    for (int k = 1; k <= m_abs; ++k) {
-        q *= std::sqrt(static_cast<double>(2 * k + 1) / static_cast<double>(2 * k)) * sin_t;
-    }
-    if (l == m_abs) return q;
-
-    // Q_{m+1}^m = sqrt(2m+3) · cosθ · Q_m^m   (the (2m+1) cancels out)
-    double q_prev = q;
-    q = std::sqrt(2.0 * m_abs + 3.0) * cos_t * q;
-    if (l == m_abs + 1) return q;
-
-    // Three-term recurrence with normalized coefficients
-    for (int n = m_abs + 2; n <= l; ++n) {
-        double r1 = std::sqrt(static_cast<double>((2 * n - 1) * (2 * n + 1) * (n - m_abs))
-                             / static_cast<double>(n + m_abs));
-        double r2 = (n + m_abs - 1.0)
-                  * std::sqrt(static_cast<double>((2 * n + 1) * (n - m_abs) * (n - m_abs - 1))
-                             / static_cast<double>((2 * n - 3) * (n + m_abs) * (n + m_abs - 1)));
-        double q_next = (cos_t * r1 * q - r2 * q_prev) / static_cast<double>(n - m_abs);
-        q_prev = q;
-        q = q_next;
-    }
-    return q;
-}
-
-auto realSphericalHarmonic(int l, int m, double theta, double phi) -> double {
-    if (l < 0 || std::abs(m) > l) return 0.0;
-
-    int m_abs = std::abs(m);
-    double q = Q_lm(l, m_abs, theta);  // already includes N_l^m
-
-    if (m == 0) {
-        return q;
-    } else if (m > 0) {
-        return std::sqrt(2.0) * q * std::cos(m * phi);
-    } else {
-        return std::sqrt(2.0) * q * std::sin(m_abs * phi);
-    }
-}
-
-} // namespace normalized
-// -------------------------------------------------------------------
 
 
 // Vectorized spherical harmonics evaluator over K-point G-vectors.
@@ -425,65 +348,59 @@ public:
         }
 
         // On-demand path: l > l_max_resident_
-        // Seed P_m^m and recurse upward to target l (no persistent state)
-        std::vector<double> p_curr(ng_);
+        // Seed Q_m^m and recurse upward to target l (no persistent state).
+        // Q_l^m = N_l^m * P_l^m already includes normalization, so no extra
+        // normFactor or multiplication is needed.
+        std::vector<double> q_curr(ng_);
+        double q0 = 0.5 / std::sqrt(std::numbers::pi);
         if (m_abs == 0) {
-            for (std::size_t i = 0; i < ng_; ++i) p_curr[i] = 1.0;
+            for (std::size_t i = 0; i < ng_; ++i) q_curr[i] = q0;
         } else {
-            double df = 1.0;
-            for (int k = 1; k <= m_abs; ++k) df *= 2.0 * k - 1.0;
+            double coeff = q0;
+            for (int k = 1; k <= m_abs; ++k)
+                coeff *= std::sqrt(static_cast<double>(2 * k + 1) / static_cast<double>(2 * k));
             for (std::size_t i = 0; i < ng_; ++i)
-                p_curr[i] = df * std::pow(sin_theta_[i], m_abs);
+                q_curr[i] = coeff * std::pow(sin_theta_[i], m_abs);
         }
 
         if (l > m_abs) {
-            std::vector<double> p_prev(ng_);
-            // P_{m+1}^m = (2m+1) * cosθ * P_m^m
+            std::vector<double> q_prev(ng_);
+            // Q_{m+1}^m = sqrt(2m+3) * cosθ * Q_m^m
+            double step_factor = std::sqrt(2.0 * m_abs + 3.0);
             for (std::size_t i = 0; i < ng_; ++i) {
-                p_prev[i] = p_curr[i];
-                p_curr[i] = (2.0 * m_abs + 1.0) * cos_theta_[i] * p_curr[i];
+                q_prev[i] = q_curr[i];
+                q_curr[i] = step_factor * cos_theta_[i] * q_curr[i];
             }
 
-            // General three-term recurrence for n = m+2 .. l
+            // Three-term recurrence for Q_l^m for n = m+2 .. l
             for (int n = m_abs + 2; n <= l; ++n) {
+                double r1 = std::sqrt(static_cast<double>((2*n-1)*(2*n+1)*(n-m_abs))
+                                     / static_cast<double>(n+m_abs));
+                double r2 = (n + m_abs - 1.0)
+                          * std::sqrt(static_cast<double>((2*n+1)*(n-m_abs)*(n-m_abs-1))
+                                     / static_cast<double>((2*n-3)*(n+m_abs)*(n+m_abs-1)));
+                double denom = 1.0 / static_cast<double>(n - m_abs);
                 for (std::size_t i = 0; i < ng_; ++i) {
-                    double next = ((2.0 * n - 1.0) * cos_theta_[i] * p_curr[i]
-                                 - static_cast<double>(n + m_abs - 1) * p_prev[i])
-                                 / static_cast<double>(n - m_abs);
-                    p_prev[i] = p_curr[i];
-                    p_curr[i] = next;
+                    double next = (cos_theta_[i] * r1 * q_curr[i] - r2 * q_prev[i]) * denom;
+                    q_prev[i] = q_curr[i];
+                    q_curr[i] = next;
                 }
             }
         }
 
-        // Normalization factor
-        double norm;
-        if (l <= MAX_L_SAFE) {
-            long long prod = 1;
-            for (int k = l - m_abs + 1; k <= l + m_abs; ++k) prod *= k;
-            norm = std::sqrt((2.0 * static_cast<double>(l) + 1.0)
-                           / (4.0 * std::numbers::pi * static_cast<double>(prod)));
-        } else {
-            double log_norm = 0.5 * (std::log(2.0 * static_cast<double>(l) + 1.0)
-                                    - std::log(4.0 * std::numbers::pi));
-            for (int k = l - m_abs + 1; k <= l + m_abs; ++k)
-                log_norm -= 0.5 * std::log(static_cast<double>(k));
-            norm = std::exp(log_norm);
-        }
-
-        // Assemble Y_lm
+        // Assemble Y_lm (Q already includes normalization)
         std::vector<double> result(ng_);
         if (m == 0) {
             for (std::size_t i = 0; i < ng_; ++i)
-                result[i] = norm * p_curr[i];
+                result[i] = q_curr[i];
         } else {
-            double sf = std::sqrt(2.0) * norm;
+            double sf = std::sqrt(2.0);
             if (m > 0) {
                 for (std::size_t i = 0; i < ng_; ++i)
-                    result[i] = sf * p_curr[i] * std::cos(static_cast<double>(m) * phi_[i]);
+                    result[i] = sf * q_curr[i] * std::cos(static_cast<double>(m) * phi_[i]);
             } else {
                 for (std::size_t i = 0; i < ng_; ++i)
-                    result[i] = sf * p_curr[i] * std::sin(static_cast<double>(m_abs) * phi_[i]);
+                    result[i] = sf * q_curr[i] * std::sin(static_cast<double>(m_abs) * phi_[i]);
             }
         }
 
@@ -502,10 +419,10 @@ private:
     std::vector<std::vector<double>> y_lm_;
 
 
-    // Top P_l^m state for each m, saved so reset() expansion can
+    // Top Q_l^m state for each m, saved so reset() expansion can
     // continue the recurrence without recomputing from scratch.
-    // top_p_[m].curr = P_{l_max_resident_}^{m},
-    // top_p_[m].prev = P_{l_max_resident_-1}^{m} (or = curr if l_max_resident_ == m).
+    // top_p_[m].curr = Q_{l_max_resident_}^{m},
+    // top_p_[m].prev = Q_{l_max_resident_-1}^{m} (or = curr if l_max_resident_ == m).
     struct TopP {
         std::vector<double> prev;
         std::vector<double> curr;
@@ -516,57 +433,76 @@ private:
     // -- Legendre recurrence helpers (shared by reset and operator()) --
     //
 
-    // Seed P_m^m into curr:  P_m^m = (2m-1)!! · sin^m(θ)
+    // Seed Q_m^m into curr:  Q_0^0 = 1/(2√π), then
+    //   Q_m^m = Q_0^0 · Π_{k=1}^{m} sqrt((2k+1)/(2k)) · sin^m(θ)
+    // All intermediate values are O(1) (no overflow at high l).
     auto seedPmm(int m, std::vector<double>& curr) -> void {
+        double q0 = 0.5 / std::sqrt(std::numbers::pi);
         if (m == 0) {
-            for (std::size_t i = 0; i < ng_; ++i) curr[i] = 1.0;
+            for (std::size_t i = 0; i < ng_; ++i) curr[i] = q0;
         } else {
-            double df = 1.0;
-            for (int k = 1; k <= m; ++k) df *= 2.0 * k - 1.0;
+            double coeff = q0;
+            for (int k = 1; k <= m; ++k) {
+                coeff *= std::sqrt(static_cast<double>(2 * k + 1) / static_cast<double>(2 * k));
+            }
             for (std::size_t i = 0; i < ng_; ++i)
-                curr[i] = df * std::pow(sin_theta_[i], m);
+                curr[i] = coeff * std::pow(sin_theta_[i], m);
         }
     }
 
-    // One step: P_{m+1}^m = (2m+1) · cosθ · P_m^m
-    // On entry: curr = P_m^m; on exit: prev = P_m^m, curr = P_{m+1}^m
+    // One step: Q_{m+1}^m = sqrt(2m+3) · cosθ · Q_m^m
+    // (the (2m+1) factor cancels when norm is folded into the recurrence)
+    // On entry: curr = Q_m^m; on exit: prev = Q_m^m, curr = Q_{m+1}^m
     auto stepPmm1(int m, std::vector<double>& prev, std::vector<double>& curr) -> void {
+        double factor = std::sqrt(2.0 * m + 3.0);
         for (std::size_t i = 0; i < ng_; ++i) {
             prev[i] = curr[i];
-            curr[i] = (2.0 * m + 1.0) * cos_theta_[i] * curr[i];
+            curr[i] = factor * cos_theta_[i] * curr[i];
         }
     }
 
-    // Assemble Y_{l,m} from P_l^m(p), write into y_lm_ cache.
-    auto assembleYlm(int l, int m, const std::vector<double>& p,
+    // Assemble Y_{l,m} from Q_l^m(q), write into y_lm_ cache.
+    // Q already includes the normalization N_l^m, so no extra normFactor.
+    //   Y_{l0}   = Q_l^0
+    //   Y_{l,±m} = √2 · Q_l^m · {cos(mφ), sin(mφ)}
+    auto assembleYlm(int l, int m, const std::vector<double>& q,
                      const std::vector<double>& cm, const std::vector<double>& sm) -> void {
         int block = l * l + l;
-        double norm = normFactor(l, m);
         if (m == 0) {
             for (std::size_t i = 0; i < ng_; ++i)
-                y_lm_[static_cast<std::size_t>(block)][i] = norm * p[i];
+                y_lm_[static_cast<std::size_t>(block)][i] = q[i];
         } else {
-            double sf = std::sqrt(2.0) * norm;
+            double sf = std::sqrt(2.0);
             for (std::size_t i = 0; i < ng_; ++i) {
-                double val = sf * p[i];
+                double val = sf * q[i];
                 y_lm_[static_cast<std::size_t>(block - m)][i] = val * sm[i];
                 y_lm_[static_cast<std::size_t>(block + m)][i] = val * cm[i];
             }
         }
     }
 
-    // Three-term Legendre recurrence for fixed m, l = start_l .. end_l.
-    // On entry: prev = P_{start_l-2}^m, curr = P_{start_l-1}^m
-    // On exit:  prev = P_{end_l-1}^m,   curr = P_{end_l}^m
-    // Each step assembles Y_{l,m} into the cache.
+    // Three-term recurrence for Q_l^m (normalized), fixed m, l = start_l .. end_l.
+    // On entry: prev = Q_{start_l-2}^m, curr = Q_{start_l-1}^m
+    // On exit:  prev = Q_{end_l-1}^m,   curr = Q_{end_l}^m
+    //
+    // Coefficients arise from folding the normalization ratio N_l^m / N_{l-1}^m
+    // and N_l^m / N_{l-2}^m into the standard P recurrence:
+    //
+    //   c1 = sqrt((2l-1)(2l+1)(l-m)/(l+m))
+    //   c2 = (l+m-1) · sqrt((2l+1)(l-m)(l-m-1)/((2l-3)(l+m)(l+m-1)))
+    //   Q_l^m = (cosθ · c1 · Q_{l-1}^m - c2 · Q_{l-2}^m) / (l-m)
     auto advanceColumn(int m, int start_l, int end_l,
                        std::vector<double>& prev, std::vector<double>& curr,
                        const std::vector<double>& cm, const std::vector<double>& sm) -> void {
         for (int l = start_l; l <= end_l; ++l) {
+            double r1 = std::sqrt(static_cast<double>((2 * l - 1) * (2 * l + 1) * (l - m))
+                                 / static_cast<double>(l + m));
+            double r2 = (l + m - 1.0)
+                      * std::sqrt(static_cast<double>((2 * l + 1) * (l - m) * (l - m - 1))
+                                 / static_cast<double>((2 * l - 3) * (l + m) * (l + m - 1)));
+            double denom = 1.0 / static_cast<double>(l - m);
             for (std::size_t i = 0; i < ng_; ++i) {
-                double next = ((2.0 * l - 1.0) * cos_theta_[i] * curr[i]
-                             - static_cast<double>(l + m - 1) * prev[i])
-                             / static_cast<double>(l - m);
+                double next = (cos_theta_[i] * r1 * curr[i] - r2 * prev[i]) * denom;
                 prev[i] = curr[i];
                 curr[i] = next;
             }
