@@ -118,9 +118,9 @@ private:
     std::size_t max_ng_ = 0;  // maximum possible G-vectors per k-point
 
     // buffers: working arrays (contiguous)
-    std::vector<double> kinetic_buf_, Kx_buf_, Ky_buf_, Kz_buf_;
-    std::vector<double> q_buf_, theta_buf_, phi_buf_;
-    std::vector<int>    iG_buf_, jG_buf_, kG_buf_;
+    std::vector<double> kinetic_, Kx_, Ky_, Kz_;
+    std::vector<double> q_, theta_, phi_;
+    std::vector<int>    iG_, jG_, kG_;
     KVecs current_data_;  // data view
 };
 
@@ -139,10 +139,10 @@ GKK::GKK(const std::string& filename)
 
     // preallocate working buffers (maximum possible size) for Cartesian only
     max_ng_ = static_cast<std::size_t>(meta.mg_nx) * meta.nnodes;
-    kinetic_buf_.resize(max_ng_);
-    Kx_buf_.resize(max_ng_);
-    Ky_buf_.resize(max_ng_);
-    Kz_buf_.resize(max_ng_);
+    kinetic_.resize(max_ng_);
+    Kx_.resize(max_ng_);
+    Ky_.resize(max_ng_);
+    Kz_.resize(max_ng_);
 
     // initialize empty data view
     current_data_ = {};
@@ -169,16 +169,16 @@ GKK::GKK(GKK&& other) noexcept
     , desired_views_(other.desired_views_)
     , ready_views_(other.ready_views_)
     , max_ng_(other.max_ng_)
-    , kinetic_buf_(std::move(other.kinetic_buf_))
-    , Kx_buf_(std::move(other.Kx_buf_))
-    , Ky_buf_(std::move(other.Ky_buf_))
-    , Kz_buf_(std::move(other.Kz_buf_))
-    , q_buf_(std::move(other.q_buf_))
-    , theta_buf_(std::move(other.theta_buf_))
-    , phi_buf_(std::move(other.phi_buf_))
-    , iG_buf_(std::move(other.iG_buf_))
-    , jG_buf_(std::move(other.jG_buf_))
-    , kG_buf_(std::move(other.kG_buf_))
+    , kinetic_(std::move(other.kinetic_))
+    , Kx_(std::move(other.Kx_))
+    , Ky_(std::move(other.Ky_))
+    , Kz_(std::move(other.Kz_))
+    , q_(std::move(other.q_))
+    , theta_(std::move(other.theta_))
+    , phi_(std::move(other.phi_))
+    , iG_(std::move(other.iG_))
+    , jG_(std::move(other.jG_))
+    , kG_(std::move(other.kG_))
     , current_data_(other.current_data_)
 {
     other.fp_ = nullptr;
@@ -186,19 +186,19 @@ GKK::GKK(GKK&& other) noexcept
     // update current_data_ spans to point to our own buffers
     if (!current_data_.kinetic.empty()) {
         const auto ng = current_data_.kinetic.size();
-        current_data_.kinetic = std::span<const double>(kinetic_buf_.data(), ng);
-        current_data_.Kx      = std::span<const double>(Kx_buf_.data(), ng);
-        current_data_.Ky      = std::span<const double>(Ky_buf_.data(), ng);
-        current_data_.Kz      = std::span<const double>(Kz_buf_.data(), ng);
+        current_data_.kinetic = std::span<const double>(kinetic_.data(), ng);
+        current_data_.Kx      = std::span<const double>(Kx_.data(), ng);
+        current_data_.Ky      = std::span<const double>(Ky_.data(), ng);
+        current_data_.Kz      = std::span<const double>(Kz_.data(), ng);
         if (!current_data_.q.empty()) {
-            current_data_.q     = std::span<const double>(q_buf_.data(), ng);
-            current_data_.theta = std::span<const double>(theta_buf_.data(), ng);
-            current_data_.phi   = std::span<const double>(phi_buf_.data(), ng);
+            current_data_.q     = std::span<const double>(q_.data(), ng);
+            current_data_.theta = std::span<const double>(theta_.data(), ng);
+            current_data_.phi   = std::span<const double>(phi_.data(), ng);
         }
         if (!current_data_.iG.empty()) {
-            current_data_.iG    = std::span<const int>(iG_buf_.data(), ng);
-            current_data_.jG    = std::span<const int>(jG_buf_.data(), ng);
-            current_data_.kG    = std::span<const int>(kG_buf_.data(), ng);
+            current_data_.iG    = std::span<const int>(iG_.data(), ng);
+            current_data_.jG    = std::span<const int>(jG_.data(), ng);
+            current_data_.kG    = std::span<const int>(kG_.data(), ng);
         }
     }
 }
@@ -217,16 +217,16 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
         desired_views_ = other.desired_views_;
         ready_views_ = other.ready_views_;
         max_ng_ = other.max_ng_;
-        kinetic_buf_ = std::move(other.kinetic_buf_);
-        Kx_buf_ = std::move(other.Kx_buf_);
-        Ky_buf_ = std::move(other.Ky_buf_);
-        Kz_buf_ = std::move(other.Kz_buf_);
-        q_buf_ = std::move(other.q_buf_);
-        theta_buf_ = std::move(other.theta_buf_);
-        phi_buf_ = std::move(other.phi_buf_);
-        iG_buf_ = std::move(other.iG_buf_);
-        jG_buf_ = std::move(other.jG_buf_);
-        kG_buf_ = std::move(other.kG_buf_);
+        kinetic_ = std::move(other.kinetic_);
+        Kx_ = std::move(other.Kx_);
+        Ky_ = std::move(other.Ky_);
+        Kz_ = std::move(other.Kz_);
+        q_ = std::move(other.q_);
+        theta_ = std::move(other.theta_);
+        phi_ = std::move(other.phi_);
+        iG_ = std::move(other.iG_);
+        jG_ = std::move(other.jG_);
+        kG_ = std::move(other.kG_);
         current_data_ = other.current_data_;
 
         other.fp_ = nullptr;
@@ -235,19 +235,19 @@ auto GKK::operator=(GKK&& other) noexcept -> GKK& {
         // update spans
         if (!current_data_.kinetic.empty()) {
             const auto ng = current_data_.kinetic.size();
-            current_data_.kinetic = std::span<const double>(kinetic_buf_.data(), ng);
-            current_data_.Kx      = std::span<const double>(Kx_buf_.data(), ng);
-            current_data_.Ky      = std::span<const double>(Ky_buf_.data(), ng);
-            current_data_.Kz      = std::span<const double>(Kz_buf_.data(), ng);
+            current_data_.kinetic = std::span<const double>(kinetic_.data(), ng);
+            current_data_.Kx      = std::span<const double>(Kx_.data(), ng);
+            current_data_.Ky      = std::span<const double>(Ky_.data(), ng);
+            current_data_.Kz      = std::span<const double>(Kz_.data(), ng);
             if (!current_data_.q.empty()) {
-                current_data_.q     = std::span<const double>(q_buf_.data(), ng);
-                current_data_.theta = std::span<const double>(theta_buf_.data(), ng);
-                current_data_.phi   = std::span<const double>(phi_buf_.data(), ng);
+                current_data_.q     = std::span<const double>(q_.data(), ng);
+                current_data_.theta = std::span<const double>(theta_.data(), ng);
+                current_data_.phi   = std::span<const double>(phi_.data(), ng);
             }
             if (!current_data_.iG.empty()) {
-                current_data_.iG    = std::span<const int>(iG_buf_.data(), ng);
-                current_data_.jG    = std::span<const int>(jG_buf_.data(), ng);
-                current_data_.kG    = std::span<const int>(kG_buf_.data(), ng);
+                current_data_.iG    = std::span<const int>(iG_.data(), ng);
+                current_data_.jG    = std::span<const int>(jG_.data(), ng);
+                current_data_.kG    = std::span<const int>(kG_.data(), ng);
             }
         }
     }
@@ -410,23 +410,23 @@ auto GKK::seekToKPoint(int ikpt) -> void {
 
 auto GKK::updateDataSpans(std::size_t ng) -> void {
     // Cartesian is always loaded when loadKPoint succeeds
-    current_data_.kinetic = std::span<const double>(kinetic_buf_.data(), ng);
-    current_data_.Kx      = std::span<const double>(Kx_buf_.data(), ng);
-    current_data_.Ky      = std::span<const double>(Ky_buf_.data(), ng);
-    current_data_.Kz      = std::span<const double>(Kz_buf_.data(), ng);
+    current_data_.kinetic = std::span<const double>(kinetic_.data(), ng);
+    current_data_.Kx      = std::span<const double>(Kx_.data(), ng);
+    current_data_.Ky      = std::span<const double>(Ky_.data(), ng);
+    current_data_.Kz      = std::span<const double>(Kz_.data(), ng);
 
     if (hasView(desired_views_, KVecsView::Spherical) && hasView(ready_views_, KVecsView::Spherical)) {
-        current_data_.q     = std::span<const double>(q_buf_.data(), ng);
-        current_data_.theta = std::span<const double>(theta_buf_.data(), ng);
-        current_data_.phi   = std::span<const double>(phi_buf_.data(), ng);
+        current_data_.q     = std::span<const double>(q_.data(), ng);
+        current_data_.theta = std::span<const double>(theta_.data(), ng);
+        current_data_.phi   = std::span<const double>(phi_.data(), ng);
     } else {
         current_data_.q = current_data_.theta = current_data_.phi = {};
     }
 
     if (hasView(desired_views_, KVecsView::Integer) && hasView(ready_views_, KVecsView::Integer)) {
-        current_data_.iG = std::span<const int>(iG_buf_.data(), ng);
-        current_data_.jG = std::span<const int>(jG_buf_.data(), ng);
-        current_data_.kG = std::span<const int>(kG_buf_.data(), ng);
+        current_data_.iG = std::span<const int>(iG_.data(), ng);
+        current_data_.jG = std::span<const int>(jG_.data(), ng);
+        current_data_.kG = std::span<const int>(kG_.data(), ng);
     } else {
         current_data_.iG = current_data_.jG = current_data_.kG = {};
     }
@@ -437,13 +437,13 @@ auto GKK::computeSpherical(std::size_t ng) -> void {
     // Handles kinetic=0 (|K|=0, i.e. Kx=Ky=Kz=0, the Gamma-point G=G-k vector):
     // q=0 → theta=0 via guard below, phi=0 via atan2(0,0)=0. No division-by-zero.
     for (std::size_t ig = 0; ig < ng; ++ig) {
-        const double kx = Kx_buf_[ig];
-        const double ky = Ky_buf_[ig];
-        const double kz = Kz_buf_[ig];
+        const double kx = Kx_[ig];
+        const double ky = Ky_[ig];
+        const double kz = Kz_[ig];
         const double q  = std::sqrt(kx * kx + ky * ky + kz * kz);
-        q_buf_[ig]     = q;
-        theta_buf_[ig] = (q > 0.0) ? std::acos(kz / q) : 0.0;
-        phi_buf_[ig]   = std::atan2(ky, kx);
+        q_[ig]     = q;
+        theta_[ig] = (q > 0.0) ? std::acos(kz / q) : 0.0;
+        phi_[ig]   = std::atan2(ky, kx);
     }
 }
 
@@ -453,9 +453,9 @@ auto GKK::computeIntegerIndices(std::size_t ng) -> void {
     constexpr double TWO_PI = 2.0 * std::numbers::pi;
     auto A_mat = meta.lattice.A();
     for (std::size_t ig = 0; ig < ng; ++ig) {
-        const double Kx = - Kx_buf_[ig];
-        const double Ky = - Ky_buf_[ig];
-        const double Kz = - Kz_buf_[ig];
+        const double Kx = - Kx_[ig];
+        const double Ky = - Ky_[ig];
+        const double Kz = - Kz_[ig];
 
         // c[n] = A[n][0] * Kx + A[n][1] * Ky + A[n][2] * Kz
         // (iG,jG,kG) = round(c / (2π) + k_frac)
@@ -465,9 +465,9 @@ auto GKK::computeIntegerIndices(std::size_t ng) -> void {
         double cy = (A_mat[1][0] * Kx + A_mat[1][1] * Ky + A_mat[1][2] * Kz);
         double cz = (A_mat[2][0] * Kx + A_mat[2][1] * Ky + A_mat[2][2] * Kz);
 
-        iG_buf_[ig] = static_cast<int>(std::lround(cx / TWO_PI - k_frac[0]));
-        jG_buf_[ig] = static_cast<int>(std::lround(cy / TWO_PI - k_frac[1]));
-        kG_buf_[ig] = static_cast<int>(std::lround(cz / TWO_PI - k_frac[2]));
+        iG_[ig] = static_cast<int>(std::lround(cx / TWO_PI - k_frac[0]));
+        jG_[ig] = static_cast<int>(std::lround(cy / TWO_PI - k_frac[1]));
+        kG_[ig] = static_cast<int>(std::lround(cz / TWO_PI - k_frac[2]));
     }
 }
 
@@ -479,34 +479,34 @@ auto GKK::setDataView(KVecsView view) -> void {
 
     // If new view does not need Spherical, release buffers and clear cached state
     if (!hasView(view, KVecsView::Spherical)) {
-        q_buf_.clear();
-        q_buf_.shrink_to_fit();
-        theta_buf_.clear();
-        theta_buf_.shrink_to_fit();
-        phi_buf_.clear();
-        phi_buf_.shrink_to_fit();
+        q_.clear();
+        q_.shrink_to_fit();
+        theta_.clear();
+        theta_.shrink_to_fit();
+        phi_.clear();
+        phi_.shrink_to_fit();
         current_data_.q = current_data_.theta = current_data_.phi = {};
         ready_views_ = ready_views_ & ~KVecsView::Spherical;
-    } else if (q_buf_.empty()) {
-        q_buf_.resize(max_ng_);
-        theta_buf_.resize(max_ng_);
-        phi_buf_.resize(max_ng_);
+    } else if (q_.empty()) {
+        q_.resize(max_ng_);
+        theta_.resize(max_ng_);
+        phi_.resize(max_ng_);
     }
 
     // If new view does not need Integer, release buffers and clear cached state
     if (!hasView(view, KVecsView::Integer)) {
-        iG_buf_.clear();
-        iG_buf_.shrink_to_fit();
-        jG_buf_.clear();
-        jG_buf_.shrink_to_fit();
-        kG_buf_.clear();
-        kG_buf_.shrink_to_fit();
+        iG_.clear();
+        iG_.shrink_to_fit();
+        jG_.clear();
+        jG_.shrink_to_fit();
+        kG_.clear();
+        kG_.shrink_to_fit();
         current_data_.iG = current_data_.jG = current_data_.kG = {};
         ready_views_ = ready_views_ & ~KVecsView::Integer;
-    } else if (iG_buf_.empty()) {
-        iG_buf_.resize(max_ng_);
-        jG_buf_.resize(max_ng_);
-        kG_buf_.resize(max_ng_);
+    } else if (iG_.empty()) {
+        iG_.resize(max_ng_);
+        jG_.resize(max_ng_);
+        kG_.resize(max_ng_);
     }
 
     desired_views_ = view;
@@ -537,10 +537,10 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
             if (ng == 0) continue;
 
             auto nbytes = static_cast<std::size_t>(ng) * sizeof(double);
-            readRecord(kinetic_buf_.data() + total_pos, nbytes, "gkk");
-            readRecord(Kx_buf_.data() + total_pos,      nbytes, "gkk_x");
-            readRecord(Ky_buf_.data() + total_pos,      nbytes, "gkk_y");
-            readRecord(Kz_buf_.data() + total_pos,      nbytes, "gkk_z");
+            readRecord(kinetic_.data() + total_pos, nbytes, "gkk");
+            readRecord(Kx_.data() + total_pos,      nbytes, "gkk_x");
+            readRecord(Ky_.data() + total_pos,      nbytes, "gkk_y");
+            readRecord(Kz_.data() + total_pos,      nbytes, "gkk_z");
 
             total_pos += static_cast<std::size_t>(ng);
         }

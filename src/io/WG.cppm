@@ -11,7 +11,7 @@ import std;
 export {
     class WG;
         struct WGMetadata;
-        struct WGCoeffs;
+        struct WGCoeffsView;
 }
 
 
@@ -25,7 +25,7 @@ struct WGMetadata {
 
 
 // Wavefunction coefficient view for a single k-point and band
-struct WGCoeffs {
+struct WGCoeffsView {
     std::span<const std::complex<double>> up;     // spin-up component (always valid)
     std::span<const std::complex<double>> down;   // spin-down component (valid only when is_SO == 1)
 };
@@ -43,18 +43,18 @@ public:
     WG(WG&& other) noexcept;                   // enable move
     auto operator=(WG&& other) noexcept -> WG&;
 
-    auto loadBand(int ikpt, int iband) -> const WGCoeffs&;        // load band data (with cache)
+    auto loadBand(int ikpt, int iband) -> const WGCoeffsView&;        // load band data (with cache)
     auto current_ikpt() const -> int { return current_ikpt_; }     // current k-point index
     auto current_iband() const -> int { return current_iband_; }      // current band index
-    auto currentData() const -> const WGCoeffs& { return current_data_view_; }  // current data
+    auto currentData() const -> const WGCoeffsView& { return current_data_view_; }  // current data
 
 private:
-    struct CacheEntry {
+    struct CachedState {
         int ikpt = -1;
         int iband = -1;
         std::vector<std::complex<double>> up;
         std::vector<std::complex<double>> down;
-        WGCoeffs view;
+        WGCoeffsView view;       // span into up/down, wired by loadBand
     };
 
     auto readRecordLength() -> int;                     // read record length marker
@@ -76,14 +76,14 @@ private:
     std::vector<long> band_offsets_;            // file offset per band per k-point
 
     // multi-band cache
-    std::vector<std::unique_ptr<CacheEntry>> cache_;  // cache entries (stable addresses via unique_ptr)
+    std::vector<std::unique_ptr<CachedState>> cache_;  // cache entries (stable addresses via unique_ptr)
     std::size_t cache_capacity_;                      // max cached bands
     std::size_t cache_next_slot_ = 0;                 // next slot to replace in FIFO order
 
     // track most recent loadBand
     int current_ikpt_ = -1;
     int current_iband_ = -1;
-    WGCoeffs current_data_view_;
+    WGCoeffsView current_data_view_;
 };
 
 
@@ -338,7 +338,7 @@ auto WG::seekToBand(int ikpt, int iband) -> void {
 }
 
 
-auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
+auto WG::loadBand(int ikpt, int iband) -> const WGCoeffsView& {
     if (ikpt < 0 || ikpt >= meta.nkpt) {
         throw std::out_of_range("Invalid k-point index: " + std::to_string(ikpt));
     }
@@ -359,9 +359,9 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffs& {
     // cache miss: read from file
     seekToBand(ikpt, iband);
 
-    CacheEntry* entry = nullptr;
+    CachedState* entry = nullptr;
     if (cache_.size() < cache_capacity_) {
-        cache_.emplace_back(std::make_unique<CacheEntry>());
+        cache_.emplace_back(std::make_unique<CachedState>());
         entry = cache_.back().get();
     } else {
         entry = cache_[cache_next_slot_].get();
