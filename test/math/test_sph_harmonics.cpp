@@ -23,7 +23,7 @@ auto test_spherical_harmonics() -> void {
     {
         double theta = 0.0, phi = 0.0;
         RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1), 3};
-        auto y00 = sh(0, 0);
+        const auto& y00 = sh.get(0, 0);
         check(near(y00[0], 1.0 / (2.0 * std::sqrt(std::numbers::pi)), eps), "Y_00 constant");
     }
 
@@ -31,7 +31,7 @@ auto test_spherical_harmonics() -> void {
     {
         double theta0 = 0.5, phi0 = 0.0;
         RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
-        auto y10 = sh(1, 0);
+        const auto& y10 = sh.get(1, 0);
         double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::cos(theta0);
         check(near(y10[0], expected, eps), "Y_10(theta)");
     }
@@ -40,7 +40,7 @@ auto test_spherical_harmonics() -> void {
     {
         double theta0 = 0.5, phi0 = 0.3;
         RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
-        auto y11 = sh(1, 1);
+        const auto& y11 = sh.get(1, 1);
         double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::cos(phi0);
         check(near(y11[0], expected, eps), "Y_11(theta,phi)");
     }
@@ -49,17 +49,17 @@ auto test_spherical_harmonics() -> void {
     {
         double theta0 = 0.5, phi0 = 0.3;
         RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
-        auto y1m1 = sh(1, -1);
+        const auto& y1m1 = sh.get(1, -1);
         double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::sin(phi0);
         check(near(y1m1[0], expected, eps), "Y_1,-1(theta,phi)");
     }
 
-    // m > l should return 0
+    // |m| > l should throw
     {
         double theta0 = 0.5, phi0 = 0.3;
         RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
         try {
-            auto y23 = sh(2, 3);
+            sh.get(2, 3);
             check(false, "Y_{2,3} should have thrown");
         } catch (const std::invalid_argument&) {
             check(true, "Y_{2,3} throws (|m| > l)");
@@ -74,15 +74,102 @@ auto test_spherical_harmonics_batch() -> void {
     double theta = 0.7;
     double phi = 0.3;
     int l_max = 4;
-    int n = (l_max + 1) * (l_max + 1);
 
     RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1), 4};
 
     for (int l = 0; l <= l_max; ++l) {
         for (int m = -l; m <= l; ++m) {
-            auto y_lm = sh(l, m);
+            const auto& y_lm = sh.get(l, m);
             check(y_lm.size() == 1, std::format("batch Y_{{{},{}}} size", l, m));
         }
+    }
+}
+
+auto test_compute() -> void {
+    std::println("\n=== compute() ===");
+
+    double eps = 1e-12;
+    double theta = 0.5;
+    double phi = 0.3;
+
+    // compute() matches get() for cached range
+    {
+        RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1), 3};
+        for (int l = 0; l <= 3; ++l) {
+            for (int m = -l; m <= l; ++m) {
+                const auto& cached = sh.get(l, m);
+                auto computed = sh.compute(l, m);
+                check(near(cached[0], computed[0], eps),
+                      std::format("compute({},{}) matches get", l, m));
+            }
+        }
+    }
+
+    // compute() works for l > l_max_resident
+    {
+        RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1), 2};
+        auto y40 = sh.compute(4, 0);
+        check(std::isfinite(y40[0]), "compute(4,0) finite");
+        auto y42 = sh.compute(4, 2);
+        check(std::isfinite(y42[0]), "compute(4,2) finite");
+    }
+
+    // compute() at θ=0: Y_{l,0} = sqrt((2l+1)/(4π)), Y_{l,±m} = 0
+    {
+        double theta_zero = 0.0;
+        RealSphericalHarmonics sh{std::span<const double>(&theta_zero, 1),
+                                   std::span<const double>(&phi, 1), 0};
+
+        auto y50 = sh.compute(5, 0);
+        double expected = std::sqrt(11.0 / (4.0 * std::numbers::pi));
+        check(near(y50[0], expected, eps), "compute(5,0) at θ=0");
+
+        auto y53 = sh.compute(5, 3);
+        check(near(y53[0], 0.0, eps), "compute(5,3) at θ=0 (=0)");
+    }
+}
+
+auto test_cache_mode_none() -> void {
+    std::println("\n=== CacheMode::None ===");
+
+    double eps = 1e-12;
+    double theta = 0.5;
+    double phi = 0.3;
+
+    RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1),
+                               0, RealSphericalHarmonics::CacheMode::None};
+
+    // compute() works
+    auto y00 = sh.compute(0, 0);
+    check(near(y00[0], 1.0 / (2.0 * std::sqrt(std::numbers::pi)), eps),
+          "None mode compute Y_00");
+
+    auto y10 = sh.compute(1, 0);
+    double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::cos(theta);
+    check(near(y10[0], expected, eps), "None mode compute Y_10");
+
+    // get() throws
+    try {
+        sh.get(0, 0);
+        check(false, "get() should throw in None mode");
+    } catch (const std::exception&) {
+        check(true, "get() throws in CacheMode::None");
+    }
+}
+
+auto test_get_out_of_range() -> void {
+    std::println("\n=== get() out of range ===");
+
+    double theta = 0.5;
+    double phi = 0.3;
+    RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1), 2};
+
+    // l > l_max_resident should throw
+    try {
+        sh.get(3, 0);
+        check(false, "get(3,0) should have thrown (l > l_max_resident)");
+    } catch (const std::runtime_error&) {
+        check(true, "get(3,0) throws (l > l_max_resident)");
     }
 }
 
@@ -91,6 +178,9 @@ auto main() -> int {
         std::println("=== Spherical Harmonics Tests ===");
         test_spherical_harmonics();
         test_spherical_harmonics_batch();
+        test_compute();
+        test_cache_mode_none();
+        test_get_out_of_range();
         std::println("\nAll Spherical Harmonics tests passed!");
         return 0;
     } catch (const std::exception& e) {
