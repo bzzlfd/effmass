@@ -140,7 +140,7 @@ public:
     }
 
     // Switch l_max_resident. Shrink truncates; expand continues Legendre
-    // recurrence from saved top_p_ state (first call with empty top_p_
+    // recurrence from saved top_column_Q_ state (first call with empty top_column_Q_
     // performs a full build from scratch).
     auto reset(int l_max_new) -> void {
         if (l_max_new < 0) {
@@ -150,38 +150,28 @@ public:
         if (mode_ == CacheMode::None) return;
         if (l_max_new == l_max_resident_) return;
 
-        // -- Shrink: truncate buffers and back-iterate top_p_ --
+        // -- Shrink: truncate buffers and back-iterate top_column_Q_ --
         if (l_max_new < l_max_resident_) {
             int old_l_max = l_max_resident_;
             std::size_t new_nm = static_cast<std::size_t>(l_max_new + 1);
             y_lm_.resize(new_nm * new_nm);
-            top_p_.resize(new_nm);
+            top_column_Q_.resize(new_nm);
             l_max_resident_ = l_max_new;
 
-            // Backward Q recurrence: recover top_p_ state for new l_max.
+            // Backward Q recurrence: recover top_column_Q_ state for new l_max.
             // Forward 3-term:  Q_l^m = (cosθ·c1·Q_{l-1}^m - c2·Q_{l-2}^m) / (l-m)
             // Inverse:          Q_{l-2}^m = (cosθ·c1·Q_{l-1}^m - (l-m)·Q_l^m) / c2
             // Valid for l ≥ m+2 (c2 ≠ 0).
             for (int m = 0; m <= l_max_new; ++m) {
-                auto& tp = top_p_[static_cast<std::size_t>(m)];
+                auto& tp = top_column_Q_[static_cast<std::size_t>(m)];
 
                 if (l_max_new == m) {
                     // Seed level: use direct formula to avoid cosθ division.
                     seedPmm(m, tp.curr);
                     tp.prev = tp.curr;
                 } else {
-                    for (int l = old_l_max; l > l_max_new; --l) {
-                        double c1 = std::sqrt(static_cast<double>((2*l-1)*(2*l+1)*(l-m))
-                                             / static_cast<double>(l+m));
-                        double c2 = (l + m - 1.0)
-                                  * std::sqrt(static_cast<double>((2*l+1)*(l-m)*(l-m-1))
-                                             / static_cast<double>((2*l-3)*(l+m)*(l+m-1)));
-                        for (std::size_t i = 0; i < ng_; ++i) {
-                            double q_lm2 = (cos_theta_[i] * c1 * tp.prev[i] - (l - m) * tp.curr[i]) / c2;
-                            tp.curr[i] = tp.prev[i];
-                            tp.prev[i] = q_lm2;
-                        }
-                    }
+                    for (int l = old_l_max; l > l_max_new; --l)
+                        retreatColumn(m, l, tp.prev, tp.curr);
                 }
             }
             return;
@@ -191,11 +181,11 @@ public:
         int old_nm = l_max_resident_ + 1;
         int new_nm = l_max_new + 1;
 
-        // Extend top_p_ for new m values
-        top_p_.resize(static_cast<std::size_t>(new_nm));
+        // Extend top_column_Q_ for new m values
+        top_column_Q_.resize(static_cast<std::size_t>(new_nm));
         for (int m = old_nm; m <= l_max_new; ++m) {
-            top_p_[static_cast<std::size_t>(m)].prev.resize(ng_);
-            top_p_[static_cast<std::size_t>(m)].curr.resize(ng_);
+            top_column_Q_[static_cast<std::size_t>(m)].prev.resize(ng_);
+            top_column_Q_[static_cast<std::size_t>(m)].curr.resize(ng_);
         }
 
         // Extend y_lm_ cache
@@ -205,7 +195,7 @@ public:
         std::vector<double> cm(ng_, 1.0), sm(ng_, 0.0);
 
         for (int m = 0; m <= l_max_new; ++m) {
-            auto& tp = top_p_[static_cast<std::size_t>(m)];
+            auto& tp = top_column_Q_[static_cast<std::size_t>(m)];
 
             if (m > l_max_resident_) {
                 // -- New m: full seed from scratch --
@@ -217,8 +207,10 @@ public:
                 } else {
                     stepPmm1(m, tp.prev, tp.curr);
                     assembleYlm(m + 1, m, tp.curr, cm, sm);
-                    if (m + 2 <= l_max_new)
-                        advanceColumn(m, m + 2, l_max_new, tp.prev, tp.curr, cm, sm);
+                    for (int l = m + 2; l <= l_max_new; ++l) {
+                        advanceColumn(m, l, tp.prev, tp.curr);
+                        assembleYlm(l, m, tp.curr, cm, sm);
+                    }
                 }
 
             } else if (l_max_resident_ == m) {
@@ -226,14 +218,18 @@ public:
                 if (m < l_max_new) {
                     stepPmm1(m, tp.prev, tp.curr);
                     assembleYlm(m + 1, m, tp.curr, cm, sm);
-                    if (m + 2 <= l_max_new)
-                        advanceColumn(m, m + 2, l_max_new, tp.prev, tp.curr, cm, sm);
+                    for (int l = m + 2; l <= l_max_new; ++l) {
+                        advanceColumn(m, l, tp.prev, tp.curr);
+                        assembleYlm(l, m, tp.curr, cm, sm);
+                    }
                 }
 
             } else {
                 // -- Existing m with valid (P_{old-1}^m, P_{old}^m) --
-                if (l_max_resident_ + 1 <= l_max_new)
-                    advanceColumn(m, l_max_resident_ + 1, l_max_new, tp.prev, tp.curr, cm, sm);
+                for (int l = l_max_resident_ + 1; l <= l_max_new; ++l) {
+                    advanceColumn(m, l, tp.prev, tp.curr);
+                    assembleYlm(l, m, tp.curr, cm, sm);
+                }
             }
 
             // Advance cos(m*phi), sin(m*phi) to m+1
@@ -352,27 +348,27 @@ private:
 
     // Top Q_l^m state for each m, saved so reset() expansion can
     // continue the recurrence without recomputing from scratch.
-    // top_p_[m].curr = Q_{l_max_resident_}^{m},
-    // top_p_[m].prev = Q_{l_max_resident_-1}^{m} (or = curr if l_max_resident_ == m).
-    struct TopP {
+    // top_column_Q_[m].curr = Q_{l_max_resident_}^{m},
+    // top_column_Q_[m].prev = Q_{l_max_resident_-1}^{m} (or = curr if l_max_resident_ == m).
+    struct TopColumnQ {
         std::vector<double> prev;
         std::vector<double> curr;
     };
-    std::vector<TopP> top_p_;
+    std::vector<TopColumnQ> top_column_Q_;
 
     //
-    // -- Legendre recurrence helpers (shared by reset and operator()) --
+    // -- Legendre recurrence helpers --
     //
 
     // Seed Q_m^m into curr:  Q_0^0 = 1/(2√π), then
     //   Q_m^m = Q_0^0 · Π_{k=1}^{m} sqrt((2k+1)/(2k)) · sin^m(θ)
     // All intermediate values are O(1) (no overflow at high l).
     auto seedPmm(int m, std::vector<double>& curr) -> void {
-        double q0 = 0.5 / std::sqrt(std::numbers::pi);
+        double Q0 = 0.5 / std::sqrt(std::numbers::pi);
         if (m == 0) {
-            for (std::size_t i = 0; i < ng_; ++i) curr[i] = q0;
+            for (std::size_t i = 0; i < ng_; ++i) curr[i] = Q0;
         } else {
-            double coeff = q0;
+            double coeff = Q0;
             for (int k = 1; k <= m; ++k) {
                 coeff *= std::sqrt(static_cast<double>(2 * k + 1) / static_cast<double>(2 * k));
             }
@@ -392,52 +388,65 @@ private:
         }
     }
 
+    // One step of forward three-term recurrence for Q_l^m (normalized).
+    // On entry: prev = Q_{l-2}^m, curr = Q_{l-1}^m
+    // On exit:  prev = Q_{l-1}^m, curr = Q_l^m
+    //
+    //   r1 = sqrt((2l-1)(2l+1)(l-m)/(l+m))
+    //   r2 = (l+m-1) · sqrt((2l+1)(l-m)(l-m-1)/((2l-3)(l+m)(l+m-1)))
+    //   Q_l^m = (cosθ · r1 · Q_{l-1}^m - r2 · Q_{l-2}^m) / (l-m)
+    auto advanceColumn(int m, int l,
+                       std::vector<double>& prev, std::vector<double>& curr) -> void {
+        double r1 = std::sqrt(static_cast<double>((2 * l - 1) * (2 * l + 1) * (l - m))
+                             / static_cast<double>(l + m));
+        double r2 = (l + m - 1.0)
+                  * std::sqrt(static_cast<double>((2 * l + 1) * (l - m) * (l - m - 1))
+                             / static_cast<double>((2 * l - 3) * (l + m) * (l + m - 1)));
+        double denom = 1.0 / static_cast<double>(l - m);
+        for (std::size_t i = 0; i < ng_; ++i) {
+            double next = (cos_theta_[i] * r1 * curr[i] - r2 * prev[i]) * denom;
+            prev[i] = curr[i];
+            curr[i] = next;
+        }
+    }
+
+    // One step of inverse three-term recurrence for Q_l^m.
+    // On entry: prev = Q_{l-1}^m, curr = Q_l^m
+    // On exit:  prev = Q_{l-2}^m, curr = Q_{l-1}^m
+    //
+    //   Q_{l-2}^m = (cosθ · c1 · Q_{l-1}^m - (l-m) · Q_l^m) / c2
+    // where c1, c2 are the same coefficients as in advanceColumn.
+    auto retreatColumn(int m, int l,
+                       std::vector<double>& prev, std::vector<double>& curr) -> void {
+        double c1 = std::sqrt(static_cast<double>((2*l-1)*(2*l+1)*(l-m))
+                             / static_cast<double>(l+m));
+        double c2 = (l + m - 1.0)
+                  * std::sqrt(static_cast<double>((2*l+1)*(l-m)*(l-m-1))
+                             / static_cast<double>((2*l-3)*(l+m)*(l+m-1)));
+        for (std::size_t i = 0; i < ng_; ++i) {
+            double q_lm2 = (cos_theta_[i] * c1 * prev[i] - (l - m) * curr[i]) / c2;
+            curr[i] = prev[i];
+            prev[i] = q_lm2;
+        }
+    }
+
     // Assemble Y_{l,m} from Q_l^m(q), write into y_lm_ cache.
     // Q already includes the normalization N_l^m, so no extra normFactor.
     //   Y_{l0}   = Q_l^0
     //   Y_{l,±m} = √2 · Q_l^m · {cos(mφ), sin(mφ)}
-    auto assembleYlm(int l, int m, const std::vector<double>& q,
+    auto assembleYlm(int l, int m, const std::vector<double>& Q,
                      const std::vector<double>& cm, const std::vector<double>& sm) -> void {
         int block = l * l + l;
         if (m == 0) {
             for (std::size_t i = 0; i < ng_; ++i)
-                y_lm_[static_cast<std::size_t>(block)][i] = q[i];
+                y_lm_[static_cast<std::size_t>(block)][i] = Q[i];
         } else {
             double sf = std::sqrt(2.0);
             for (std::size_t i = 0; i < ng_; ++i) {
-                double val = sf * q[i];
+                double val = sf * Q[i];
                 y_lm_[static_cast<std::size_t>(block - m)][i] = val * sm[i];
                 y_lm_[static_cast<std::size_t>(block + m)][i] = val * cm[i];
             }
-        }
-    }
-
-    // Three-term recurrence for Q_l^m (normalized), fixed m, l = start_l .. end_l.
-    // On entry: prev = Q_{start_l-2}^m, curr = Q_{start_l-1}^m
-    // On exit:  prev = Q_{end_l-1}^m,   curr = Q_{end_l}^m
-    //
-    // Coefficients arise from folding the normalization ratio N_l^m / N_{l-1}^m
-    // and N_l^m / N_{l-2}^m into the standard P recurrence:
-    //
-    //   c1 = sqrt((2l-1)(2l+1)(l-m)/(l+m))
-    //   c2 = (l+m-1) · sqrt((2l+1)(l-m)(l-m-1)/((2l-3)(l+m)(l+m-1)))
-    //   Q_l^m = (cosθ · c1 · Q_{l-1}^m - c2 · Q_{l-2}^m) / (l-m)
-    auto advanceColumn(int m, int start_l, int end_l,
-                       std::vector<double>& prev, std::vector<double>& curr,
-                       const std::vector<double>& cm, const std::vector<double>& sm) -> void {
-        for (int l = start_l; l <= end_l; ++l) {
-            double r1 = std::sqrt(static_cast<double>((2 * l - 1) * (2 * l + 1) * (l - m))
-                                 / static_cast<double>(l + m));
-            double r2 = (l + m - 1.0)
-                      * std::sqrt(static_cast<double>((2 * l + 1) * (l - m) * (l - m - 1))
-                                 / static_cast<double>((2 * l - 3) * (l + m) * (l + m - 1)));
-            double denom = 1.0 / static_cast<double>(l - m);
-            for (std::size_t i = 0; i < ng_; ++i) {
-                double next = (cos_theta_[i] * r1 * curr[i] - r2 * prev[i]) * denom;
-                prev[i] = curr[i];
-                curr[i] = next;
-            }
-            assembleYlm(l, m, curr, cm, sm);
         }
     }
 
