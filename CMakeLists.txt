@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project(effmass LANGUAGES CXX)
 
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # pugixml (used by UPF reader)
@@ -72,6 +73,16 @@ set_source_files_properties(vendor/pocketfft/pocketfft.c PROPERTIES
 )
 target_include_directories(math PRIVATE vendor/pocketfft)
 target_link_libraries(math PRIVATE utils)
+
+# Library target for H_psi module
+add_library(H_psi)
+target_sources(H_psi
+    PUBLIC
+        FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            src/H_psi.cppm
+            src/H_psi/hamiltonian.cppm
+)
+target_link_libraries(H_psi PRIVATE io math)
 
 # Tests
 enable_testing()
