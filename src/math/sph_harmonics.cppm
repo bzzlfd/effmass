@@ -267,6 +267,8 @@ public:
 
     // Compute Y_lm on the fly. Works in any mode, for any (l,m).
     // Returns by value (no persistent cache).
+    // Reuses the Q recurrence helpers (seedPmm, stepPmm1, advanceColumn);
+    // only the final Y_lm assembly differs (returns a new vector).
     auto compute(int l, int m) -> std::vector<double> {
         if (l < 0 || std::abs(m) > l) {
             throw std::invalid_argument(
@@ -275,50 +277,20 @@ public:
 
         int m_abs = std::abs(m);
 
-        // Seed Q_m^m and recurse upward to target l (no persistent state).
-        // Q_l^m = N_l^m * P_l^m already includes normalization, so no extra
-        // normFactor or multiplication is needed.
+        // Q_l^m = N_l^m * P_l^m already includes normalization
         std::vector<double> q_curr(ng_);
-        double q0 = 0.5 / std::sqrt(std::numbers::pi);
-        if (m_abs == 0) {
-            for (std::size_t i = 0; i < ng_; ++i) q_curr[i] = q0;
-        } else {
-            double coeff = q0;
-            for (int k = 1; k <= m_abs; ++k)
-                coeff *= std::sqrt(static_cast<double>(2 * k + 1) / static_cast<double>(2 * k));
-            for (std::size_t i = 0; i < ng_; ++i)
-                q_curr[i] = coeff * std::pow(sin_theta_[i], m_abs);
-        }
+        seedPmm(m_abs, q_curr);
 
         if (l > m_abs) {
             std::vector<double> q_prev(ng_);
-            // Q_{m+1}^m = sqrt(2m+3) * cosθ * Q_m^m
-            double step_factor = std::sqrt(2.0 * m_abs + 3.0);
-            for (std::size_t i = 0; i < ng_; ++i) {
-                q_prev[i] = q_curr[i];
-                q_curr[i] = step_factor * cos_theta_[i] * q_curr[i];
-            }
-
-            // Three-term recurrence for Q_l^m for n = m+2 .. l
-            for (int n = m_abs + 2; n <= l; ++n) {
-                double r1 = std::sqrt(static_cast<double>((2*n-1)*(2*n+1)*(n-m_abs))
-                                     / static_cast<double>(n+m_abs));
-                double r2 = (n + m_abs - 1.0)
-                          * std::sqrt(static_cast<double>((2*n+1)*(n-m_abs)*(n-m_abs-1))
-                                     / static_cast<double>((2*n-3)*(n+m_abs)*(n+m_abs-1)));
-                double denom = 1.0 / static_cast<double>(n - m_abs);
-                for (std::size_t i = 0; i < ng_; ++i) {
-                    double next = (cos_theta_[i] * r1 * q_curr[i] - r2 * q_prev[i]) * denom;
-                    q_prev[i] = q_curr[i];
-                    q_curr[i] = next;
-                }
-            }
+            stepPmm1(m_abs, q_prev, q_curr);
+            for (int n = m_abs + 2; n <= l; ++n)
+                advanceColumn(m_abs, n, q_prev, q_curr);
         }
 
         std::vector<double> result(ng_);
         if (m == 0) {
-            for (std::size_t i = 0; i < ng_; ++i)
-                result[i] = q_curr[i];
+            result = std::move(q_curr);
         } else {
             double sf = std::sqrt(2.0);
             if (m > 0) {
