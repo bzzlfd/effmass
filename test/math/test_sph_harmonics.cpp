@@ -173,6 +173,52 @@ auto test_get_out_of_range() -> void {
     }
 }
 
+auto test_reset_shrink_expand() -> void {
+    std::println("\n=== reset(shrink) → reset(expand) ===");
+
+    double eps = 1e-12;
+    double theta_arr[] = {0.5};
+    double phi_arr[] = {0.3};
+    int l_max = 4;
+
+    RealSphericalHarmonics sh{theta_arr, phi_arr, l_max};
+
+    // Save pre-shrink references
+    int n4 = 2 * l_max + 1;
+    int n5 = 2 * (l_max + 1) + 1;
+    auto ref_low = sh.get(2, 1);
+    std::vector<std::vector<double>> ref_high(static_cast<std::size_t>(n4));
+    std::vector<std::vector<double>> ref_beyond(static_cast<std::size_t>(n5));
+    for (int m = -l_max; m <= l_max; ++m)
+        ref_high[static_cast<std::size_t>(m + l_max)] = sh.get(l_max, m);
+    for (int m = -(l_max + 1); m <= (l_max + 1); ++m)
+        ref_beyond[static_cast<std::size_t>(m + l_max + 1)] = sh.compute(l_max + 1, m);
+
+    // Shrink and verify remaining cache intact
+    sh.reset(2);
+    check(near(sh.get(2, 1)[0], ref_low[0], eps),
+          "get(2,1) unchanged after shrink");
+    try {
+        sh.get(3, 0);
+        check(false, "get(3,0) should throw after shrink");
+    } catch (const std::runtime_error&) {
+        check(true, "get(3,0) throws after shrink");
+    }
+
+    // Expand back and verify get() and compute() match pre-shrink
+    sh.reset(l_max);
+    for (int m = -l_max; m <= l_max; ++m) {
+        const auto& y = sh.get(l_max, m);
+        check(near(y[0], ref_high[static_cast<std::size_t>(m + l_max)][0], eps),
+              std::format("get({},{}) matches pre-shrink after expand", l_max, m));
+    }
+    for (int m = -(l_max + 1); m <= (l_max + 1); ++m) {
+        auto y = sh.compute(l_max + 1, m);
+        check(near(y[0], ref_beyond[static_cast<std::size_t>(m + l_max + 1)][0], eps),
+              std::format("compute({},{}) matches pre-shrink after expand", l_max + 1, m));
+    }
+}
+
 auto main() -> int {
     try {
         std::println("=== Spherical Harmonics Tests ===");
@@ -181,6 +227,7 @@ auto main() -> int {
         test_compute();
         test_cache_mode_none();
         test_get_out_of_range();
+        test_reset_shrink_expand();
         std::println("\nAll Spherical Harmonics tests passed!");
         return 0;
     } catch (const std::exception& e) {

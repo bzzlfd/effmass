@@ -150,12 +150,40 @@ public:
         if (mode_ == CacheMode::None) return;
         if (l_max_new == l_max_resident_) return;
 
+        // -- Shrink: truncate buffers and back-iterate top_p_ --
         if (l_max_new < l_max_resident_) {
-            // -- Shrink: truncate buffers --
+            int old_l_max = l_max_resident_;
             std::size_t new_nm = static_cast<std::size_t>(l_max_new + 1);
             y_lm_.resize(new_nm * new_nm);
             top_p_.resize(new_nm);
             l_max_resident_ = l_max_new;
+
+            // Backward Q recurrence: recover top_p_ state for new l_max.
+            // Forward 3-term:  Q_l^m = (cosθ·c1·Q_{l-1}^m - c2·Q_{l-2}^m) / (l-m)
+            // Inverse:          Q_{l-2}^m = (cosθ·c1·Q_{l-1}^m - (l-m)·Q_l^m) / c2
+            // Valid for l ≥ m+2 (c2 ≠ 0).
+            for (int m = 0; m <= l_max_new; ++m) {
+                auto& tp = top_p_[static_cast<std::size_t>(m)];
+
+                if (l_max_new == m) {
+                    // Seed level: use direct formula to avoid cosθ division.
+                    seedPmm(m, tp.curr);
+                    tp.prev = tp.curr;
+                } else {
+                    for (int l = old_l_max; l > l_max_new; --l) {
+                        double c1 = std::sqrt(static_cast<double>((2*l-1)*(2*l+1)*(l-m))
+                                             / static_cast<double>(l+m));
+                        double c2 = (l + m - 1.0)
+                                  * std::sqrt(static_cast<double>((2*l+1)*(l-m)*(l-m-1))
+                                             / static_cast<double>((2*l-3)*(l+m)*(l+m-1)));
+                        for (std::size_t i = 0; i < ng_; ++i) {
+                            double q_lm2 = (cos_theta_[i] * c1 * tp.prev[i] - (l - m) * tp.curr[i]) / c2;
+                            tp.curr[i] = tp.prev[i];
+                            tp.prev[i] = q_lm2;
+                        }
+                    }
+                }
+            }
             return;
         }
 
