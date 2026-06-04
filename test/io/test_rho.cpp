@@ -17,8 +17,8 @@ auto testVR() -> void {
     if (m.n3 != 32) {
         throw std::runtime_error("VR n3 mismatch: expected 32, got " + std::to_string(m.n3));
     }
-    if (m.nnodes != 2) {
-        throw std::runtime_error("VR nnodes mismatch: expected 2, got " + std::to_string(m.nnodes));
+    if (m.nnode != 2) {
+        throw std::runtime_error("VR nnodes mismatch: expected 2, got " + std::to_string(m.nnode));
     }
     if (m.nstate != 1) {
         throw std::runtime_error("VR nstate mismatch: expected 1, got " + std::to_string(m.nstate));
@@ -63,8 +63,8 @@ auto testRHO() -> void {
     if (m.n3 != 32) {
         throw std::runtime_error("RHO n3 mismatch: expected 32, got " + std::to_string(m.n3));
     }
-    if (m.nnodes != 2) {
-        throw std::runtime_error("RHO nnodes mismatch: expected 2, got " + std::to_string(m.nnodes));
+    if (m.nnode != 2) {
+        throw std::runtime_error("RHO nnodes mismatch: expected 2, got " + std::to_string(m.nnode));
     }
     if (m.nstate != 1) {
         throw std::runtime_error("RHO nstate mismatch: expected 1, got " + std::to_string(m.nstate));

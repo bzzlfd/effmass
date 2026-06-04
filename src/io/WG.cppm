@@ -17,7 +17,7 @@ export {
 
 // WG file metadata structure
 struct WGMetadata {
-    int n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda;  // FFT grid / bands / record length / node / k-point / spin
+    int n1, n2, n3, nband, mg_nx, nnode, nkpt, is_SO, islda;  // FFT grid / bands / record length / node / k-point / spin
     double Ecut;              // cutoff energy
     Lattice lattice;          // lattice vectors (Bohr) and reciprocal lattice (Bohr^-1)
     std::vector<int> ng_tot_per_kpt;  // total G-vectors per k-point
@@ -236,15 +236,15 @@ auto WG::readRecordSOC(std::complex<double>* dst_up, std::complex<double>* dst_d
 
 
 auto WG::readMetadata() -> void {
-    // Record 1: n1, n2, n3, mx, mg_nx, nnodes, nkpt, is_SO, islda (9 ints)
+    // Record 1: n1, n2, n3, nband, mg_nx, nnode, nkpt, is_SO, islda (9 ints)
     int header[9];
     readRecord(header, "header");
     meta.n1 = header[0];
     meta.n2 = header[1];
     meta.n3 = header[2];
-    meta.mx = header[3];
+    meta.nband = header[3];
     meta.mg_nx = header[4];
-    meta.nnodes = header[5];
+    meta.nnode = header[5];
     meta.nkpt = header[6];
     meta.is_SO = header[7];
     meta.islda = header[8];
@@ -261,7 +261,7 @@ auto WG::readMetadata() -> void {
     readRecord(al_flat, "AL");
     meta.lattice.setLattice(al_flat, LengthUnit::Angstrom);
 
-    // Record 4: nnodes, ngtotnod
+    // Record 4: nnode, ngtotnod
     int len = readRecordLength();
     readNgtotnod(len);
     checkRecordLength(len);
@@ -273,16 +273,16 @@ auto WG::readNgtotnod(int record_len) -> void {
     if (std::fread(&nnodes_check, sizeof(int), 1, fp_) != 1) {
         throw std::runtime_error("Failed to read nnodes");
     }
-    if (nnodes_check != meta.nnodes) {
+    if (nnodes_check != meta.nnode) {
         throw std::runtime_error("nnodes mismatch");
     }
 
-    ngtotnod_.resize(meta.nkpt, std::vector<int>(meta.nnodes));
+    ngtotnod_.resize(meta.nkpt, std::vector<int>(meta.nnode));
     meta.ng_tot_per_kpt.resize(meta.nkpt, 0);
 
     for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
         int ng_total = 0;
-        for (int n = 0; n < meta.nnodes; ++n) {
+        for (int n = 0; n < meta.nnode; ++n) {
             int ng;
             if (std::fread(&ng, sizeof(int), 1, fp_) != 1) {
                 throw std::runtime_error("Failed to read ngtotnod");
@@ -309,13 +309,13 @@ auto WG::skipRecord() -> void {
 
 auto WG::computeOffsets() -> void {
     // record the starting file offset for each (k-point, band) pair
-    // File layout per kpt: node=0 band=0..mx-1, node=1 band=0..mx-1, ...
-    band_offsets_.resize(static_cast<std::size_t>(meta.nkpt) * meta.mx);
+    // File layout per kpt: node=0 band=0..nband-1, node=1 band=0..nband-1, ...
+    band_offsets_.resize(static_cast<std::size_t>(meta.nkpt) * meta.nband);
 
     for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
-        for (int b = 0; b < meta.mx; ++b) {
-            band_offsets_[static_cast<std::size_t>(ikpt) * meta.mx + b] = std::ftell(fp_);
-            for (int n = 0; n < meta.nnodes; ++n) {
+        for (int b = 0; b < meta.nband; ++b) {
+            band_offsets_[static_cast<std::size_t>(ikpt) * meta.nband + b] = std::ftell(fp_);
+            for (int n = 0; n < meta.nnode; ++n) {
                 skipRecord();
             }
         }
@@ -327,11 +327,11 @@ auto WG::seekToBand(int ikpt, int iband) -> void {
     if (ikpt < 0 || ikpt >= meta.nkpt) {
         throw std::out_of_range("Invalid k-point index");
     }
-    if (iband < 0 || iband >= meta.mx) {
+    if (iband < 0 || iband >= meta.nband) {
         throw std::out_of_range("Invalid band index");
     }
 
-    long offset = band_offsets_[static_cast<std::size_t>(ikpt) * meta.mx + iband];
+    long offset = band_offsets_[static_cast<std::size_t>(ikpt) * meta.nband + iband];
     if (std::fseek(fp_, offset, SEEK_SET) != 0) {
         throw std::runtime_error("Failed to seek to band");
     }
@@ -342,7 +342,7 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffsView& {
     if (ikpt < 0 || ikpt >= meta.nkpt) {
         throw std::out_of_range("Invalid k-point index: " + std::to_string(ikpt));
     }
-    if (iband < 0 || iband >= meta.mx) {
+    if (iband < 0 || iband >= meta.nband) {
         throw std::out_of_range("Invalid band index: " + std::to_string(iband));
     }
 
@@ -378,7 +378,7 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffsView& {
     }
 
     std::size_t pos = 0;
-    for (int inode = 0; inode < meta.nnodes; ++inode) {
+    for (int inode = 0; inode < meta.nnode; ++inode) {
         int ng = ngtotnod_[ikpt][inode];
         if (ng == 0) continue;
 

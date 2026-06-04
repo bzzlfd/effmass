@@ -221,7 +221,7 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(g.n2,    w.n2,    "n2    [GKK vs WG]");
         checkInt(g.n3,    w.n3,    "n3    [GKK vs WG]");
         checkInt(g.mg_nx, w.mg_nx, "mg_nx [GKK vs WG]");
-        checkInt(g.nnodes,w.nnodes,"nnodes[GKK vs WG]");
+        checkInt(g.nnode, w.nnode, "nnode [GKK vs WG]");
         checkInt(g.is_SO, w.is_SO, "is_SO [GKK vs WG]");
         checkInt(g.islda, w.islda, "islda [GKK vs WG]");
 
@@ -249,7 +249,7 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(g.n1,     v.n1,     "n1    [GKK vs VR]");
         checkInt(g.n2,     v.n2,     "n2    [GKK vs VR]");
         checkInt(g.n3,     v.n3,     "n3    [GKK vs VR]");
-        checkInt(g.nnodes, v.nnodes, "nnodes[GKK vs VR]");
+        checkInt(g.nnode, v.nnode, "nnode [GKK vs VR]");
         checkLattice(gkk_->meta.lattice, vr_->lattice, "GKK vs VR");
         checked_.set(Pair_GKK_VR);
     } else {
@@ -271,7 +271,7 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(g.nkpt,  e.nkpt,  "nkpt  [GKK vs EIGEN]");
         checkInt(g.is_SO, e.is_SO, "is_SO [GKK vs EIGEN]");
         checkInt(g.islda, e.islda, "islda [GKK vs EIGEN]");
-        // Note: do NOT compare e.natom with g.nnodes — they are different
+        // Note: do NOT compare e.natom with g.nnode — they are different
         // concepts (number of atoms vs number of MPI nodes).
         checked_.set(Pair_GKK_EIGEN);
     } else {
@@ -288,7 +288,7 @@ auto Hamiltonian::checkConsistency() const -> void {
 
     // ----  pair: WG  x  EIGEN  ------------------------------------------------
     if (wg_ && eigen_ && !checked_[Pair_WG_EIGEN]) {
-        checkInt(wg_->meta.mx, eigen_->meta.nband, "band count [WG vs EIGEN]");
+        checkInt(wg_->meta.nband, eigen_->meta.nband, "band count [WG vs EIGEN]");
         checked_.set(Pair_WG_EIGEN);
     } else {
         debug("WG vs EIGEN");
@@ -319,7 +319,7 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(r.n1,     v.n1,     "n1    [RHO vs VR]");
         checkInt(r.n2,     v.n2,     "n2    [RHO vs VR]");
         checkInt(r.n3,     v.n3,     "n3    [RHO vs VR]");
-        checkInt(r.nnodes, v.nnodes, "nnodes[RHO vs VR]");
+        checkInt(r.nnode, v.nnode, "nnode [RHO vs VR]");
         checkInt(r.nstate, v.nstate, "nstate[RHO vs VR]");
         checkLattice(rho_->lattice, vr_->lattice, "RHO vs VR");
         checked_.set(Pair_RHO_VR);
@@ -342,7 +342,7 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(r.n1,     g.n1,     "n1    [RHO vs GKK]");
         checkInt(r.n2,     g.n2,     "n2    [RHO vs GKK]");
         checkInt(r.n3,     g.n3,     "n3    [RHO vs GKK]");
-        checkInt(r.nnodes, g.nnodes, "nnodes[RHO vs GKK]");
+        checkInt(r.nnode, g.nnode, "nnode [RHO vs GKK]");
         checkLattice(rho_->lattice, g.lattice, "RHO vs GKK");
         checked_.set(Pair_RHO_GKK);
     } else {

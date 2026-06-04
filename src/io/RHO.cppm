@@ -16,7 +16,7 @@ export {
 
 struct RHOMetadata {
     int n1, n2, n3;
-    int nnodes;
+    int nnode;
     int nstate;
 };
 
@@ -98,7 +98,7 @@ public:
         std::println("  n1     = {}", meta.n1);
         std::println("  n2     = {}", meta.n2);
         std::println("  n3     = {}", meta.n3);
-        std::println("  nnodes = {}", meta.nnodes);
+        std::println("  nnode  = {}", meta.nnode);
         std::println("  nstate = {}", meta.nstate);
         std::println("  nr     = {}", meta.n1 * meta.n2 * meta.n3);
     }
@@ -169,7 +169,7 @@ private:
             meta.n1      = header[0];
             meta.n2      = header[1];
             meta.n3      = header[2];
-            meta.nnodes  = header[3];
+            meta.nnode  = header[3];
             meta.nstate  = header[4];
         } else if (len == static_cast<int>(4 * sizeof(int))) {
             int header[4];
@@ -179,7 +179,7 @@ private:
             meta.n1      = header[0];
             meta.n2      = header[1];
             meta.n3      = header[2];
-            meta.nnodes  = header[3];
+            meta.nnode  = header[3];
             meta.nstate  = 1;
         } else {
             throw std::runtime_error(
@@ -197,12 +197,12 @@ private:
 
     auto readData() -> void {
         int nr = meta.n1 * meta.n2 * meta.n3;
-        int nr_n = nr / meta.nnodes;
+        int nr_n = nr / meta.nnode;
         data_.resize(static_cast<std::size_t>(meta.nstate) * nr);
 
         auto nbytes = static_cast<std::size_t>(nr_n) * sizeof(double);
         for (int istate = 0; istate < meta.nstate; ++istate) {
-            for (int inode = 0; inode < meta.nnodes; ++inode) {
+            for (int inode = 0; inode < meta.nnode; ++inode) {
                 double* slice = data_.data()
                     + (static_cast<std::size_t>(istate) * nr + inode * nr_n);
                 readRecord(slice, nbytes, "grid data");

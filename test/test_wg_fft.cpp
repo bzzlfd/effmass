@@ -50,7 +50,7 @@ auto main() -> int {
 
         // --- metadata ---
         check(eigen.meta.nkpt == wg.meta.nkpt, "EIGEN/WG nkpt consistency");
-        check(eigen.meta.nband == wg.meta.mx, "EIGEN/WG nband consistency");
+        check(eigen.meta.nband == wg.meta.nband, "EIGEN/WG nband consistency");
 
         // =========================================================================
         // 1. GKK.inferCurrent_k  vs  EIGEN k-points
@@ -86,7 +86,7 @@ auto main() -> int {
             auto& kvecs = gkk.loadKPoint(ikpt);
             int ng = static_cast<int>(kvecs.g_idx.size());
 
-            for (int iband = 0; iband < wg.meta.mx; ++iband) {
+            for (int iband = 0; iband < wg.meta.nband; ++iband) {
                 auto coeffs = wg.loadBand(ikpt, iband);
                 check(static_cast<int>(coeffs.up.size()) == ng,
                       std::format("kpt={} band={}: WG/GKK G-vector count match", ikpt, iband));
@@ -230,13 +230,13 @@ auto main() -> int {
 
         auto occ = parseOCC("test/data_io-nonlocal/OUT.OCC");
         check(occ.nkpt == wg.meta.nkpt, "OCC/WG nkpt consistency");
-        check(occ.nband == wg.meta.mx, "OCC/WG nband consistency");
+        check(occ.nband == wg.meta.nband, "OCC/WG nband consistency");
 
         std::vector<double>              rho_acc(static_cast<std::size_t>(n123), 0.0);
         std::vector<std::complex<double>> buf(static_cast<std::size_t>(n123));
         FFT3D fft_acc(n1, n2, n3);
 
-        int nband = wg.meta.mx;
+        int nband = wg.meta.nband;
         double total_occ = 0.0;
         for (int ikpt = 0; ikpt < wg.meta.nkpt; ++ikpt) {
             gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);

@@ -66,7 +66,7 @@ auto main() -> int {
         const auto& vr_meta  = h.vr().meta;
 
         if (gkk_meta.nkpt < 1) { std::println("FAIL: no k-points in GKK"); return 1; }
-        if (wg_meta.mx < 1)    { std::println("FAIL: no bands in WG"); return 1; }
+        if (wg_meta.nband < 1)    { std::println("FAIL: no bands in WG"); return 1; }
         if (vr_meta.n1 < 1)   { std::println("FAIL: VR grid empty"); return 1; }
 
         std::println("PASS: step-by-step load (ATOM + NCPPs + GKK + WG + VR)");

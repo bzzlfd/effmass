@@ -13,7 +13,7 @@ auto main() -> int {
         if (m.n2 != 20)     throw std::runtime_error("n2 mismatch: expected 20");
         if (m.n3 != 32)     throw std::runtime_error("n3 mismatch: expected 32");
         if (m.mg_nx != 1042) throw std::runtime_error("mg_nx mismatch: expected 1042");
-        if (m.nnodes != 2)  throw std::runtime_error("nnodes mismatch: expected 2");
+        if (m.nnode != 2)  throw std::runtime_error("nnode mismatch: expected 2");
         if (m.nkpt != 10)   throw std::runtime_error("nkpt mismatch: expected 10");
         if (m.is_SO != 0)   throw std::runtime_error("is_SO mismatch: expected 0");
         if (m.islda != 1)   throw std::runtime_error("islda mismatch: expected 1");

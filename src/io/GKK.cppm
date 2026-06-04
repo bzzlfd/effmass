@@ -24,7 +24,7 @@ export {
 
 // GKK file metadata structure
 struct GKKMetadata {
-    int n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda;  // FFT grid / record length / node / k-point / spin
+    int n1, n2, n3, mg_nx, nnode, nkpt, is_SO, islda;  // FFT grid / record length / node / k-point / spin
     double Ecut;              // cutoff energy
     Lattice lattice;          // lattice vectors (Bohr) and reciprocal lattice (Bohr^-1)
     std::vector<int> ng_tot_per_kpt;  // total G-vectors per k-point
@@ -140,7 +140,7 @@ GKK::GKK(const std::string& filename)
     readMetadata();
 
     // preallocate working buffers (maximum possible size) for Cartesian only
-    max_ng_ = static_cast<std::size_t>(meta.mg_nx) * meta.nnodes;
+    max_ng_ = static_cast<std::size_t>(meta.mg_nx) * meta.nnode;
     kinetic_.resize(max_ng_);
     Kx_.resize(max_ng_);
     Ky_.resize(max_ng_);
@@ -298,14 +298,14 @@ auto GKK::readRecord(void* dst, std::size_t nbytes, const char* context) -> void
 
 
 auto GKK::readMetadata() -> void {
-    // Record 1: n1, n2, n3, mg_nx, nnodes, nkpt, is_SO, islda
+    // Record 1: n1, n2, n3, mg_nx, nnode, nkpt, is_SO, islda
     int header[8];
     readRecord(header, "header");
     meta.n1 = header[0];
     meta.n2 = header[1];
     meta.n3 = header[2];
     meta.mg_nx = header[3];
-    meta.nnodes = header[4];
+    meta.nnode = header[4];
     meta.nkpt = header[5];
     meta.is_SO = header[6];
     meta.islda = header[7];
@@ -323,7 +323,7 @@ auto GKK::readMetadata() -> void {
     readRecord(al_flat, "AL");
     meta.lattice.setLattice(al_flat, LengthUnit::Angstrom);
 
-    // Record 4: nnodes, ngtotnod
+    // Record 4: nnode, ngtotnod
     int len = readRecordLength();
     readNgtotnod(len);
     checkRecordLength(len);
@@ -335,17 +335,17 @@ auto GKK::readNgtotnod(int record_len) -> void {
     if (std::fread(&nnodes_check, sizeof(int), 1, fp_) != 1) {
         throw std::runtime_error("Failed to read nnodes");
     }
-    if (nnodes_check != meta.nnodes) {
+    if (nnodes_check != meta.nnode) {
         throw std::runtime_error("nnodes mismatch");
     }
 
     // read G-vector count per k-point per node
-    ngtotnod_.resize(meta.nkpt, std::vector<int>(meta.nnodes));
+    ngtotnod_.resize(meta.nkpt, std::vector<int>(meta.nnode));
     meta.ng_tot_per_kpt.resize(meta.nkpt, 0);
 
     for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
         int ng_total = 0;
-        for (int n = 0; n < meta.nnodes; ++n) {
+        for (int n = 0; n < meta.nnode; ++n) {
             int ng;
             if (std::fread(&ng, sizeof(int), 1, fp_) != 1) {
                 throw std::runtime_error("Failed to read ngtotnod");
@@ -381,7 +381,7 @@ auto GKK::computeOffsets() -> void {
         // This correctly handles compiler-dependent record padding (alignment),
         // because we trust the length markers in the file rather than computing
         // the offset from ng.
-        for (int n = 0; n < meta.nnodes; ++n) {
+        for (int n = 0; n < meta.nnode; ++n) {
             // 4 arrays (gkk, gkk_x, gkk_y, gkk_z), each in its own record
             for (int i = 0; i < 4; ++i) {
                 skipRecord();
@@ -518,7 +518,7 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
         // read all nodes for this k-point and merge into contiguous buffers
         // Fortran records are mg_nx-sized; readRecord(dst, nbytes, ...) reads nbytes
         // and automatically skips the remaining (mg_nx - ng) elements.
-        for (int inode = 0; inode < meta.nnodes; ++inode) {
+        for (int inode = 0; inode < meta.nnode; ++inode) {
             int ng = ngtotnod_[ikpt][inode];
             if (ng == 0) continue;
 
