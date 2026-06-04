@@ -10,6 +10,7 @@ io (aggregate)
 ├── io.EIGEN   →  src/io/EIGEN.cppm
 ├── io.GKK     →  src/io/GKK.cppm
 ├── io.lattice →  src/io/lattice.cppm
+├── io.OCC     →  src/io/OCC.cppm
 ├── io.RHO     →  src/io/RHO.cppm
 ├── io.VR      →  src/io/VR.cppm
 └── io.WG      →  src/io/WG.cppm
@@ -65,7 +66,7 @@ export struct KVecs {
     // Integer indices of G vector in reciprocal lattice basis: G = g_idx.x*b1 + g_idx.y*b2 + g_idx.z*b3
     std::span<const vector3d<int>>  g_idx;
     // Per-k-point metadata (valid whenever Integer view is enabled)
-    vector3d<double>                    kPoint{};            // fractional coordinate of current k-point
+    kVec                                kPoint{};            // fractional coordinate of current k-point
     array2d<double, 3, 3>               reciprocalLattice{}; // reciprocal lattice vectors: row n = b_n
 };
 ```
@@ -293,19 +294,22 @@ export struct EIGENMetadata {
 };
 ```
 
-#### `KPointVec`
+#### `kVec`
 
-k 点坐标向量，支持 `.x/.y/.z` 命名成员访问和 `[0]/[1]/[2]` 下标访问：
+k 点分数坐标向量类型，io 各子模块内部统一使用 `kVec`（`using kVec = vector3d<double>;`），但**不 export**：
 
 ```cpp
-export struct KPointVec {
+struct vector3d<double> {
     double x{}, y{}, z{};
-    auto operator[](int i) -> double&;
-    auto operator[](int i) const -> double;
+    auto operator[](int i) -> double&;           // 0→x, 1→y, 2→z
+    auto data() -> double*;                      // returns &x
+    auto norm_squared() const -> double;
+    auto norm() const -> double;
+    // operator+=, -=, *=, /=, +, -, *, /, dot, cross, ==, !=
 };
 ```
 
-`[0]`→`x`, `[1]`→`y`, `[2]`→`z`，越界抛 `std::out_of_range`。
+外部代码通过 `vector3d<double>` 或成员名（`kpt_vec[ik].x`）访问，`kVec` 仅为模块内部别名。
 
 #### `Array3d`
 
@@ -358,14 +362,14 @@ public:
     // 公有数据成员
     EIGENMetadata meta;
     std::vector<double> kpt_weight;    // k 点权重，size = nkpt
-    std::vector<KPointVec> kpt_vec;    // k 点坐标，size = nkpt
+    std::vector<vector3d<double>> kpt_vec;    // k 点坐标，size = nkpt
     Array3d eigenvalue;                // 本征值，dims = [nband, nkpt, islda]
 };
 ```
 
 ### 设计要点
 
-1. **一次性读取**：EIGEN 文件通常较小（数 KB），构造函数中读取所有元数据和数据，不采用延迟加载策略。
+1. **一次性读取**：EIGEN 文件通常较小（数 KB），构造函数中读取所有元数据和数据，不采用延迟加载策略。文件读取完毕立即关闭，不持有成员 `FILE*`。Rule of Zero。
 
 2. **文件格式兼容性**：header record 通过前导长度标记区分新/旧格式：
    - 28 字节 → 7 int（含 `is_SO`）
@@ -376,7 +380,73 @@ public:
 
 4. **数据冗余**：文件中每个 `(ispin, ikpt)` 对都有一份 weight/ak 数据（4 doubles）。这些量在语义上按 kpt 索引（而非按自旋），因此最终保留最后一次读入的值。
 
-5. **移动语义**：自定义移动构造/赋值，正确转移 `FILE*` 所有权（源对象 `fp_` 置空）。
+5. **移动语义**：Rule of Zero。无 `FILE*` 成员，默认移动/拷贝即可满足需求。
+
+## `OCC` 类
+
+`OCC` 类封装了对 `OUT.OCC` 文本格式文件的读取操作。关于文件格式定义，请参阅 [`note/file_formats.md`](../note/file_formats.md#outocc)。
+
+### `OCCMetadata`
+
+```cpp
+export struct OCCMetadata {
+    int islda{};      // 自旋数（1 或 2），自动检测
+    int nkpt{};       // k 点数
+    int nband{};      // 每个 k 点的能带数
+};
+```
+
+### `OCC` 类
+
+```cpp
+export class OCC {
+public:
+    explicit OCC(const std::string& filename);
+
+    // Rule of zero
+    OCC() = default;
+    OCC(const OCC&) = default;
+    auto operator=(const OCC&) -> OCC& = default;
+    OCC(OCC&&) noexcept = default;
+    auto operator=(OCC&&) noexcept -> OCC& = default;
+
+    auto energy(int iband, int ikpt) const -> double;              // islda=1
+    auto energy(int iband, int ikpt, int ispin) const -> double;   // islda=2
+    auto occupation(int iband, int ikpt) const -> double;          // islda=1
+    auto occupation(int iband, int ikpt, int ispin) const -> double; // islda=2
+    auto print_info() const -> void;
+
+    OCCMetadata meta;
+    std::vector<kVec> kpt_vec;          // k 点分数坐标，size = nkpt
+
+private:
+    std::vector<double> energies_;       // eV，平铺 [ispin][ikpt][iband]
+    std::vector<double> occupations_;    // 平铺 [ispin][ikpt][iband]
+};
+```
+
+参数顺序 `(iband, ikpt)` 与 `EIGEN` 一致。
+
+### 设计要点
+
+1. **文本解析**：与 `ATOM` 类一致，使用 `fopen("r")` + `fgets` 逐行读取，`strtol`/`strtod` 链式解析数值。与其它二进制 IO 类（GKK/WG/EIGEN）的最显著区别。
+
+2. **Spin=2 自动检测**：读取首行，若以 `=` 开头则进入 spin 模式，按 `==========  SPIN N  ==========` 分隔两段数据；否则视为单自旋（islda=1）。第二自旋的 k 点坐标自动与第一自旋校验一致。
+
+3. **一次性读取**：OCC 文件通常较小（数百行），构造函数中读取所有元数据和数据。不采用延迟加载策略。
+
+4. **局部 FILE***：构造函数内使用局部 FILE*，解析完成后立即关闭。try/catch 保护解析过程。Rule of Zero。
+
+5. **数据验证**：
+   - 每个 k 点的能带数必须一致（跨 k 点验证）
+   - 总数据条目必须等于 islda × nkpt × nband
+   - k 点索引必须为 1-based 递增正整数
+
+6. **占据数语义**：文件中存储的占据数已包含 k 点权重，即 $\sum_{\text{band}} f_{n\mathbf{k}} = N_{\text{valence}} \cdot w_{\mathbf{k}}$。
+
+7. **与 OUT.EIGEN 的交叉验证**：`OUT.OCC` 与 `OUT.EIGEN` 共享相同的 k 点网格和能带结构。测试代码通过对比两个文件的能量本征值（OCC 四舍五入到 4 位小数，与 EIGEN 原始值差距 ≤ 0.001 eV），以及 k 点坐标（≤ 1e-4 误差），来验证文件读取的正确性。
+
+8. **内部类型别名**：OCC 内部使用 `using kVec = vector3d<double>;` 表示 k 点向量（不 export），与 `EIGEN`、`GKK` 保持一致。
 
 ## `RHO` / `VR` 类
 
@@ -446,7 +516,7 @@ idx = state × n1 × n2 × n3 + i × n2 × n3 + j × n3 + k
    - 20 字节 → 5 int（含 `nstate`）
    - 16 字节 → 4 int（旧格式，`nstate = 1`）
 
-4. **一次性读取**：文件约 100KB（实测），构造函数中读取所有元数据和数据。
+4. **一次性读取**：文件约 100KB（实测），构造函数中读取所有元数据和数据。文件读取完毕立即关闭。Rule of Zero。
 
 5. **VR = RHO 别名**：`VR` 与 `RHO` 是同一类型，两者在代码中可互换使用。`src/io/VR.cppm` 仅包含：
 
@@ -512,15 +582,9 @@ public:
    - 排序需要额外维护一个排列数组（`sorted_idx`），不能直接对容器 `sort`
    - 若改为结构体，排序更直接但失去扁平数组的灵活性。当前项目倾向于扁平数组风格。
 
-5. **文件句柄生命周期**：与 EIGEN/RHO 一致——构造时 `fopen`，析构时 `fclose`。支持移动语义。文件在构造中读取完毕后实际不再需要，但保持打开直到析构以统一模式。异常安全性：构造中若解析失败，`FILE*` 会泄漏（与其它类同），由析构函数覆盖正常路径。
+5. **文件句柄生命周期**：与 OCC 一致——使用局部 `FILE*`，解析完成后立即关闭。try/catch 保护解析过程。Rule of Zero。
 
-6. **`archived::SimpleATOM`（模块内部参考实现）**：文件末尾保留了一个不持 `FILE*` 的轻量版本（`namespace archived`，不导出），展示另一种设计思路：
-   - 构造中使用局部 `FILE*`，读取完毕立即 `fclose`
-   - Rule of zero：不需要自定义析构、移动、拷贝——类可平凡复制
-   - 代码结构与主实现共享同一 `parseAtomConfigFile` 解析函数
-   - 仅供内部参考，不构成公共 API
-
-7. **单位**：晶格矢量从 Å 读入，立即通过 `Lattice` 转换为 Bohr。分数坐标不涉及单位转换。
+6. **单位**：晶格矢量从 Å 读入，立即通过 `Lattice` 转换为 Bohr。分数坐标不涉及单位转换。
 
 ### 元素符号 ↔ 原子序数转换
 

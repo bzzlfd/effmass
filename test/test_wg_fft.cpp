@@ -2,9 +2,6 @@ import std;
 import math;
 import io;
 
-#define OCC_READER_IMPORT_STD
-#include "io/occ_reader.hpp"
-
 
 auto check(bool cond, std::string_view msg) -> void {
     if (!cond) throw std::runtime_error(std::string("FAILED: ") + std::string(msg));
@@ -228,9 +225,9 @@ auto main() -> int {
         // =========================================================================
         std::println("\n--- Charge density  Σ occ·|ψ|²  vs  OUT.RHO ---");
 
-        auto occ = parseOCC("test/data_io-nonlocal/OUT.OCC");
-        check(occ.nkpt == wg.meta.nkpt, "OCC/WG nkpt consistency");
-        check(occ.nband == wg.meta.nband, "OCC/WG nband consistency");
+        OCC occ("test/data_io-nonlocal/OUT.OCC");
+        check(occ.meta.nkpt == wg.meta.nkpt, "OCC/WG nkpt consistency");
+        check(occ.meta.nband == wg.meta.nband, "OCC/WG nband consistency");
 
         std::vector<double>              rho_acc(static_cast<std::size_t>(n123), 0.0);
         std::vector<std::complex<double>> buf(static_cast<std::size_t>(n123));
@@ -244,7 +241,7 @@ auto main() -> int {
             int ng = static_cast<int>(kv.g_idx.size());
 
             for (int iband = 0; iband < nband; ++iband) {
-                double occ_val = occ.occupation(ikpt, iband);
+                double occ_val = occ.occupation(iband, ikpt);
                 if (occ_val == 0.0) continue;
                 total_occ += occ_val;
 

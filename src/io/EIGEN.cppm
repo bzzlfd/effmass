@@ -11,8 +11,9 @@ import utils.vector3d;
 export {
     class EIGEN;
         struct EIGENMetadata;
-        using kVec = vector3d<double>;
 }
+
+using kVec = vector3d<double>;
 
 
 struct EIGENMetadata {
@@ -30,53 +31,37 @@ class EIGEN {
 public:
     explicit EIGEN(const std::string& filename)
         : meta{}
-        , fp_(nullptr)
     {
-        fp_ = std::fopen(filename.c_str(), "rb");
-        if (!fp_) {
+        auto* fp = std::fopen(filename.c_str(), "rb");
+        if (!fp) {
             throw std::runtime_error("Cannot open file: " + filename);
         }
 
-        readMetadata();
+        try {
+            readMetadata(fp);
+        } catch (...) {
+            std::fclose(fp);
+            throw;
+        }
 
         kpt_weight.resize(meta.nkpt);
         kpt_vec.resize(meta.nkpt);
         eigenvalue_data_.resize(static_cast<std::size_t>(meta.nband) * meta.nkpt * meta.islda);
 
-        readData();
-    }
-
-    ~EIGEN() {
-        if (fp_) {
-            std::fclose(fp_);
+        try {
+            readData(fp);
+        } catch (...) {
+            std::fclose(fp);
+            throw;
         }
+
+        std::fclose(fp);
     }
 
-    EIGEN(const EIGEN&) = delete;
-    auto operator=(const EIGEN&) -> EIGEN& = delete;
-
-    EIGEN(EIGEN&& other) noexcept
-        : meta(std::move(other.meta))
-        , kpt_weight(std::move(other.kpt_weight))
-        , kpt_vec(std::move(other.kpt_vec))
-        , eigenvalue_data_(std::move(other.eigenvalue_data_))
-        , fp_(other.fp_)
-    {
-        other.fp_ = nullptr;
-    }
-
-    auto operator=(EIGEN&& other) noexcept -> EIGEN& {
-        if (this != &other) {
-            if (fp_) std::fclose(fp_);
-            meta = std::move(other.meta);
-            kpt_weight = std::move(other.kpt_weight);
-            kpt_vec = std::move(other.kpt_vec);
-            eigenvalue_data_ = std::move(other.eigenvalue_data_);
-            fp_ = other.fp_;
-            other.fp_ = nullptr;
-        }
-        return *this;
-    }
+    EIGEN(const EIGEN&) = default;
+    auto operator=(const EIGEN&) -> EIGEN& = default;
+    EIGEN(EIGEN&&) noexcept = default;
+    auto operator=(EIGEN&&) noexcept -> EIGEN& = default;
 
     auto operator[](int iband, int ikpt) -> double& {
         if (meta.islda != 1) {
@@ -141,17 +126,17 @@ private:
              + static_cast<std::size_t>(iband);
     }
 
-    auto readRecordLength() -> int {
+    auto readRecordLength(std::FILE* fp) -> int {
         int length;
-        if (std::fread(&length, sizeof(int), 1, fp_) != 1) {
+        if (std::fread(&length, sizeof(int), 1, fp) != 1) {
             throw std::runtime_error("Failed to read record length marker");
         }
         return length;
     }
 
-    auto checkRecordLength(int expected) -> void {
+    auto checkRecordLength(std::FILE* fp, int expected) -> void {
         int length;
-        if (std::fread(&length, sizeof(int), 1, fp_) != 1) {
+        if (std::fread(&length, sizeof(int), 1, fp) != 1) {
             throw std::runtime_error("Failed to read record length marker");
         }
         if (length != expected) {
@@ -162,26 +147,26 @@ private:
         }
     }
 
-    auto readRecord(void* dst, std::size_t nbytes, const char* context) -> void {
-        int len = readRecordLength();
+    auto readRecord(std::FILE* fp, void* dst, std::size_t nbytes, const char* context) -> void {
+        int len = readRecordLength(fp);
         if (static_cast<std::size_t>(len) != nbytes) {
             throw std::runtime_error(
                 std::string(context) + ": record size mismatch: expected " +
                 std::to_string(nbytes) + ", got " + std::to_string(len)
             );
         }
-        if (std::fread(dst, 1, nbytes, fp_) != nbytes) {
+        if (std::fread(dst, 1, nbytes, fp) != nbytes) {
             throw std::runtime_error(std::string(context) + ": read failed");
         }
-        checkRecordLength(len);
+        checkRecordLength(fp, len);
     }
 
-    auto readMetadata() -> void {
-        int len = readRecordLength();
+    auto readMetadata(std::FILE* fp) -> void {
+        int len = readRecordLength(fp);
 
         if (len == static_cast<int>(7 * sizeof(int))) {
             int header[7];
-            if (std::fread(header, sizeof(int), 7, fp_) != 7) {
+            if (std::fread(header, sizeof(int), 7, fp) != 7) {
                 throw std::runtime_error("Failed to read EIGEN header (7 ints)");
             }
             meta.islda     = header[0];
@@ -193,7 +178,7 @@ private:
             meta.is_SO     = header[6];
         } else if (len == static_cast<int>(6 * sizeof(int))) {
             int header[6];
-            if (std::fread(header, sizeof(int), 6, fp_) != 6) {
+            if (std::fread(header, sizeof(int), 6, fp) != 6) {
                 throw std::runtime_error("Failed to read EIGEN header (6 ints)");
             }
             meta.islda     = header[0];
@@ -209,14 +194,14 @@ private:
             );
         }
 
-        checkRecordLength(len);
+        checkRecordLength(fp, len);
     }
 
-    auto readData() -> void {
+    auto readData(std::FILE* fp) -> void {
         for (int ispin = 0; ispin < meta.islda; ++ispin) {
             for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
                 KptRecord kpt_rec;
-                readRecord(&kpt_rec, sizeof(KptRecord), "kpt metadata");
+                readRecord(fp, &kpt_rec, sizeof(KptRecord), "kpt metadata");
 
                 if (kpt_rec.islda_tmp != ispin + 1) {
                     throw std::runtime_error(
@@ -238,7 +223,7 @@ private:
 
                 double* eig_slice = eigenvalue_data_.data()
                     + (static_cast<std::size_t>(ispin) * meta.nkpt + ikpt) * meta.nband;
-                readRecord(eig_slice, meta.nband * sizeof(double), "eigenvalues");
+                readRecord(fp, eig_slice, meta.nband * sizeof(double), "eigenvalues");
                 for (int iband = 0; iband < meta.nband; ++iband) {
                     eig_slice[iband] /= HARTREE_TO_EV;  // file stores eV → Hartree
                 }
@@ -246,6 +231,5 @@ private:
         }
     }
 
-    std::FILE* fp_ = nullptr;
     std::vector<double> eigenvalue_data_;
 };

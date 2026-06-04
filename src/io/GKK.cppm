@@ -7,7 +7,10 @@ export module io.GKK;
 import io.lattice;
 import utils.array2d;
 import utils.vector3d;
+
 import std;
+
+using kVec = vector3d<double>;
 
 
 export {
@@ -64,7 +67,7 @@ struct KVecs {
     // Integer indices of G vector in reciprocal lattice basis: G = g_idx.x*b1 + g_idx.y*b2 + g_idx.z*b3
     std::span<const vector3d<int>>  g_idx;
     // Per-k-point metadata (valid whenever Integer view is enabled)
-    vector3d<double>                    kPoint{};            // fractional coordinate of current k-point
+    kVec                                kPoint{};            // fractional coordinate of current k-point
     array2d<double, 3, 3>               reciprocalLattice{}; // reciprocal lattice vectors: row n = b_n
 };
 
@@ -88,7 +91,7 @@ public:
     auto loadKPoint(int ikpt) -> const KVecs&;    // load k-point data (with cache)
     auto current_ikpt() const -> int { return current_ikpt_; }     // current k-point index
     auto currentData() const -> const KVecs& { return current_data_; }  // current data (filtered by currentView)
-    auto inferCurrent_k() const -> vector3d<double>;  // infer k fractional coord from G-k data
+    auto inferCurrent_k() const -> kVec;  // infer k fractional coord from G-k data
     auto validateKineticConsistency() const -> void;        // validate kinetic = 0.5*|K|^2 for loaded k-point
 
 private:
@@ -576,7 +579,7 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
 }
 
 
-auto GKK::inferCurrent_k() const -> vector3d<double> {
+auto GKK::inferCurrent_k() const -> kVec {
     if (current_ikpt_ < 0) {
         throw std::runtime_error("inferCurrent_k: no k-point loaded");
     }
@@ -589,7 +592,7 @@ auto GKK::inferCurrent_k() const -> vector3d<double> {
     constexpr double TWO_PI = 2.0 * std::numbers::pi;
     const std::size_t ng = data.Kx.size();
 
-    vector3d<double> k_frac{};
+    kVec k_frac{};
 
     auto A_mat = meta.lattice.A();
 

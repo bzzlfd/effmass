@@ -1,5 +1,5 @@
 # IO reader tests
-add_executable(test-io-eigen io/test_eigen.cpp)
+add_executable(test-io-eigen io/test_eigen_occ.cpp)
 target_link_libraries(test-io-eigen PRIVATE io)
 add_test(NAME test-io-eigen COMMAND test-io-eigen WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 

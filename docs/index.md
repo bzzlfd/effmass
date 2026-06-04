@@ -11,7 +11,7 @@
 
 - `note/atomic_units.md`：Hartree 原子单位制的约定与单位转换
 - `note/fortran_record_format.md`：Fortran unformatted binary 的 record 格式
-- `note/file_formats.md`：OUT.GKK、OUT.WG、OUT.EIGEN、OUT.KPT 的文件格式解析
+- `note/file_formats.md`：OUT.GKK、OUT.WG、OUT.EIGEN、OUT.OCC、OUT.KPT 的文件格式解析
 - `note/upf_format.md`：UPF v.2 赝势格式的字段含义、变量说明、束缚态波函数归一化条件
 - `note/plane_wave_sign_conventions.md`：平面波波矢相关符号约定。涉及 GKK；FFT forward/backward，及其归一化系数约定；PWmat WG2RHO 程序、数据分析与参考。
 - `note/clangd_cpp23_modules.md`：clangd 如何通过 `compile_commands.json` 自动解析 `import std`，无需硬编码 `std.pcm` 路径
@@ -21,9 +21,9 @@
 - `design/cpp_conventions.md`：C++ 编码约定（命名规范、函数返回类型写法等）
 - `design/conventions.md`：**[Convention-001/002]** 晶格矢量索引约定/物理量命名规范
 - `design/physical_constants.md`：物理常量命名规范与 `constexpr` 使用约定
-- `design/io_module.md`：`io` 总模块及子模块 `io.GKK`、`io.WG`、`io.EIGEN`、`io.lattice` 的接口设计与实现细节
+- `design/io_module.md`：`io` 总模块及子模块 `io.GKK`、`io.WG`、`io.EIGEN`、`io.OCC`、`io.lattice` 的接口设计与实现细节
 - `design/pseudo_module.md`：赝势读取模块的接口设计、`NCPPUPF` 类结构与 UPF 文件 tag 的映射
-- `design/upf_vs_binary_io.md`：UPF（pugixml）与二进制 IO（GKK/WG/RHO/EIGEN）文件生命周期管理的对比分析
+- `design/io_file_lifecycle.md`：IO 模块各类的文件句柄生命周期策略对比（一次性读取 vs 延迟加载）与设计取舍
 - `design/utils_types.md`：通用工具类型 `array2d`（动态/静态 2D 数组）和 `vector3d`（3 维向量）的设计与接口
 
 ## 实现的模块

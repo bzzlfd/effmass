@@ -27,6 +27,7 @@ target_sources(io
             src/io/WG.cppm
             src/io/ATOM.cppm
             src/io/EIGEN.cppm
+            src/io/OCC.cppm
             src/io/RHO.cppm
             src/io/VR.cppm
             src/io/lattice.cppm

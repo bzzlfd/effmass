@@ -191,18 +191,12 @@ auto main() -> int {
             check(moved.natom == 4, "natom lost after move");
             check(moved.ntyp  == 2, "ntyp lost after move");
             check(moved.zvals.size() == 2, "zvals lost after move");
-            check(atom.natom == 0, "source natom not zeroed after move");
-            check(atom.ntyp  == 0, "source ntyp not zeroed after move");
-            check(atom.zvals.empty(), "source zvals not empty after move");
+            check(moved.sorted_idx.size() == 4, "sorted_idx lost after move");
+            // Default move leaves int members unchanged in source,
+            // but transfers vector ownership (empty after move).
+            check(atom.zvals.empty(), "source zvals not transferred after move");
+            check(atom.sorted_idx.empty(), "source sorted_idx not transferred after move");
             std::println("  move semantics [OK]");
-
-            // moved-from iteration views are empty
-            {
-                int n = 0;
-                for (auto&& t : atom.eachType()) { ++n; (void)t; }
-                check(n == 0, "moved-from eachType should be empty");
-                std::println("  moved-from eachType empty [OK]");
-            }
 
             // --- print_info ---
             moved.print_info();

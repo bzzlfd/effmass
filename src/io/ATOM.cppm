@@ -15,13 +15,7 @@ export class ATOM {
 public:
     explicit ATOM(const std::string& filename);
 
-    ~ATOM();
-
-    ATOM(const ATOM&) = delete;
-    auto operator=(const ATOM&) -> ATOM& = delete;
-
-    ATOM(ATOM&&) noexcept;
-    auto operator=(ATOM&&) noexcept -> ATOM&;
+    // Rule of zero: no FILE* or other resource handle
 
     auto print_info() const -> void;
     // element name ↔ atomic number conversion (Z = 1..112)
@@ -133,7 +127,6 @@ public:
 private:
     auto analyzeSpecies() -> void;
 
-    std::FILE* fp_ = nullptr;
 };
 
 
@@ -233,11 +226,17 @@ auto parseAtomConfigFile(std::FILE* fp, int& natom, Lattice& lattice,
 // --- ATOM implementation ---
 
 ATOM::ATOM(const std::string& filename) {
-    fp_ = std::fopen(filename.c_str(), "r");
-    if (!fp_) {
+    auto* fp = std::fopen(filename.c_str(), "r");
+    if (!fp) {
         throw std::runtime_error("Cannot open file: " + filename);
     }
-    parseAtomConfigFile(fp_, natom, lattice, species, x, y, z);
+    try {
+        parseAtomConfigFile(fp, natom, lattice, species, x, y, z);
+    } catch (...) {
+        std::fclose(fp);
+        throw;
+    }
+    std::fclose(fp);
     analyzeSpecies();
 }
 
@@ -316,47 +315,6 @@ auto ATOM::atomicNumber(std::string_view name) -> int {
 }
 
 
-ATOM::~ATOM() {
-    if (fp_) std::fclose(fp_);
-}
-
-
-ATOM::ATOM(ATOM&& other) noexcept
-    : natom(std::exchange(other.natom, 0))
-    , lattice(std::move(other.lattice))
-    , species(std::move(other.species))
-    , x(std::move(other.x))
-    , y(std::move(other.y))
-    , z(std::move(other.z))
-    , ntyp(std::exchange(other.ntyp, 0))
-    , zvals(std::move(other.zvals))
-    , type_counts(std::move(other.type_counts))
-    , atom_types(std::move(other.atom_types))
-    , sorted_idx(std::move(other.sorted_idx))
-    , fp_(std::exchange(other.fp_, nullptr))
-{}
-
-
-auto ATOM::operator=(ATOM&& other) noexcept -> ATOM& {
-    if (this != &other) {
-        if (fp_) std::fclose(fp_);
-        natom      = std::exchange(other.natom, 0);
-        lattice    = std::move(other.lattice);
-        species    = std::move(other.species);
-        x          = std::move(other.x);
-        y          = std::move(other.y);
-        z          = std::move(other.z);
-        ntyp       = std::exchange(other.ntyp, 0);
-        zvals       = std::move(other.zvals);
-        type_counts = std::move(other.type_counts);
-        atom_types  = std::move(other.atom_types);
-        sorted_idx = std::move(other.sorted_idx);
-        fp_        = std::exchange(other.fp_, nullptr);
-    }
-    return *this;
-}
-
-
 auto ATOM::print_info() const -> void {
     std::println("ATOM: natom = {}, ntyp = {}", natom, ntyp);
     auto A_ang = lattice.A(LengthUnit::Angstrom);
@@ -377,39 +335,6 @@ auto ATOM::print_info() const -> void {
         std::println("  ... and {} more atoms", natom - 5);
     }
 }
-
-
-// --- archived: alternative eager-close implementation (module-internal, for reference) ---
-//
-// Compared to ATOM:
-//   - Parsing logic identical (shared parseAtomConfigFile)
-//   - No FILE* member → rule of zero, trivially copyable
-//   - No species analysis (ntyp / zvals / sorted_idx etc.)
-
-namespace archived {
-
-struct SimpleATOM {
-    int natom{};
-    Lattice lattice;
-    std::vector<int> species;
-    std::vector<double> x, y, z;
-
-    explicit SimpleATOM(const std::string& filename) {
-        auto* fp = std::fopen(filename.c_str(), "r");
-        if (!fp) {
-            throw std::runtime_error("Cannot open file: " + filename);
-        }
-        try {
-            parseAtomConfigFile(fp, natom, lattice, species, x, y, z);
-        } catch (...) {
-            std::fclose(fp);
-            throw;
-        }
-        std::fclose(fp);
-    }
-};
-
-} // namespace archived
 
 
 // --- archived: alternative "view-as-iterator" iteration pattern (module-internal, for reference) ---

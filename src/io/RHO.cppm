@@ -24,46 +24,28 @@ struct RHOMetadata {
 class RHO {
 public:
     explicit RHO(const std::string& filename)
-        : fp_(nullptr)
     {
-        fp_ = std::fopen(filename.c_str(), "rb");
-        if (!fp_) {
+        auto* fp = std::fopen(filename.c_str(), "rb");
+        if (!fp) {
             throw std::runtime_error("Cannot open file: " + filename);
         }
 
-        readMetadata();
-        readData();
-    }
-
-    ~RHO() {
-        if (fp_) {
-            std::fclose(fp_);
+        try {
+            readMetadata(fp);
+            readData(fp);
+        } catch (...) {
+            std::fclose(fp);
+            throw;
         }
+
+        std::fclose(fp);
     }
 
-    RHO(const RHO&) = delete;
-    auto operator=(const RHO&) -> RHO& = delete;
-
-    RHO(RHO&& other) noexcept
-        : meta(other.meta)
-        , lattice(std::move(other.lattice))
-        , data_(std::move(other.data_))
-        , fp_(other.fp_)
-    {
-        other.fp_ = nullptr;
-    }
-
-    auto operator=(RHO&& other) noexcept -> RHO& {
-        if (this != &other) {
-            if (fp_) std::fclose(fp_);
-            meta = other.meta;
-            lattice = std::move(other.lattice);
-            data_ = std::move(other.data_);
-            fp_ = other.fp_;
-            other.fp_ = nullptr;
-        }
-        return *this;
-    }
+    // Rule of zero: no FILE* or other resource handle
+    RHO(const RHO&) = default;
+    auto operator=(const RHO&) -> RHO& = default;
+    RHO(RHO&&) noexcept = default;
+    auto operator=(RHO&&) noexcept -> RHO& = default;
 
     // [i, j, k] access state 0, no runtime check, direct index
     auto operator[](int i, int j, int k) -> double& {
@@ -107,17 +89,17 @@ public:
     Lattice lattice;
 
 private:
-    auto readRecordLength() -> int {
+    auto readRecordLength(std::FILE* fp) -> int {
         int length;
-        if (std::fread(&length, sizeof(int), 1, fp_) != 1) {
+        if (std::fread(&length, sizeof(int), 1, fp) != 1) {
             throw std::runtime_error("Failed to read record length marker");
         }
         return length;
     }
 
-    auto checkRecordLength(int expected) -> void {
+    auto checkRecordLength(std::FILE* fp, int expected) -> void {
         int length;
-        if (std::fread(&length, sizeof(int), 1, fp_) != 1) {
+        if (std::fread(&length, sizeof(int), 1, fp) != 1) {
             throw std::runtime_error("Failed to read record length marker");
         }
         if (length != expected) {
@@ -128,16 +110,16 @@ private:
         }
     }
 
-    auto readRecord(void* dst, const char* context) -> void {
-        int len = readRecordLength();
-        if (std::fread(dst, 1, len, fp_) != static_cast<std::size_t>(len)) {
+    auto readRecord(std::FILE* fp, void* dst, const char* context) -> void {
+        int len = readRecordLength(fp);
+        if (std::fread(dst, 1, len, fp) != static_cast<std::size_t>(len)) {
             throw std::runtime_error(std::string(context) + ": read failed");
         }
-        checkRecordLength(len);
+        checkRecordLength(fp, len);
     }
 
-    auto readRecord(void* dst, std::size_t nbytes, const char* context) -> void {
-        int len = readRecordLength();
+    auto readRecord(std::FILE* fp, void* dst, std::size_t nbytes, const char* context) -> void {
+        int len = readRecordLength(fp);
         if (static_cast<int>(nbytes) > len) {
             throw std::runtime_error(
                 std::string(context) + ": nbytes exceeds record length: expected ≤ " +
@@ -145,25 +127,25 @@ private:
             );
         }
         if (nbytes > 0) {
-            if (std::fread(dst, 1, nbytes, fp_) != nbytes) {
+            if (std::fread(dst, 1, nbytes, fp) != nbytes) {
                 throw std::runtime_error(std::string(context) + ": read failed");
             }
         }
         std::size_t remaining = static_cast<std::size_t>(len) - nbytes;
         if (remaining > 0) {
-            if (std::fseek(fp_, static_cast<long>(remaining), SEEK_CUR) != 0) {
+            if (std::fseek(fp, static_cast<long>(remaining), SEEK_CUR) != 0) {
                 throw std::runtime_error(std::string(context) + ": seek failed");
             }
         }
-        checkRecordLength(len);
+        checkRecordLength(fp, len);
     }
 
-    auto readMetadata() -> void {
-        int len = readRecordLength();
+    auto readMetadata(std::FILE* fp) -> void {
+        int len = readRecordLength(fp);
 
         if (len == static_cast<int>(5 * sizeof(int))) {
             int header[5];
-            if (std::fread(header, sizeof(int), 5, fp_) != 5) {
+            if (std::fread(header, sizeof(int), 5, fp) != 5) {
                 throw std::runtime_error("Failed to read RHO header (5 ints)");
             }
             meta.n1      = header[0];
@@ -173,7 +155,7 @@ private:
             meta.nstate  = header[4];
         } else if (len == static_cast<int>(4 * sizeof(int))) {
             int header[4];
-            if (std::fread(header, sizeof(int), 4, fp_) != 4) {
+            if (std::fread(header, sizeof(int), 4, fp) != 4) {
                 throw std::runtime_error("Failed to read RHO header (4 ints)");
             }
             meta.n1      = header[0];
@@ -187,15 +169,15 @@ private:
             );
         }
 
-        checkRecordLength(len);
+        checkRecordLength(fp, len);
 
         // Read lattice vectors (Angstrom in file, converted to Bohr internally)
         double al_flat[9];
-        readRecord(al_flat, "AL");
+        readRecord(fp, al_flat, "AL");
         lattice.setLattice(al_flat, LengthUnit::Angstrom);
     }
 
-    auto readData() -> void {
+    auto readData(std::FILE* fp) -> void {
         int nr = meta.n1 * meta.n2 * meta.n3;
         int nr_n = nr / meta.nnode;
         data_.resize(static_cast<std::size_t>(meta.nstate) * nr);
@@ -205,11 +187,10 @@ private:
             for (int inode = 0; inode < meta.nnode; ++inode) {
                 double* slice = data_.data()
                     + (static_cast<std::size_t>(istate) * nr + inode * nr_n);
-                readRecord(slice, nbytes, "grid data");
+                readRecord(fp, slice, nbytes, "grid data");
             }
         }
     }
 
-    std::FILE* fp_ = nullptr;
     std::vector<double> data_;
 };
