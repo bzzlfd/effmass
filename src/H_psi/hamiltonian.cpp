@@ -88,6 +88,13 @@ auto Hamiltonian::loadEIGEN(const std::string& path) -> void {
     checkConsistency();
 }
 
+auto Hamiltonian::loadOCC(const std::string& path) -> void {
+    auto full = resolve(path);
+    std::println("[Hamiltonian] loading OCC: {}", full);
+    occ_.emplace(full);
+    checkConsistency();
+}
+
 auto Hamiltonian::loadNCPPs(const std::string& directory) -> void {
     auto full = resolve(directory);
     std::println("[Hamiltonian] loading NCPPs from: {}", full);
@@ -131,6 +138,7 @@ auto Hamiltonian::loadFromDirectory() -> void {
     loadVR("OUT.VR");
     loadRHO("OUT.RHO");
     loadEIGEN("OUT.EIGEN");
+    loadOCC("OUT.OCC");
 }
 
 
@@ -168,6 +176,11 @@ auto Hamiltonian::eigen() const -> const EIGEN& {
     return *eigen_;
 }
 
+auto Hamiltonian::occ() const -> const OCC& {
+    if (!occ_) throw std::runtime_error("Hamiltonian: OCC not loaded");
+    return *occ_;
+}
+
 auto Hamiltonian::ncpp(int atomic_number) const -> const NCPP& {
     std::string_view want = ATOM::elementName(atomic_number);
     for (const auto& p : ncpps_) {
@@ -183,7 +196,7 @@ auto Hamiltonian::ncpp(int atomic_number) const -> const NCPP& {
 //  Consistency check  —  runs after every load step
 // ===========================================================================
 
-auto Hamiltonian::checkConsistency() const -> void {
+auto Hamiltonian::checkConsistency() -> void {
     using namespace std;
     auto& log = Logger::instance();
 
@@ -249,7 +262,6 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(g.n1,     v.n1,     "n1    [GKK vs VR]");
         checkInt(g.n2,     v.n2,     "n2    [GKK vs VR]");
         checkInt(g.n3,     v.n3,     "n3    [GKK vs VR]");
-        checkInt(g.nnode, v.nnode, "nnode [GKK vs VR]");
         checkLattice(gkk_->meta.lattice, vr_->lattice, "GKK vs VR");
         checked_.set(Pair_GKK_VR);
     } else {
@@ -271,8 +283,51 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(g.nkpt,  e.nkpt,  "nkpt  [GKK vs EIGEN]");
         checkInt(g.is_SO, e.is_SO, "is_SO [GKK vs EIGEN]");
         checkInt(g.islda, e.islda, "islda [GKK vs EIGEN]");
-        // Note: do NOT compare e.natom with g.nnode — they are different
-        // concepts (number of atoms vs number of MPI nodes).
+        checkInt(g.nnode, e.nnode, "nnode [GKK vs EIGEN]");
+
+        // Compare k-point vectors, allowing periodic translation
+        {
+            auto saved_view = gkk_->currentView();
+            gkk_->setDataView(saved_view | KVecsView::Integer);
+            bool kpts_ok = true;
+            int bad_ik = -1;
+            double bad_gkk_x{}, bad_gkk_y{}, bad_gkk_z{};
+            double bad_eig_x{}, bad_eig_y{}, bad_eig_z{};
+            constexpr double TWO_PI = 2.0 * std::numbers::pi;
+            auto A = g.lattice.A();  // direct lattice (Bohr)
+            for (int ik = 0; ik < g.nkpt; ++ik) {
+                const auto& kv = gkk_->loadKPoint(ik);
+                const auto& eig_k = eigen_->kpt_vec[ik];
+                // EIGEN stores k-points in Cartesian (Bohr^-1).
+                // GKK infers fractional coordinates.  Convert EIGEN → fractional
+                // via  kf[i] = (A[i] · k_cart) / (2π).
+                double eig_kf_x = (A[0][0] * eig_k.x + A[0][1] * eig_k.y + A[0][2] * eig_k.z) / TWO_PI;
+                double eig_kf_y = (A[1][0] * eig_k.x + A[1][1] * eig_k.y + A[1][2] * eig_k.z) / TWO_PI;
+                double eig_kf_z = (A[2][0] * eig_k.x + A[2][1] * eig_k.y + A[2][2] * eig_k.z) / TWO_PI;
+                double dx = kv.kPoint.x - eig_kf_x;
+                double dy = kv.kPoint.y - eig_kf_y;
+                double dz = kv.kPoint.z - eig_kf_z;
+                constexpr double eps = 1e-8;
+                if (abs(dx - round(dx)) > eps ||
+                    abs(dy - round(dy)) > eps ||
+                    abs(dz - round(dz)) > eps) {
+                    kpts_ok = false;
+                    bad_ik = ik;
+                    bad_gkk_x = kv.kPoint.x; bad_gkk_y = kv.kPoint.y; bad_gkk_z = kv.kPoint.z;
+                    bad_eig_x = eig_k.x;      bad_eig_y = eig_k.y;      bad_eig_z = eig_k.z;
+                    break;
+                }
+            }
+            gkk_->setDataView(saved_view);
+            if (!kpts_ok) throw runtime_error(format(
+                "Hamiltonian consistency: k-point[{}] mismatch (GKK vs EIGEN): "
+                "GKK_frac({},{},{}) EIGEN_cart({},{},{})",
+                bad_ik,
+                bad_gkk_x, bad_gkk_y, bad_gkk_z,
+                bad_eig_x, bad_eig_y, bad_eig_z));
+            log.log(LogLevel::Info, "  ✓ k-point vectors [GKK vs EIGEN]");
+        }
+
         checked_.set(Pair_GKK_EIGEN);
     } else {
         debug("GKK vs EIGEN");
@@ -288,7 +343,10 @@ auto Hamiltonian::checkConsistency() const -> void {
 
     // ----  pair: WG  x  EIGEN  ------------------------------------------------
     if (wg_ && eigen_ && !checked_[Pair_WG_EIGEN]) {
-        checkInt(wg_->meta.nband, eigen_->meta.nband, "band count [WG vs EIGEN]");
+        checkInt(wg_->meta.nband, eigen_->meta.nband, "nband [WG vs EIGEN]");
+        checkInt(wg_->meta.nkpt,  eigen_->meta.nkpt,  "nkpt  [WG vs EIGEN]");
+        checkInt(wg_->meta.is_SO, eigen_->meta.is_SO, "is_SO [WG vs EIGEN]");
+        checkInt(wg_->meta.islda, eigen_->meta.islda, "islda [WG vs EIGEN]");
         checked_.set(Pair_WG_EIGEN);
     } else {
         debug("WG vs EIGEN");
@@ -319,7 +377,6 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(r.n1,     v.n1,     "n1    [RHO vs VR]");
         checkInt(r.n2,     v.n2,     "n2    [RHO vs VR]");
         checkInt(r.n3,     v.n3,     "n3    [RHO vs VR]");
-        checkInt(r.nnode, v.nnode, "nnode [RHO vs VR]");
         checkInt(r.nstate, v.nstate, "nstate[RHO vs VR]");
         checkLattice(rho_->lattice, vr_->lattice, "RHO vs VR");
         checked_.set(Pair_RHO_VR);
@@ -382,6 +439,77 @@ auto Hamiltonian::checkConsistency() const -> void {
         checked_.set(Pair_NCPP_ATOM);
     } else {
         debug("NCPP vs ATOM");
+    }
+
+    // ----  pair: EIGEN  x  VR  -------------------------------------------------
+    if (eigen_ && vr_ && !checked_[Pair_EIGEN_VR]) {
+        checkInt(eigen_->meta.nnode, vr_->meta.nnode, "nnode [EIGEN vs VR]");
+        if (atom_) {
+            checkLattice(vr_->lattice, atom_->lattice, "EIGEN vs VR");
+        }
+        checked_.set(Pair_EIGEN_VR);
+    } else {
+        debug("EIGEN vs VR");
+    }
+
+    // ----  pair: EIGEN  x  RHO  ------------------------------------------------
+    if (eigen_ && rho_ && !checked_[Pair_EIGEN_RHO]) {
+        checkInt(eigen_->meta.nnode, rho_->meta.nnode, "nnode [EIGEN vs RHO]");
+        if (atom_) {
+            checkLattice(rho_->lattice, atom_->lattice, "EIGEN vs RHO");
+        }
+        checked_.set(Pair_EIGEN_RHO);
+    } else {
+        debug("EIGEN vs RHO");
+    }
+
+    // ----  pair: OCC  x  EIGEN  ------------------------------------------------
+    if (occ_ && eigen_ && !checked_[Pair_OCC_EIGEN]) {
+        const auto& o = occ_->meta;
+        const auto& e = eigen_->meta;
+        checkInt(o.islda, e.islda, "islda [OCC vs EIGEN]");
+        checkInt(o.nkpt,  e.nkpt,  "nkpt  [OCC vs EIGEN]");
+        checkInt(o.nband, e.nband, "nband [OCC vs EIGEN]");
+
+        // Compare k-point vectors directly (OCC text format has ~4 dp precision)
+        bool kpts_ok = true;
+        int bad_ik = -1;
+        constexpr double eps = 1e-4;
+        for (int ik = 0; ik < o.nkpt; ++ik) {
+            auto dx = std::abs(occ_->kpt_vec[ik].x - eigen_->kpt_vec[ik].x);
+            auto dy = std::abs(occ_->kpt_vec[ik].y - eigen_->kpt_vec[ik].y);
+            auto dz = std::abs(occ_->kpt_vec[ik].z - eigen_->kpt_vec[ik].z);
+            if (dx > eps || dy > eps || dz > eps) {
+                kpts_ok = false;
+                bad_ik = ik;
+                break;
+            }
+        }
+        if (!kpts_ok) throw runtime_error(format(
+            "Hamiltonian consistency: k-point[{}] mismatch (OCC vs EIGEN)",
+            bad_ik));
+        log.log(LogLevel::Info, "  ✓ k-point vectors [OCC vs EIGEN]");
+
+        checked_.set(Pair_OCC_EIGEN);
+    } else {
+        debug("OCC vs EIGEN");
+    }
+
+    // ----  pair: OCC  x  WG  --------------------------------------------------
+    if (occ_ && wg_ && !checked_[Pair_OCC_WG]) {
+        checkInt(occ_->meta.nkpt,  wg_->meta.nkpt,  "nkpt  [OCC vs WG]");
+        checkInt(occ_->meta.nband, wg_->meta.nband, "nband [OCC vs WG]");
+        checked_.set(Pair_OCC_WG);
+    } else {
+        debug("OCC vs WG");
+    }
+
+    // ----  pair: OCC  x  GKK  -------------------------------------------------
+    if (occ_ && gkk_ && !checked_[Pair_OCC_GKK]) {
+        checkInt(occ_->meta.nkpt, gkk_->meta.nkpt, "nkpt [OCC vs GKK]");
+        checked_.set(Pair_OCC_GKK);
+    } else {
+        debug("OCC vs GKK");
     }
 
     log.log(LogLevel::Info, "[Hamiltonian] consistency check complete");

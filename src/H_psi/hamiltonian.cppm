@@ -23,9 +23,9 @@ export {
 //  Data is loaded incrementally via loadXxx() methods.  Each load triggers
 //  cross-file consistency checks that log what was verified.
 //
-//  Always-needed:  GKK, WG, ATOM, NCPPs
+//  Always-needed:  GKK, ATOM, NCPPs
 //  Optional:       VR, RHO
-//                  EIGEN
+//                  EIGEN, WG
 //
 //  k-point coordinates always come from GKK (inferCurrent_k).
 //
@@ -52,6 +52,7 @@ export {
         auto loadRHO(const std::string& path) -> void;
         auto loadATOM(const std::string& path) -> void;
         auto loadEIGEN(const std::string& path) -> void;
+        auto loadOCC(const std::string& path) -> void;
         auto loadNCPPs(const std::string& directory) -> void;
 
         /// Convenience: load all standard files from the base directory.
@@ -64,14 +65,16 @@ export {
         auto hasRHO()   const -> bool { return rho_.has_value(); }
         auto hasATOM()  const -> bool { return atom_.has_value(); }
         auto hasEIGEN() const -> bool { return eigen_.has_value(); }
+        auto hasOCC()   const -> bool { return occ_.has_value(); }
 
         // --- owned data access (throws if not loaded) ---
-        auto gkk()   const -> const GKK&;
-        auto wg()    const -> const WG&;
-        auto vr()    const -> const VR&;
-        auto rho()   const -> const RHO&;
-        auto atom()  const -> const ATOM&;
-        auto eigen() const -> const EIGEN&;
+        auto gkk()    const -> const GKK&;
+        auto wg()     const -> const WG&;
+        auto vr()     const -> const VR&;
+        auto rho()    const -> const RHO&;
+        auto atom()   const -> const ATOM&;
+        auto eigen()  const -> const EIGEN&;
+        auto occ()    const -> const OCC&;
         auto ncpp(int atomic_number) const -> const NCPP&;
 
         // -------------------------------------------------------------------
@@ -185,6 +188,7 @@ export {
         std::optional<RHO>   rho_;
         std::optional<ATOM>  atom_;
         std::optional<EIGEN> eigen_;
+        std::optional<OCC>   occ_;
         std::vector<NCPP>    ncpps_;
 
         // Consistency-check pair tracking: mark verified after
@@ -203,6 +207,11 @@ export {
             Pair_RHO_GKK,
             Pair_RHO_WG,
             Pair_NCPP_ATOM,
+            Pair_EIGEN_VR,
+            Pair_EIGEN_RHO,
+            Pair_OCC_EIGEN,
+            Pair_OCC_WG,
+            Pair_OCC_GKK,
             Pair_COUNT
         };
         mutable std::bitset<Pair_COUNT> checked_{};
@@ -211,6 +220,6 @@ export {
         /// Absolute paths are returned as-is; relative paths are prefixed with base_dir_.
         auto resolve(const std::string& path) const -> std::string;
 
-        auto checkConsistency() const -> void;
+        auto checkConsistency() -> void;
     };
 }

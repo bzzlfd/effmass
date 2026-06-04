@@ -12,20 +12,20 @@ import utils.vector3d;
 
 export {
     class OCC;
-    struct OCCMetadata;
+        struct OCCMetadata;
 }
 
 using kVec = vector3d<double>;
 
 
-export struct OCCMetadata {
+struct OCCMetadata {
     int islda{};
     int nkpt{};
     int nband{};
 };
 
 
-export class OCC {
+class OCC {
 public:
     // Open file and read all data (text format, eager loading)
     explicit OCC(const std::string& filename);
