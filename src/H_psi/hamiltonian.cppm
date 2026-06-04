@@ -24,41 +24,41 @@ export {
 //        2.1.  Callable    —  ∂H/∂k_α|ψ⟩       H.gradient.at_k_a()
 //    3.  Hessian                               H.hessian
 //        3.1.  Callable    —  ∂²H/∂k_α∂k_β|ψ⟩  H.hessian.at_k_ab()
+//
+//  Implementations live in sibling .cpp files (module implementation units).
 // ===========================================================================
 export {
     class Hamiltonian {
     public:
         Hamiltonian() = default;
 
-        class Callable;
-        auto at_k(int ikpt) const -> Callable { return Callable(this, ikpt); }
-
         // -------------------------------------------------------------------
         //  1.  Callable  —  H|ψ⟩ at fixed k
         //      H.at_k(ikpt) → Callable
         //      callable(psi, hpsi)  or  callable(n_bands, psi, hpsi)
-        // --------------------------------------------------------------------
+        // -------------------------------------------------------------------
         class Callable {
         public:
             Callable() = default;
 
             void operator()(std::span<const std::complex<double>> psi,
-                            std::span<std::complex<double>> hpsi) const {}
+                            std::span<std::complex<double>> hpsi) const;
 
             void operator()(int n_bands,
                             std::span<const std::complex<double>> psi,
-                            std::span<std::complex<double>> hpsi) const {}
+                            std::span<std::complex<double>> hpsi) const;
 
-            auto dim() const -> int { return 0; }
+            auto dim() const -> int;
 
         private:
             friend class Hamiltonian;
-            Callable(const Hamiltonian* parent, int ikpt)
-                : parent_(parent), ikpt_(ikpt) {}
+            Callable(const Hamiltonian* parent, int ikpt);
 
             const Hamiltonian* parent_{nullptr};
             int ikpt_{0};
         };
+        auto at_k(int ikpt) const -> Callable { return Callable(this, ikpt); }
+
 
         // ===================================================================
         //  2.  Gradient  —  ∂H/∂k_α|ψ⟩ at fixed k
@@ -69,37 +69,33 @@ export {
         public:
             Gradient() = default;
 
-            class Callable;
-            auto at_k_a(int ikpt, KDir dir) const -> Callable { return Callable(parent_, ikpt, dir); }
-            
-            // --------
-            // Callable  (nested functor)  
-            // --------
             class Callable {
             public:
                 Callable() = default;
 
                 void operator()(std::span<const std::complex<double>> psi,
-                                std::span<std::complex<double>> out) const {}
+                                std::span<std::complex<double>> out) const;
 
-                auto dim() const -> int { return 0; }
+                auto dim() const -> int;
 
             private:
                 friend class Gradient;
-                Callable(const Hamiltonian* parent, int ikpt, KDir dir)
-                    : parent_(parent), ikpt_(ikpt), dir_(dir) {}
+                Callable(const Hamiltonian* parent, int ikpt, KDir dir);
 
                 const Hamiltonian* parent_{nullptr};
                 int ikpt_{0};
                 KDir dir_{KDir::X};
             };
+            auto at_k_a(int ikpt, KDir dir) const -> Callable { return Callable(parent_, ikpt, dir); }
 
         private:
             friend class Hamiltonian;
-            explicit Gradient(const Hamiltonian* parent) : parent_(parent) {}
+            explicit Gradient(const Hamiltonian* parent);
+
             const Hamiltonian* parent_{nullptr};
         };
         auto gradient() const -> Gradient { return Gradient(this); }
+
 
         // ===================================================================
         //  3.  Hessian  —  ∂²H/∂k_α∂k_β|ψ⟩ at fixed k
@@ -110,36 +106,31 @@ export {
         public:
             Hessian() = default;
 
-            class Callable;
-            auto at_k_ab(int ikpt, KDir d1, KDir d2) const -> Callable { return Callable(parent_, ikpt, d1, d2); }
-            
-            // --------
-            // Callable  (nested functor)  
-            // --------
             class Callable {
             public:
                 Callable() = default;
 
                 void operator()(std::span<const std::complex<double>> psi,
-                                std::span<std::complex<double>> out) const {}
+                                std::span<std::complex<double>> out) const;
 
-                auto dim() const -> int { return 0; }
+                auto dim() const -> int;
 
             private:
                 friend class Hessian;
                 Callable(const Hamiltonian* parent, int ikpt,
-                         KDir d1, KDir d2)
-                    : parent_(parent), ikpt_(ikpt), d1_(d1), d2_(d2) {}
+                         KDir d1, KDir d2);
 
                 const Hamiltonian* parent_{nullptr};
                 int ikpt_{0};
                 KDir d1_{KDir::X};
                 KDir d2_{KDir::X};
             };
+            auto at_k_ab(int ikpt, KDir d1, KDir d2) const -> Callable { return Callable(parent_, ikpt, d1, d2); }
 
         private:
             friend class Hamiltonian;
-            explicit Hessian(const Hamiltonian* parent) : parent_(parent) {}
+            explicit Hessian(const Hamiltonian* parent);
+
             const Hamiltonian* parent_{nullptr};
         };
         auto hessian() const -> Hessian { return Hessian(this); }

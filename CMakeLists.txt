@@ -81,6 +81,10 @@ target_sources(H_psi
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
             src/H_psi.cppm
             src/H_psi/hamiltonian.cppm
+    PRIVATE
+        src/H_psi/hamiltonian_callable.cpp
+        src/H_psi/hamiltonian_gradient.cpp
+        src/H_psi/hamiltonian_hessian.cpp
 )
 target_link_libraries(H_psi PRIVATE io math)
 
