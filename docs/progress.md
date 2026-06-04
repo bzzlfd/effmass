@@ -76,7 +76,7 @@ for(ityp: ATOM.eachtype())
 
 # module 组织
 
-#### 前置声明
+#### 前置声明 （interface partition）
 `module_A` 和 `module_B`
 	**A 类需要内置一个 B 类的对象**：为了知道 B 类对象的大小（以便为 A 分配内存空间），编译器在编译 A 时，**必须完整地看到 B 类的具体定义**。
 	**B 类需要让 A 是自己的 friend**：在 C++ 模块中，要声明另一个模块的类为 `friend`，B 必须知道 A 的存在。
@@ -137,7 +137,7 @@ void B::do_something_with_A(A& a) {
 > [!note]
 > 类的定义不能拆开，因为要知道它的内存分布
 
-#### 接口与实现分离
+#### 接口与实现分离 (implementation partition)
 内部接口分区 (Internal Interface Partitions)
 
 在 `.cppm` 文件中只保留声明（骨架），在非分区的 `.cpp` 模块实现文件中写实现。
@@ -160,6 +160,7 @@ public:
     void foo();
 };
 ```
+
 2. 实现文件 (`MyModule.cpp`)**
 	1. 没有 `export`，它是模块内部隐私
 ```cpp
@@ -206,6 +207,7 @@ private:
     std::unique_ptr<Impl> pimpl; 
 };
 ```
+
 2. 内部实现分区或普通的实现文件 (`MyModule.cpp`)
 ```cpp
 module MyModule;
