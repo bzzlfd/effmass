@@ -187,6 +187,26 @@ export {
         std::optional<EIGEN> eigen_;
         std::vector<NCPP>    ncpps_;
 
+        // Consistency-check pair tracking: mark verified after
+        // first successful check to skip re-verification on later loads.
+        enum PairId : int {
+            Pair_GKK_WG,
+            Pair_GKK_VR,
+            Pair_GKK_ATOM,
+            Pair_GKK_EIGEN,
+            Pair_EIGEN_ATOM,
+            Pair_WG_EIGEN,
+            Pair_VR_ATOM,
+            Pair_VR_WG,
+            Pair_RHO_VR,
+            Pair_RHO_ATOM,
+            Pair_RHO_GKK,
+            Pair_RHO_WG,
+            Pair_NCPP_ATOM,
+            Pair_COUNT
+        };
+        mutable std::bitset<Pair_COUNT> checked_{};
+
         /// Resolve a user-provided path against base_dir_.
         /// Absolute paths are returned as-is; relative paths are prefixed with base_dir_.
         auto resolve(const std::string& path) const -> std::string;

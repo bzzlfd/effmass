@@ -213,7 +213,7 @@ auto Hamiltonian::checkConsistency() const -> void {
     log.log(LogLevel::Info, "[Hamiltonian] consistency check");
 
     // ----  pair: GKK  x  WG  ---------------------------------------------------
-    if (gkk_ && wg_) {
+    if (gkk_ && wg_ && !checked_[Pair_GKK_WG]) {
         const auto& g = gkk_->meta;
         const auto& w = wg_->meta;
         checkInt(g.nkpt,  w.nkpt,  "nkpt  [GKK vs WG]");
@@ -237,12 +237,13 @@ auto Hamiltonian::checkConsistency() const -> void {
             "Hamiltonian consistency: ng_tot_per_kpt mismatch");
 
         checkLattice(g.lattice, w.lattice, "GKK vs WG");
+        checked_.set(Pair_GKK_WG);
     } else {
         debug("GKK vs WG");
     }
 
     // ----  pair: GKK  x  VR  ---------------------------------------------------
-    if (gkk_ && vr_) {
+    if (gkk_ && vr_ && !checked_[Pair_GKK_VR]) {
         const auto& g = gkk_->meta;
         const auto& v = vr_->meta;
         checkInt(g.n1,     v.n1,     "n1    [GKK vs VR]");
@@ -250,19 +251,21 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(g.n3,     v.n3,     "n3    [GKK vs VR]");
         checkInt(g.nnodes, v.nnodes, "nnodes[GKK vs VR]");
         checkLattice(gkk_->meta.lattice, vr_->lattice, "GKK vs VR");
+        checked_.set(Pair_GKK_VR);
     } else {
         debug("GKK vs VR");
     }
 
     // ----  pair: GKK  x  ATOM  ------------------------------------------------
-    if (gkk_ && atom_) {
+    if (gkk_ && atom_ && !checked_[Pair_GKK_ATOM]) {
         checkLattice(gkk_->meta.lattice, atom_->lattice, "GKK vs ATOM");
+        checked_.set(Pair_GKK_ATOM);
     } else {
         debug("GKK vs ATOM");
     }
 
     // ----  pair: GKK  x  EIGEN  -----------------------------------------------
-    if (gkk_ && eigen_) {
+    if (gkk_ && eigen_ && !checked_[Pair_GKK_EIGEN]) {
         const auto& g = gkk_->meta;
         const auto& e = eigen_->meta;
         checkInt(g.nkpt,  e.nkpt,  "nkpt  [GKK vs EIGEN]");
@@ -270,42 +273,47 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(g.islda, e.islda, "islda [GKK vs EIGEN]");
         // Note: do NOT compare e.natom with g.nnodes — they are different
         // concepts (number of atoms vs number of MPI nodes).
+        checked_.set(Pair_GKK_EIGEN);
     } else {
         debug("GKK vs EIGEN");
     }
 
     // ----  pair: EIGEN  x  ATOM  ---------------------------------------------
-    if (eigen_ && atom_) {
+    if (eigen_ && atom_ && !checked_[Pair_EIGEN_ATOM]) {
         checkInt(eigen_->meta.natom, atom_->natom, "natom [EIGEN vs ATOM]");
+        checked_.set(Pair_EIGEN_ATOM);
     } else {
         debug("EIGEN vs ATOM");
     }
 
     // ----  pair: WG  x  EIGEN  ------------------------------------------------
-    if (wg_ && eigen_) {
+    if (wg_ && eigen_ && !checked_[Pair_WG_EIGEN]) {
         checkInt(wg_->meta.mx, eigen_->meta.nband, "band count [WG vs EIGEN]");
+        checked_.set(Pair_WG_EIGEN);
     } else {
         debug("WG vs EIGEN");
     }
 
     // ----  pair: VR  x  ATOM  -------------------------------------------------
-    if (vr_ && atom_) {
+    if (vr_ && atom_ && !checked_[Pair_VR_ATOM]) {
         checkLattice(vr_->lattice, atom_->lattice, "VR vs ATOM");
+        checked_.set(Pair_VR_ATOM);
     } else {
         debug("VR vs ATOM");
     }
 
     // ----  pair: VR  x  WG  ---------------------------------------------------
-    if (vr_ && wg_) {
+    if (vr_ && wg_ && !checked_[Pair_VR_WG]) {
         checkInt(vr_->meta.n1, wg_->meta.n1, "n1 [VR vs WG]");
         checkInt(vr_->meta.n2, wg_->meta.n2, "n2 [VR vs WG]");
         checkInt(vr_->meta.n3, wg_->meta.n3, "n3 [VR vs WG]");
+        checked_.set(Pair_VR_WG);
     } else {
         debug("VR vs WG");
     }
 
     // ----  pair: RHO  x  VR  -------------------------------------------------
-    if (rho_ && vr_) {
+    if (rho_ && vr_ && !checked_[Pair_RHO_VR]) {
         const auto& r = rho_->meta;
         const auto& v = vr_->meta;
         checkInt(r.n1,     v.n1,     "n1    [RHO vs VR]");
@@ -314,19 +322,21 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(r.nnodes, v.nnodes, "nnodes[RHO vs VR]");
         checkInt(r.nstate, v.nstate, "nstate[RHO vs VR]");
         checkLattice(rho_->lattice, vr_->lattice, "RHO vs VR");
+        checked_.set(Pair_RHO_VR);
     } else {
         debug("RHO vs VR");
     }
 
     // ----  pair: RHO  x  ATOM  -----------------------------------------------
-    if (rho_ && atom_) {
+    if (rho_ && atom_ && !checked_[Pair_RHO_ATOM]) {
         checkLattice(rho_->lattice, atom_->lattice, "RHO vs ATOM");
+        checked_.set(Pair_RHO_ATOM);
     } else {
         debug("RHO vs ATOM");
     }
 
     // ----  pair: RHO  x  GKK  ------------------------------------------------
-    if (rho_ && gkk_) {
+    if (rho_ && gkk_ && !checked_[Pair_RHO_GKK]) {
         const auto& r = rho_->meta;
         const auto& g = gkk_->meta;
         checkInt(r.n1,     g.n1,     "n1    [RHO vs GKK]");
@@ -334,21 +344,23 @@ auto Hamiltonian::checkConsistency() const -> void {
         checkInt(r.n3,     g.n3,     "n3    [RHO vs GKK]");
         checkInt(r.nnodes, g.nnodes, "nnodes[RHO vs GKK]");
         checkLattice(rho_->lattice, g.lattice, "RHO vs GKK");
+        checked_.set(Pair_RHO_GKK);
     } else {
         debug("RHO vs GKK");
     }
 
     // ----  pair: RHO  x  WG  -------------------------------------------------
-    if (rho_ && wg_) {
+    if (rho_ && wg_ && !checked_[Pair_RHO_WG]) {
         checkInt(rho_->meta.n1, wg_->meta.n1, "n1 [RHO vs WG]");
         checkInt(rho_->meta.n2, wg_->meta.n2, "n2 [RHO vs WG]");
         checkInt(rho_->meta.n3, wg_->meta.n3, "n3 [RHO vs WG]");
+        checked_.set(Pair_RHO_WG);
     } else {
         debug("RHO vs WG");
     }
 
     // ----  NCPPs  x  ATOM  ----------------------------------------------------
-    if (!ncpps_.empty() && atom_) {
+    if (!ncpps_.empty() && atom_ && !checked_[Pair_NCPP_ATOM]) {
         // Only check that every ATOM species has a matching NCPP.
         // Extra NCPPs are allowed (over-loading).
         for (int it = 0; it < atom_->ntyp; ++it) {
@@ -367,6 +379,7 @@ auto Hamiltonian::checkConsistency() const -> void {
                            expected, z));
             }
         }
+        checked_.set(Pair_NCPP_ATOM);
     } else {
         debug("NCPP vs ATOM");
     }
