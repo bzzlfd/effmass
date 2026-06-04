@@ -9,7 +9,7 @@ import H_psi;
 
 auto main() -> int {
     // =====================================================================
-    //  1. Default construction
+    //  1. Default construction (base_dir = cwd)
     // =====================================================================
     {
         Hamiltonian h;
@@ -26,17 +26,17 @@ auto main() -> int {
     //  2. Step-by-step load — nonlocal AlN data
     // =====================================================================
     {
-        Hamiltonian h;
-        h.loadATOM("test/data_io-nonlocal/atom.config");
+        Hamiltonian h("test/data_io-nonlocal");
+        h.loadATOM("atom.config");
         if (!h.hasATOM()) { std::println("FAIL: ATOM not loaded"); return 1; }
         if (h.hasGKK())  { std::println("FAIL: GKK should not be loaded yet"); return 1; }
         std::println("PASS: ATOM loaded, GKK absent");
     }
 
     {
-        Hamiltonian h;
-        h.loadATOM("test/data_io-nonlocal/atom.config");
-        h.loadNCPPs("test/data_io-nonlocal");
+        Hamiltonian h("test/data_io-nonlocal");
+        h.loadATOM("atom.config");
+        h.loadNCPPs(".");
         if (!h.hasATOM()) { std::println("FAIL: ATOM not loaded"); return 1; }
         std::println("PASS: ATOM + NCPPs loaded");
 
@@ -49,12 +49,12 @@ auto main() -> int {
     }
 
     {
-        Hamiltonian h;
-        h.loadATOM ("test/data_io-nonlocal/atom.config");
-        h.loadNCPPs("test/data_io-nonlocal");
-        h.loadGKK  ("test/data_io-nonlocal/OUT.GKK");
-        h.loadWG   ("test/data_io-nonlocal/OUT.WG");
-        h.loadVR   ("test/data_io-nonlocal/OUT.VR");
+        Hamiltonian h("test/data_io-nonlocal");
+        h.loadATOM ("atom.config");
+        h.loadNCPPs(".");
+        h.loadGKK  ("OUT.GKK");
+        h.loadWG   ("OUT.WG");
+        h.loadVR   ("OUT.VR");
 
         if (!h.hasGKK() || !h.hasWG() || !h.hasVR()) {
             std::println("FAIL: data missing after loading all required files");
@@ -76,8 +76,8 @@ auto main() -> int {
     //  3. loadFromDirectory convenience
     // =====================================================================
     {
-        Hamiltonian h;
-        h.loadFromDirectory("test/data_io-nonlocal");
+        Hamiltonian h("test/data_io-nonlocal");
+        h.loadFromDirectory();
 
         if (!h.hasGKK() || !h.hasWG() || !h.hasVR() ||
             !h.hasATOM() || !h.hasEIGEN())
@@ -110,9 +110,9 @@ auto main() -> int {
         if (!threw) { std::println("FAIL: wg() should throw when not loaded"); return 1; }
 
         // ncpp with missing element
-        Hamiltonian h2;
-        h2.loadATOM("test/data_io-nonlocal/atom.config");
-        h2.loadNCPPs("test/data_io-nonlocal");
+        Hamiltonian h2("test/data_io-nonlocal");
+        h2.loadATOM("atom.config");
+        h2.loadNCPPs(".");
         threw = false;
         try { (void)h2.ncpp(999); }
         catch (const std::out_of_range&) { threw = true; }
@@ -125,8 +125,8 @@ auto main() -> int {
     //  5. EIGEN is truly optional — H|ψ⟩ does not require it
     // =====================================================================
     {
-        Hamiltonian h;
-        h.loadFromDirectory("test/data_io-nonlocal");
+        Hamiltonian h("test/data_io-nonlocal");
+        h.loadFromDirectory();
 
         // at_k should succeed even though eigen is loaded — it's optional (extra)
         // But the important test: at_k doesn't check eigen
@@ -135,16 +135,30 @@ auto main() -> int {
         std::println("PASS: at_k() works with EIGEN present (optional)");
 
         // H without EIGEN
-        Hamiltonian h2;
-        h2.loadATOM ("test/data_io-nonlocal/atom.config");
-        h2.loadNCPPs("test/data_io-nonlocal");
-        h2.loadGKK  ("test/data_io-nonlocal/OUT.GKK");
-        h2.loadWG   ("test/data_io-nonlocal/OUT.WG");
-        h2.loadVR   ("test/data_io-nonlocal/OUT.VR");
+        Hamiltonian h2("test/data_io-nonlocal");
+        h2.loadATOM ("atom.config");
+        h2.loadNCPPs(".");
+        h2.loadGKK  ("OUT.GKK");
+        h2.loadWG   ("OUT.WG");
+        h2.loadVR   ("OUT.VR");
         // Note: no loadEIGEN
         auto callable2 = h2.at_k(0);
         (void)callable2;
         std::println("PASS: at_k() works without EIGEN");
+    }
+
+    // =====================================================================
+    //  6. Constructor throws when base_dir does not exist
+    // =====================================================================
+    {
+        bool threw = false;
+        try { Hamiltonian h("nonexistent-directory"); }
+        catch (const std::runtime_error&) { threw = true; }
+        if (!threw) {
+            std::println("FAIL: constructor should throw for nonexistent directory");
+            return 1;
+        }
+        std::println("PASS: constructor rejects nonexistent directory");
     }
 
     std::println("\nAll tests passed.");

@@ -4,14 +4,30 @@ import std;
 import utils.logger;
 
 // ===========================================================================
-//  Internal helpers
+//  Constructor
 // ===========================================================================
-namespace {
 
-// Build a file path from directory + filename.
-auto makePath(const std::string& dir, const std::string& file) -> std::string {
-    return (std::filesystem::path(dir) / file).string();
+Hamiltonian::Hamiltonian(std::filesystem::path base_dir) : base_dir_(std::move(base_dir)) {
+    if (!std::filesystem::is_directory(base_dir_)) {
+        throw std::runtime_error(
+            "Hamiltonian: base directory does not exist or is not a directory: "
+            + base_dir_.string());
+    }
+    base_dir_ = std::filesystem::absolute(base_dir_);
 }
+
+
+// ===========================================================================
+//  Path resolution — relative paths are prefixed with base_dir_
+// ===========================================================================
+
+auto Hamiltonian::resolve(const std::string& path) const -> std::string {
+    auto p = std::filesystem::path(path);
+    if (p.is_absolute()) return path;
+    return (base_dir_ / p).string();
+}
+
+namespace {
 
 // Compare two 3×3 lattice matrices with tolerance.
 auto latticesMatch(const Lattice& a, const Lattice& b) -> bool {
@@ -31,44 +47,51 @@ auto latticesMatch(const Lattice& a, const Lattice& b) -> bool {
 // ===========================================================================
 
 auto Hamiltonian::loadGKK(const std::string& path) -> void {
-    std::println("[Hamiltonian] loading GKK: {}", path);
-    gkk_.emplace(path);
+    auto full = resolve(path);
+    std::println("[Hamiltonian] loading GKK: {}", full);
+    gkk_.emplace(full);
     checkConsistency();
 }
 
 auto Hamiltonian::loadWG(const std::string& path) -> void {
-    std::println("[Hamiltonian] loading WG: {}", path);
-    wg_.emplace(path);
+    auto full = resolve(path);
+    std::println("[Hamiltonian] loading WG: {}", full);
+    wg_.emplace(full);
     checkConsistency();
 }
 
 auto Hamiltonian::loadVR(const std::string& path) -> void {
-    std::println("[Hamiltonian] loading VR: {}", path);
-    vr_.emplace(path);
+    auto full = resolve(path);
+    std::println("[Hamiltonian] loading VR: {}", full);
+    vr_.emplace(full);
     checkConsistency();
 }
 
 auto Hamiltonian::loadRHO(const std::string& path) -> void {
-    std::println("[Hamiltonian] loading RHO: {}", path);
-    rho_.emplace(path);
+    auto full = resolve(path);
+    std::println("[Hamiltonian] loading RHO: {}", full);
+    rho_.emplace(full);
     checkConsistency();
 }
 
 auto Hamiltonian::loadATOM(const std::string& path) -> void {
-    std::println("[Hamiltonian] loading ATOM: {}", path);
-    atom_.emplace(path);
+    auto full = resolve(path);
+    std::println("[Hamiltonian] loading ATOM: {}", full);
+    atom_.emplace(full);
     checkConsistency();
 }
 
 auto Hamiltonian::loadEIGEN(const std::string& path) -> void {
-    std::println("[Hamiltonian] loading EIGEN: {}", path);
-    eigen_.emplace(path);
+    auto full = resolve(path);
+    std::println("[Hamiltonian] loading EIGEN: {}", full);
+    eigen_.emplace(full);
     checkConsistency();
 }
 
 auto Hamiltonian::loadNCPPs(const std::string& directory) -> void {
-    std::println("[Hamiltonian] loading NCPPs from: {}", directory);
-    auto upf_dir = std::filesystem::path(directory);
+    auto full = resolve(directory);
+    std::println("[Hamiltonian] loading NCPPs from: {}", full);
+    auto upf_dir = std::filesystem::path(full);
     if (!std::filesystem::is_directory(upf_dir)) {
         throw std::runtime_error(
             "Hamiltonian: directory not found: " + upf_dir.string());
@@ -90,24 +113,24 @@ auto Hamiltonian::loadNCPPs(const std::string& directory) -> void {
 //  Convenience
 // ===========================================================================
 
-auto Hamiltonian::loadFromDirectory(const std::string& directory) -> void {
+auto Hamiltonian::loadFromDirectory() -> void {
     // Order: load the ones with fewer cross-file dependencies first so that
     // each checkConsistency() call gets to verify progressively more pairs.
-    loadATOM (makePath(directory, "atom.config"));
+    loadATOM("atom.config");
 
-    // Try UPF/ subdirectory first, fall back to the directory itself.
-    auto upf_subdir = std::filesystem::path(directory) / "UPF";
+    // Try UPF/ subdirectory first, fall back to the base directory itself.
+    auto upf_subdir = base_dir_ / "UPF";
     if (std::filesystem::is_directory(upf_subdir)) {
-        loadNCPPs(upf_subdir.string());
+        loadNCPPs("UPF");
     } else {
-        loadNCPPs(directory);
+        loadNCPPs(".");
     }
 
-    loadGKK  (makePath(directory, "OUT.GKK"));
-    loadWG   (makePath(directory, "OUT.WG"));
-    loadVR   (makePath(directory, "OUT.VR"));
-    loadRHO  (makePath(directory, "OUT.RHO"));
-    loadEIGEN(makePath(directory, "OUT.EIGEN"));
+    loadGKK("OUT.GKK");
+    loadWG("OUT.WG");
+    loadVR("OUT.VR");
+    loadRHO("OUT.RHO");
+    loadEIGEN("OUT.EIGEN");
 }
 
 

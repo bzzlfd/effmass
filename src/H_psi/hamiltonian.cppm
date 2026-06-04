@@ -41,9 +41,11 @@ export {
 export {
     class Hamiltonian {
     public:
-        Hamiltonian() = default;
+        /// Construct with a base directory (default: current working directory).
+        /// All relative paths in loadXxx() are resolved against this directory.
+        explicit Hamiltonian(std::filesystem::path base_dir = ".");
 
-        // --- step-by-step loading ---
+        // --- step-by-step loading (relative paths resolved against base_dir_) ---
         auto loadGKK(const std::string& path) -> void;
         auto loadWG(const std::string& path) -> void;
         auto loadVR(const std::string& path) -> void;
@@ -52,8 +54,8 @@ export {
         auto loadEIGEN(const std::string& path) -> void;
         auto loadNCPPs(const std::string& directory) -> void;
 
-        /// Convenience: load everything from a working directory.
-        auto loadFromDirectory(const std::string& directory) -> void;
+        /// Convenience: load all standard files from the base directory.
+        auto loadFromDirectory() -> void;
 
         // --- queries ---
         auto hasGKK()   const -> bool { return gkk_.has_value(); }
@@ -176,6 +178,7 @@ export {
         auto hessian() const -> Hessian { return Hessian(this); }
 
     private:
+        std::filesystem::path base_dir_;
         std::optional<GKK>   gkk_;
         std::optional<WG>    wg_;
         std::optional<VR>    vr_;
@@ -183,6 +186,10 @@ export {
         std::optional<ATOM>  atom_;
         std::optional<EIGEN> eigen_;
         std::vector<NCPP>    ncpps_;
+
+        /// Resolve a user-provided path against base_dir_.
+        /// Absolute paths are returned as-is; relative paths are prefixed with base_dir_.
+        auto resolve(const std::string& path) const -> std::string;
 
         auto checkConsistency() const -> void;
     };
