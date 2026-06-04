@@ -40,6 +40,7 @@ target_sources(utils
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
             src/utils/array2d.cppm
             src/utils/vector3d.cppm
+            src/utils/logger.cppm
 )
 
 # Library target for pseudo-potential module
@@ -82,11 +83,12 @@ target_sources(H_psi
             src/H_psi.cppm
             src/H_psi/hamiltonian.cppm
     PRIVATE
+        src/H_psi/hamiltonian.cpp
         src/H_psi/hamiltonian_callable.cpp
         src/H_psi/hamiltonian_gradient.cpp
         src/H_psi/hamiltonian_hessian.cpp
 )
-target_link_libraries(H_psi PRIVATE io math)
+target_link_libraries(H_psi PRIVATE io math pseudo utils)
 
 # Tests
 enable_testing()

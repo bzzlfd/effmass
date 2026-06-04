@@ -1,0 +1,352 @@
+module H_psi.hamiltonian;
+
+import std;
+import utils.logger;
+
+// ===========================================================================
+//  Internal helpers
+// ===========================================================================
+namespace {
+
+// Build a file path from directory + filename.
+auto makePath(const std::string& dir, const std::string& file) -> std::string {
+    return (std::filesystem::path(dir) / file).string();
+}
+
+// Compare two 3×3 lattice matrices with tolerance.
+auto latticesMatch(const Lattice& a, const Lattice& b) -> bool {
+    auto A_a = a.A();  // Hartree atomic units (Bohr)
+    auto A_b = b.A();
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            if (std::abs(A_a[i][j] - A_b[i][j]) > 1e-10) return false;
+    return true;
+}
+
+} // anonymous namespace
+
+
+// ===========================================================================
+//  Step-by-step loading
+// ===========================================================================
+
+auto Hamiltonian::loadGKK(const std::string& path) -> void {
+    std::println("[Hamiltonian] loading GKK: {}", path);
+    gkk_.emplace(path);
+    checkConsistency();
+}
+
+auto Hamiltonian::loadWG(const std::string& path) -> void {
+    std::println("[Hamiltonian] loading WG: {}", path);
+    wg_.emplace(path);
+    checkConsistency();
+}
+
+auto Hamiltonian::loadVR(const std::string& path) -> void {
+    std::println("[Hamiltonian] loading VR: {}", path);
+    vr_.emplace(path);
+    checkConsistency();
+}
+
+auto Hamiltonian::loadRHO(const std::string& path) -> void {
+    std::println("[Hamiltonian] loading RHO: {}", path);
+    rho_.emplace(path);
+    checkConsistency();
+}
+
+auto Hamiltonian::loadATOM(const std::string& path) -> void {
+    std::println("[Hamiltonian] loading ATOM: {}", path);
+    atom_.emplace(path);
+    checkConsistency();
+}
+
+auto Hamiltonian::loadEIGEN(const std::string& path) -> void {
+    std::println("[Hamiltonian] loading EIGEN: {}", path);
+    eigen_.emplace(path);
+    checkConsistency();
+}
+
+auto Hamiltonian::loadNCPPs(const std::string& directory) -> void {
+    std::println("[Hamiltonian] loading NCPPs from: {}", directory);
+    auto upf_dir = std::filesystem::path(directory);
+    if (!std::filesystem::is_directory(upf_dir)) {
+        throw std::runtime_error(
+            "Hamiltonian: directory not found: " + upf_dir.string());
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(upf_dir)) {
+        auto ext = entry.path().extension();
+        if (ext == ".UPF" || ext == ".upf") {
+            ncpps_.emplace_back(UPF(entry.path().string()));
+            std::println("  loaded: {}", entry.path().filename().string());
+        }
+    }
+    std::println("  total NCPP objects: {}", ncpps_.size());
+    checkConsistency();
+}
+
+
+// ===========================================================================
+//  Convenience
+// ===========================================================================
+
+auto Hamiltonian::loadFromDirectory(const std::string& directory) -> void {
+    // Order: load the ones with fewer cross-file dependencies first so that
+    // each checkConsistency() call gets to verify progressively more pairs.
+    loadATOM (makePath(directory, "atom.config"));
+
+    // Try UPF/ subdirectory first, fall back to the directory itself.
+    auto upf_subdir = std::filesystem::path(directory) / "UPF";
+    if (std::filesystem::is_directory(upf_subdir)) {
+        loadNCPPs(upf_subdir.string());
+    } else {
+        loadNCPPs(directory);
+    }
+
+    loadGKK  (makePath(directory, "OUT.GKK"));
+    loadWG   (makePath(directory, "OUT.WG"));
+    loadVR   (makePath(directory, "OUT.VR"));
+    loadRHO  (makePath(directory, "OUT.RHO"));
+    loadEIGEN(makePath(directory, "OUT.EIGEN"));
+}
+
+
+// ===========================================================================
+//  Data accessors
+// ===========================================================================
+
+auto Hamiltonian::gkk() const -> const GKK& {
+    if (!gkk_) throw std::runtime_error("Hamiltonian: GKK not loaded");
+    return *gkk_;
+}
+
+auto Hamiltonian::wg() const -> const WG& {
+    if (!wg_) throw std::runtime_error("Hamiltonian: WG not loaded");
+    return *wg_;
+}
+
+auto Hamiltonian::vr() const -> const VR& {
+    if (!vr_) throw std::runtime_error("Hamiltonian: VR not loaded");
+    return *vr_;
+}
+
+auto Hamiltonian::rho() const -> const RHO& {
+    if (!rho_) throw std::runtime_error("Hamiltonian: RHO not loaded");
+    return *rho_;
+}
+
+auto Hamiltonian::atom() const -> const ATOM& {
+    if (!atom_) throw std::runtime_error("Hamiltonian: ATOM not loaded");
+    return *atom_;
+}
+
+auto Hamiltonian::eigen() const -> const EIGEN& {
+    if (!eigen_) throw std::runtime_error("Hamiltonian: EIGEN not loaded");
+    return *eigen_;
+}
+
+auto Hamiltonian::ncpp(int atomic_number) const -> const NCPP& {
+    std::string_view want = ATOM::elementName(atomic_number);
+    for (const auto& p : ncpps_) {
+        if (p.meta.element == want) return p;
+    }
+    throw std::out_of_range(
+        "Hamiltonian: no NCPP for element " + std::string(want) +
+        " (Z=" + std::to_string(atomic_number) + ')');
+}
+
+
+// ===========================================================================
+//  Consistency check  —  runs after every load step
+// ===========================================================================
+
+auto Hamiltonian::checkConsistency() const -> void {
+    using namespace std;
+    auto& log = Logger::instance();
+
+    // -- helper: log a debug-level skip message ---------------------------------
+    auto debug = [&](string_view msg) {
+        log.log(LogLevel::Debug, "  — {}: skipped (data not loaded)", msg);
+    };
+
+    // -- helper: check int equality, log at info-level --------------------------
+    auto checkInt = [&](int a, int b, string_view label) -> void {
+        bool ok = (a == b);
+        log.log(LogLevel::Info, "  {} {}: {} vs {}", ok ? "✓" : "✗", label, a, b);
+        if (!ok) throw runtime_error(
+            format("Hamiltonian consistency: {} mismatch ({} vs {})",
+                   label, a, b));
+    };
+
+    // -- helper: check lattice match -------------------------------------------
+    auto checkLattice = [&](const Lattice& a, const Lattice& b,
+                            string_view label) -> void {
+        bool ok = latticesMatch(a, b);
+        log.log(LogLevel::Info, "  {} lattice [{}]", ok ? "✓" : "✗", label);
+        if (!ok) throw runtime_error(
+            format("Hamiltonian consistency: lattice mismatch [{}]", label));
+    };
+
+    log.log(LogLevel::Info, "[Hamiltonian] consistency check");
+
+    // ----  pair: GKK  x  WG  ---------------------------------------------------
+    if (gkk_ && wg_) {
+        const auto& g = gkk_->meta;
+        const auto& w = wg_->meta;
+        checkInt(g.nkpt,  w.nkpt,  "nkpt  [GKK vs WG]");
+        checkInt(g.n1,    w.n1,    "n1    [GKK vs WG]");
+        checkInt(g.n2,    w.n2,    "n2    [GKK vs WG]");
+        checkInt(g.n3,    w.n3,    "n3    [GKK vs WG]");
+        checkInt(g.mg_nx, w.mg_nx, "mg_nx [GKK vs WG]");
+        checkInt(g.nnodes,w.nnodes,"nnodes[GKK vs WG]");
+        checkInt(g.is_SO, w.is_SO, "is_SO [GKK vs WG]");
+        checkInt(g.islda, w.islda, "islda [GKK vs WG]");
+
+        bool ecut_ok = (abs(g.Ecut - w.Ecut) < 1e-12);
+        log.log(LogLevel::Info, "  {} Ecut  [GKK vs WG]: {} vs {}",
+                ecut_ok ? "✓" : "✗", g.Ecut, w.Ecut);
+        if (!ecut_ok) throw runtime_error(
+            "Hamiltonian consistency: Ecut mismatch");
+
+        bool ng_ok = (g.ng_tot_per_kpt == w.ng_tot_per_kpt);
+        log.log(LogLevel::Info, "  {} ng_tot_per_kpt [GKK vs WG]", ng_ok ? "✓" : "✗");
+        if (!ng_ok) throw runtime_error(
+            "Hamiltonian consistency: ng_tot_per_kpt mismatch");
+
+        checkLattice(g.lattice, w.lattice, "GKK vs WG");
+    } else {
+        debug("GKK vs WG");
+    }
+
+    // ----  pair: GKK  x  VR  ---------------------------------------------------
+    if (gkk_ && vr_) {
+        const auto& g = gkk_->meta;
+        const auto& v = vr_->meta;
+        checkInt(g.n1,     v.n1,     "n1    [GKK vs VR]");
+        checkInt(g.n2,     v.n2,     "n2    [GKK vs VR]");
+        checkInt(g.n3,     v.n3,     "n3    [GKK vs VR]");
+        checkInt(g.nnodes, v.nnodes, "nnodes[GKK vs VR]");
+        checkLattice(gkk_->meta.lattice, vr_->lattice, "GKK vs VR");
+    } else {
+        debug("GKK vs VR");
+    }
+
+    // ----  pair: GKK  x  ATOM  ------------------------------------------------
+    if (gkk_ && atom_) {
+        checkLattice(gkk_->meta.lattice, atom_->lattice, "GKK vs ATOM");
+    } else {
+        debug("GKK vs ATOM");
+    }
+
+    // ----  pair: GKK  x  EIGEN  -----------------------------------------------
+    if (gkk_ && eigen_) {
+        const auto& g = gkk_->meta;
+        const auto& e = eigen_->meta;
+        checkInt(g.nkpt,  e.nkpt,  "nkpt  [GKK vs EIGEN]");
+        checkInt(g.is_SO, e.is_SO, "is_SO [GKK vs EIGEN]");
+        checkInt(g.islda, e.islda, "islda [GKK vs EIGEN]");
+        // Note: do NOT compare e.natom with g.nnodes — they are different
+        // concepts (number of atoms vs number of MPI nodes).
+    } else {
+        debug("GKK vs EIGEN");
+    }
+
+    // ----  pair: EIGEN  x  ATOM  ---------------------------------------------
+    if (eigen_ && atom_) {
+        checkInt(eigen_->meta.natom, atom_->natom, "natom [EIGEN vs ATOM]");
+    } else {
+        debug("EIGEN vs ATOM");
+    }
+
+    // ----  pair: WG  x  EIGEN  ------------------------------------------------
+    if (wg_ && eigen_) {
+        checkInt(wg_->meta.mx, eigen_->meta.nband, "band count [WG vs EIGEN]");
+    } else {
+        debug("WG vs EIGEN");
+    }
+
+    // ----  pair: VR  x  ATOM  -------------------------------------------------
+    if (vr_ && atom_) {
+        checkLattice(vr_->lattice, atom_->lattice, "VR vs ATOM");
+    } else {
+        debug("VR vs ATOM");
+    }
+
+    // ----  pair: VR  x  WG  ---------------------------------------------------
+    if (vr_ && wg_) {
+        checkInt(vr_->meta.n1, wg_->meta.n1, "n1 [VR vs WG]");
+        checkInt(vr_->meta.n2, wg_->meta.n2, "n2 [VR vs WG]");
+        checkInt(vr_->meta.n3, wg_->meta.n3, "n3 [VR vs WG]");
+    } else {
+        debug("VR vs WG");
+    }
+
+    // ----  pair: RHO  x  VR  -------------------------------------------------
+    if (rho_ && vr_) {
+        const auto& r = rho_->meta;
+        const auto& v = vr_->meta;
+        checkInt(r.n1,     v.n1,     "n1    [RHO vs VR]");
+        checkInt(r.n2,     v.n2,     "n2    [RHO vs VR]");
+        checkInt(r.n3,     v.n3,     "n3    [RHO vs VR]");
+        checkInt(r.nnodes, v.nnodes, "nnodes[RHO vs VR]");
+        checkInt(r.nstate, v.nstate, "nstate[RHO vs VR]");
+        checkLattice(rho_->lattice, vr_->lattice, "RHO vs VR");
+    } else {
+        debug("RHO vs VR");
+    }
+
+    // ----  pair: RHO  x  ATOM  -----------------------------------------------
+    if (rho_ && atom_) {
+        checkLattice(rho_->lattice, atom_->lattice, "RHO vs ATOM");
+    } else {
+        debug("RHO vs ATOM");
+    }
+
+    // ----  pair: RHO  x  GKK  ------------------------------------------------
+    if (rho_ && gkk_) {
+        const auto& r = rho_->meta;
+        const auto& g = gkk_->meta;
+        checkInt(r.n1,     g.n1,     "n1    [RHO vs GKK]");
+        checkInt(r.n2,     g.n2,     "n2    [RHO vs GKK]");
+        checkInt(r.n3,     g.n3,     "n3    [RHO vs GKK]");
+        checkInt(r.nnodes, g.nnodes, "nnodes[RHO vs GKK]");
+        checkLattice(rho_->lattice, g.lattice, "RHO vs GKK");
+    } else {
+        debug("RHO vs GKK");
+    }
+
+    // ----  pair: RHO  x  WG  -------------------------------------------------
+    if (rho_ && wg_) {
+        checkInt(rho_->meta.n1, wg_->meta.n1, "n1 [RHO vs WG]");
+        checkInt(rho_->meta.n2, wg_->meta.n2, "n2 [RHO vs WG]");
+        checkInt(rho_->meta.n3, wg_->meta.n3, "n3 [RHO vs WG]");
+    } else {
+        debug("RHO vs WG");
+    }
+
+    // ----  NCPPs  x  ATOM  ----------------------------------------------------
+    if (!ncpps_.empty() && atom_) {
+        // Only check that every ATOM species has a matching NCPP.
+        // Extra NCPPs are allowed (over-loading).
+        for (int it = 0; it < atom_->ntyp; ++it) {
+            int         z        = atom_->zvals[it];
+            string_view expected = ATOM::elementName(z);
+            bool found = false;
+            for (const auto& p : ncpps_) {
+                if (p.meta.element == expected) { found = true; break; }
+            }
+            if (found) {
+                log.log(LogLevel::Info, "  ✓ element {} [NCPP vs ATOM]", expected);
+            } else {
+                log.log(LogLevel::Info, "  ✗ element {} [NCPP vs ATOM]: no matching UPF", expected);
+                throw runtime_error(
+                    format("Hamiltonian consistency: no NCPP for element {} (Z={})",
+                           expected, z));
+            }
+        }
+    } else {
+        debug("NCPP vs ATOM");
+    }
+
+    log.log(LogLevel::Info, "[Hamiltonian] consistency check complete");
+}

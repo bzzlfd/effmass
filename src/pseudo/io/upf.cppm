@@ -236,7 +236,9 @@ auto UPF::readHeader(const pugi::xml_node& root) -> void {
     if (pp_header.attribute("wfc_cutoff")) {
         header_.wfc_cutoff = getAttrDouble(pp_header, "wfc_cutoff");
     }
-    header_.rho_cutoff      = getAttrDouble(pp_header, "rho_cutoff");
+    if (pp_header.attribute("rho_cutoff")) {
+        header_.rho_cutoff = getAttrDouble(pp_header, "rho_cutoff");
+    }
     header_.l_max           = getAttrInt(pp_header, "l_max");
     header_.l_local         = getAttrInt(pp_header, "l_local");
     header_.mesh_size       = getAttrInt(pp_header, "mesh_size");

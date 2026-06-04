@@ -65,3 +65,8 @@ add_test(NAME test-math-linalg COMMAND test-math-linalg WORKING_DIRECTORY ${CMAK
 add_executable(test-wg-fft test_wg_fft.cpp)
 target_link_libraries(test-wg-fft PRIVATE io math)
 add_test(NAME test-wg-fft COMMAND test-wg-fft WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Hamiltonian tests
+add_executable(test-hamiltonian test_hamiltonian.cpp)
+target_link_libraries(test-hamiltonian PRIVATE H_psi)
+add_test(NAME test-hamiltonian COMMAND test-hamiltonian WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

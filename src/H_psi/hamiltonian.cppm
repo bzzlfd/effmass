@@ -3,6 +3,8 @@ module;
 export module H_psi.hamiltonian;
 
 import std;
+import io;
+import pseudo;
 
 // ===================================================================
 //  KDir — Cartesian direction specifier for gradient/hessian
@@ -16,7 +18,16 @@ export {
 }
 
 // ===========================================================================
-//  Hamiltonian  —  shared data container that owns nothing
+//  Hamiltonian  —  owns input data files for H|ψ⟩ / gradient / hessian
+//
+//  Data is loaded incrementally via loadXxx() methods.  Each load triggers
+//  cross-file consistency checks that log what was verified.
+//
+//  Always-needed:  GKK, WG, ATOM, NCPPs
+//  Optional:       VR, RHO
+//                  EIGEN
+//
+//  k-point coordinates always come from GKK (inferCurrent_k).
 //
 //  Three groups (peers at the Hamiltonian level):
 //    1.  Callable          —  H|ψ⟩             H.at_k()
@@ -31,6 +42,35 @@ export {
     class Hamiltonian {
     public:
         Hamiltonian() = default;
+
+        // --- step-by-step loading ---
+        auto loadGKK(const std::string& path) -> void;
+        auto loadWG(const std::string& path) -> void;
+        auto loadVR(const std::string& path) -> void;
+        auto loadRHO(const std::string& path) -> void;
+        auto loadATOM(const std::string& path) -> void;
+        auto loadEIGEN(const std::string& path) -> void;
+        auto loadNCPPs(const std::string& directory) -> void;
+
+        /// Convenience: load everything from a working directory.
+        auto loadFromDirectory(const std::string& directory) -> void;
+
+        // --- queries ---
+        auto hasGKK()   const -> bool { return gkk_.has_value(); }
+        auto hasWG()    const -> bool { return wg_.has_value(); }
+        auto hasVR()    const -> bool { return vr_.has_value(); }
+        auto hasRHO()   const -> bool { return rho_.has_value(); }
+        auto hasATOM()  const -> bool { return atom_.has_value(); }
+        auto hasEIGEN() const -> bool { return eigen_.has_value(); }
+
+        // --- owned data access (throws if not loaded) ---
+        auto gkk()   const -> const GKK&;
+        auto wg()    const -> const WG&;
+        auto vr()    const -> const VR&;
+        auto rho()   const -> const RHO&;
+        auto atom()  const -> const ATOM&;
+        auto eigen() const -> const EIGEN&;
+        auto ncpp(int atomic_number) const -> const NCPP&;
 
         // -------------------------------------------------------------------
         //  1.  Callable  —  H|ψ⟩ at fixed k
@@ -136,9 +176,14 @@ export {
         auto hessian() const -> Hessian { return Hessian(this); }
 
     private:
-        // Data references — filled when real types are available
-        // const GKK& gkk_;
-        // const FFT3D& fft_;
-        // std::span<const double> vlocal_;
+        std::optional<GKK>   gkk_;
+        std::optional<WG>    wg_;
+        std::optional<VR>    vr_;
+        std::optional<RHO>   rho_;
+        std::optional<ATOM>  atom_;
+        std::optional<EIGEN> eigen_;
+        std::vector<NCPP>    ncpps_;
+
+        auto checkConsistency() const -> void;
     };
 }
