@@ -4,6 +4,13 @@ export module io.ATOM;
 
 import std;
 import io.lattice;
+import utils.vector3d;
+
+// --- forward declarations for archived reference classes ---
+namespace archived {
+    class TypeView;
+    class TypeAtomView;
+}
 
 
 export {
@@ -27,30 +34,26 @@ public:
     // parsed data (as-read order, unsorted)
     int natom{};
     Lattice lattice;
+    // Note: separate vectors (species / x / y / z) rather than vector<Atom>.
+    // Tradeoffs: flat arrays let callers pass individual buffers, and are
+    // compact when only species are needed; sorting requires an external
+    // permutation (typeSort_order_) instead of a trivial struct-sort.
+    //
+    // Positions are stored as vector3d<double> (fractional coordinates).
     std::vector<int> species;
-    std::vector<double> x, y, z;   // fractional coordinates
+    std::vector<vector3d<double>> frac_coord;
 
     // species analysis (computed during construction)
-    //
-    // Approach: separate vectors (species / x / y / z) rather than a vector of
-    // struct Atom{int species; double x,y,z;}.  Tradeoffs:
-    //   + flat arrays let callers pass individual buffers without unpacking
-    //   + compact when only species (not positions) are needed
-    //   - sorting requires an external permutation instead of a trivial struct-sort
-    //   - the permutation (sorted_idx) must be maintained explicitly
-    // The struct approach would make sorting trivial but loses the flat-buffer
-    // advantage.  For this use-case (moderate natom) the choice is stylistic;
-    // separate vectors are used here to match the project's flat-array idiom.
     int ntyp{};                     // number of distinct species types
-    std::vector<int> atomic_numbers;          // atomic_numbers[it] = atomic number, sorted ascending, length ntyp
-    std::vector<int> type_counts;    // type_counts[it] = how many atoms of that type, length ntyp
-    std::vector<int> atom_types;     // atom_types[ia] = which type (0..ntyp-1) atom ia belongs to
-    std::vector<int> sorted_idx;    // sorted_idx[new] = old — permutation grouping atoms by type
+
 
     // --- iteration views ---
-    struct TypeEntry { int z; int count; };
-    struct AtomEntry { int specie; double x, y, z; };
+    struct TypeDatum { int z; int count; int ityp; };
+    struct AtomDatum { int species; vector3d<double> coord; };
 
+    // Iterate over each species type in ascending Z order.
+    // Each step yields TypeDatum{z, count, ityp} for one type.
+    // Usage: for (auto&& t : atom.eachType())
     class TypeView {
         friend class ATOM;
         const ATOM* a_;
@@ -62,7 +65,7 @@ public:
             int it_;
             Iterator(const ATOM* a, int it) : a_(a), it_(it) {}
           public:
-            auto operator*() const -> TypeEntry { return {a_->atomic_numbers[it_], a_->type_counts[it_]}; }
+            auto operator*() const -> TypeDatum { return {a_->typeGroup_z_[it_], a_->typeGroup_count_[it_], it_}; }
             auto operator++() -> Iterator& { ++it_; return *this; }
             bool operator!=(const Iterator& o) const { return it_ != o.it_; }
         };
@@ -70,27 +73,59 @@ public:
         auto end() const { return Iterator(a_, a_->ntyp); }
     };
 
-    class AtomView {
+    // Iterate over species types in a caller-specified order.
+    // `order` is a sequence of type indices (0..ntyp-1) in the desired
+    // iteration order.  Each step yields TypeDatum{z, count, ityp}.
+    // Usage: for (auto&& t : atom.eachType({2, 0, 1}))
+    class TypeOrderView {
+        friend class ATOM;
+        const ATOM* a_;
+        std::span<const int> order_;
+        TypeOrderView(const ATOM* a, std::span<const int> order) : a_(a), order_(order) {}
+      public:
+        class Iterator {
+            friend class TypeOrderView;
+            const ATOM* a_;
+            const int* order_;
+            int pos_;
+            Iterator(const ATOM* a, const int* order, int pos) : a_(a), order_(order), pos_(pos) {}
+          public:
+            auto operator*() const -> TypeDatum {
+                int it = order_[pos_];
+                return {a_->typeGroup_z_[it], a_->typeGroup_count_[it], it};
+            }
+            auto operator++() -> Iterator& { ++pos_; return *this; }
+            bool operator!=(const Iterator& o) const { return pos_ != o.pos_; }
+        };
+        auto begin() const { return Iterator(a_, order_.data(), 0); }
+        auto end() const { return Iterator(a_, order_.data(), static_cast<int>(order_.size())); }
+    };
+
+    // Iterate over all atoms of a given type, in type-grouped order
+    // (i.e. the order produced by typeSort_order_).
+    // Each step yields AtomDatum{species, x, y, z}.
+    // Usage: for (auto&& a : atom.eachTypeAtom(ityp))
+    class TypeAtomView {
         friend class ATOM;
         const ATOM* a_;
         int start_;
         int count_;
-        AtomView(const ATOM* a, int ityp) : a_(a) {
+        TypeAtomView(const ATOM* a, int ityp) : a_(a) {
             start_ = 0;
-            for (int t = 0; t < ityp; ++t) start_ += a->type_counts[t];
-            count_ = a->type_counts[ityp];
+            for (int t = 0; t < ityp; ++t) start_ += a->typeGroup_count_[t];
+            count_ = a->typeGroup_count_[ityp];
         }
     public:
         class Iterator {
-            friend class AtomView;
+            friend class TypeAtomView;
             const ATOM* a_;
             int start_;
             int k_;
             Iterator(const ATOM* a, int start, int k) : a_(a), start_(start), k_(k) {}
         public:
-            auto operator*() const -> AtomEntry {
-                int orig = a_->sorted_idx[start_ + k_];
-                return {a_->species[orig], a_->x[orig], a_->y[orig], a_->z[orig]};
+            auto operator*() const -> AtomDatum {
+                int orig = a_->typeSort_order_[start_ + k_];
+                return {a_->species[orig], a_->frac_coord[orig]};
             }
             auto operator++() -> Iterator& { ++k_; return *this; }
             bool operator!=(const Iterator& o) const { return k_ != o.k_; }
@@ -99,6 +134,9 @@ public:
         auto end() const { return Iterator(a_, start_, count_); }
     };
 
+    // Iterate over all atoms in the original file-read order.
+    // Each step yields AtomDatum{species, x, y, z}.
+    // Usage: for (auto&& a : atom.eachSpecie())
     class SpecieView {
         friend class ATOM;
         const ATOM* a_;
@@ -110,8 +148,8 @@ public:
             int i_;
             Iterator(const ATOM* a, int i) : a_(a), i_(i) {}
         public:
-            auto operator*() const -> AtomEntry {
-                return {a_->species[i_], a_->x[i_], a_->y[i_], a_->z[i_]};
+            auto operator*() const -> AtomDatum {
+                return {a_->species[i_], a_->frac_coord[i_]};
             }
             auto operator++() -> Iterator& { ++i_; return *this; }
             bool operator!=(const Iterator& o) const { return i_ != o.i_; }
@@ -121,10 +159,21 @@ public:
     };
 
     auto eachType() const -> TypeView { return TypeView(this); }
-    auto eachAtom(int ityp) const -> AtomView { return AtomView(this, ityp); }
+    auto eachType(std::span<const int> order) const -> TypeOrderView { return TypeOrderView(this, order); }
+    auto eachTypeAtom(int ityp) const -> TypeAtomView { return TypeAtomView(this, ityp); }
     auto eachSpecie() const -> SpecieView { return SpecieView(this); }
 
 private:
+    friend class archived::TypeView;
+    friend class archived::TypeAtomView;
+
+    std::vector<int> typeGroup_z_;            // typeGroup_z_[it] = atomic number Z, sorted ascending, length ntyp
+    std::vector<int> typeGroup_count_;        // typeGroup_count_[it] = how many atoms of that type, length ntyp
+    std::vector<int> atom_type_idx_;          // atom_type_idx_[ia] = which type (0..ntyp-1) atom ia belongs to
+
+    // typeSort_order_[k] = original index of k-th atom when grouped by type
+    std::vector<int> typeSort_order_;
+
     auto analyzeSpecies() -> void;
 
 };
@@ -150,9 +199,7 @@ auto trimTrailing(char* p) -> void {
 
 auto parseAtomConfigFile(std::FILE* fp, int& natom, Lattice& lattice,
                          std::vector<int>& species,
-                         std::vector<double>& x,
-                         std::vector<double>& y,
-                         std::vector<double>& z) -> void
+                         std::vector<vector3d<double>>& coords) -> void
 {
     char line[1024];
 
@@ -191,9 +238,7 @@ auto parseAtomConfigFile(std::FILE* fp, int& natom, Lattice& lattice,
         }
         else if (std::strcmp(p, "POSITION") == 0) {
             species.resize(natom);
-            x.resize(natom);
-            y.resize(natom);
-            z.resize(natom);
+            coords.resize(natom);
             for (int i = 0; i < natom; ++i) {
                 if (!std::fgets(line, sizeof(line), fp)) {
                     throw std::runtime_error(
@@ -203,9 +248,10 @@ auto parseAtomConfigFile(std::FILE* fp, int& natom, Lattice& lattice,
                 }
                 char* ep;
                 species[i] = static_cast<int>(std::strtol(line, &ep, 10));
-                x[i] = std::strtod(ep, &ep);
-                y[i] = std::strtod(ep, &ep);
-                z[i] = std::strtod(ep, nullptr);
+                double fx = std::strtod(ep, &ep);
+                double fy = std::strtod(ep, &ep);
+                double fz = std::strtod(ep, nullptr);
+                coords[i] = {fx, fy, fz};
             }
             position_found = true;
         }
@@ -231,7 +277,7 @@ ATOM::ATOM(const std::string& filename) {
         throw std::runtime_error("Cannot open file: " + filename);
     }
     try {
-        parseAtomConfigFile(fp, natom, lattice, species, x, y, z);
+        parseAtomConfigFile(fp, natom, lattice, species, frac_coord);
     } catch (...) {
         std::fclose(fp);
         throw;
@@ -242,30 +288,30 @@ ATOM::ATOM(const std::string& filename) {
 
 
 auto ATOM::analyzeSpecies() -> void {
-    // 1. sort unique species → atomic_numbers
+    // 1. sort unique species → type_z
     auto sorted_species = species;
     std::ranges::sort(sorted_species);
-    atomic_numbers.clear();
+    typeGroup_z_.clear();
     for (int z : sorted_species) {
-        if (atomic_numbers.empty() || atomic_numbers.back() != z) atomic_numbers.push_back(z);
+        if (typeGroup_z_.empty() || typeGroup_z_.back() != z) typeGroup_z_.push_back(z);
     }
-    ntyp = static_cast<int>(atomic_numbers.size());
+    ntyp = static_cast<int>(typeGroup_z_.size());
 
     // 2. count atoms per type
-    type_counts.assign(ntyp, 0);
-    atom_types.resize(natom);
+    typeGroup_count_.assign(ntyp, 0);
+    atom_type_idx_.resize(natom);
     for (int i = 0; i < natom; ++i) {
-        auto it = std::ranges::lower_bound(atomic_numbers, species[i]);
-        int ityp = static_cast<int>(it - atomic_numbers.begin());
-        atom_types[i] = ityp;
-        ++type_counts[ityp];
+        auto it = std::ranges::lower_bound(typeGroup_z_, species[i]);
+        int ityp = static_cast<int>(it - typeGroup_z_.begin());
+        atom_type_idx_[i] = ityp;
+        ++typeGroup_count_[ityp];
     }
 
     // 3. permutation that groups atoms by type (stable within type)
-    sorted_idx.resize(natom);
-    std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
-    std::ranges::stable_sort(sorted_idx, [&](int a, int b) {
-        return atom_types[a] < atom_types[b];
+    typeSort_order_.resize(natom);
+    std::iota(typeSort_order_.begin(), typeSort_order_.end(), 0);
+    std::ranges::stable_sort(typeSort_order_, [&](int a, int b) {
+        return atom_type_idx_[a] < atom_type_idx_[b];
     });
 }
 
@@ -324,12 +370,13 @@ auto ATOM::print_info() const -> void {
                      A_ang[i][0], A_ang[i][1], A_ang[i][2]);
     }
     for (int it = 0; it < ntyp; ++it) {
-        std::println("  type {}: Z = {}, count = {}", it, atomic_numbers[it], type_counts[it]);
+        std::println("  type {}: Z = {}, count = {}", it, typeGroup_z_[it], typeGroup_count_[it]);
     }
     int nshow = (std::cmp_less(natom, 5)) ? natom : 5;
     for (int i = 0; i < nshow; ++i) {
         std::println("  atom[{}]: species={}, type={},  frac=({:.8f}, {:.8f}, {:.8f})",
-                     i, species[i], atom_types[i], x[i], y[i], z[i]);
+                     i, species[i], atom_type_idx_[i],
+                     frac_coord[i].x, frac_coord[i].y, frac_coord[i].z);
     }
     if (std::cmp_greater(natom, 5)) {
         std::println("  ... and {} more atoms", natom - 5);
@@ -339,7 +386,7 @@ auto ATOM::print_info() const -> void {
 
 // --- archived: alternative "view-as-iterator" iteration pattern (module-internal, for reference) ---
 //
-// Compared to the main ATOM iteration views (eachType / eachAtom / eachSpecie):
+// Compared to the main ATOM iteration views (eachType / eachTypeAtom / eachSpecie):
 //   - View class IS the iterator: all 5 range-for operations on one class
 //   - No separate Iterator nested class
 //   - Uses EndTag sentinel so end() returns a non-dereferenceable type
@@ -357,7 +404,7 @@ class TypeView {
     friend ATOM;
     TypeView(const ATOM* a, int it) : a_(a), it_(it) {}
 public:
-    auto operator*() const -> ATOM::TypeEntry { return {a_->atomic_numbers[it_], a_->type_counts[it_]}; }
+    auto operator*() const -> ATOM::TypeDatum { return {a_->typeGroup_z_[it_], a_->typeGroup_count_[it_], it_}; }
     auto operator++() -> TypeView& { ++it_; return *this; }
     bool operator!=(EndTag) const { return it_ < a_->ntyp; }
 
@@ -366,26 +413,26 @@ public:
 };
 
 
-class AtomView {
+class TypeAtomView {
     const ATOM* a_ = nullptr;
     int start_ = 0;
     int k_ = 0;
     int count_ = 0;
     friend ATOM;
-    AtomView(const ATOM* a, int ityp) : a_(a) {
+    TypeAtomView(const ATOM* a, int ityp) : a_(a) {
         start_ = 0;
-        for (int t = 0; t < ityp; ++t) start_ += a->type_counts[t];
-        count_ = a->type_counts[ityp];
+        for (int t = 0; t < ityp; ++t) start_ += a->typeGroup_count_[t];
+        count_ = a->typeGroup_count_[ityp];
     }
 public:
-    auto operator*() const -> ATOM::AtomEntry {
-        int orig = a_->sorted_idx[start_ + k_];
-        return {a_->species[orig], a_->x[orig], a_->y[orig], a_->z[orig]};
+    auto operator*() const -> ATOM::AtomDatum {
+        int orig = a_->typeSort_order_[start_ + k_];
+        return {a_->species[orig], a_->frac_coord[orig]};
     }
-    auto operator++() -> AtomView& { ++k_; return *this; }
+    auto operator++() -> TypeAtomView& { ++k_; return *this; }
     bool operator!=(EndTag) const { return k_ < count_; }
 
-    auto begin() const -> AtomView { return *this; }
+    auto begin() const -> TypeAtomView { return *this; }
     auto end() const -> EndTag { return {}; }
 };
 
@@ -396,8 +443,8 @@ class SpecieView {
     friend ATOM;
     SpecieView(const ATOM* a, int i) : a_(a), i_(i) {}
 public:
-    auto operator*() const -> ATOM::AtomEntry {
-        return {a_->species[i_], a_->x[i_], a_->y[i_], a_->z[i_]};
+    auto operator*() const -> ATOM::AtomDatum {
+        return {a_->species[i_], a_->frac_coord[i_]};
     }
     auto operator++() -> SpecieView& { ++i_; return *this; }
     bool operator!=(EndTag) const { return i_ < a_->natom; }

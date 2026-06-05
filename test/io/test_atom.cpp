@@ -89,29 +89,25 @@ auto main() -> int {
 
             // --- species analysis ---
             check(atom.ntyp == 2, "ntyp != 2");
-            check(atom.atomic_numbers[0] ==  7, "atomic_numbers[0] != 7");
-            check(atom.atomic_numbers[1] == 13, "atomic_numbers[1] != 13");
-            check(atom.type_counts[0] == 2, "type_counts[0] != 2");
-            check(atom.type_counts[1] == 2, "type_counts[1] != 2");
-            std::println("  ntyp = {}, atomic_numbers = [{}, {}], counts = [{}, {}] [OK]",
-                         atom.ntyp, atom.atomic_numbers[0], atom.atomic_numbers[1],
-                         atom.type_counts[0], atom.type_counts[1]);
 
-            // atom_types: original order: [13, 13, 7, 7] → type [1, 1, 0, 0]
-            check(atom.atom_types[0] == 1, "atom_types[0] != 1");
-            check(atom.atom_types[1] == 1, "atom_types[1] != 1");
-            check(atom.atom_types[2] == 0, "atom_types[2] != 0");
-            check(atom.atom_types[3] == 0, "atom_types[3] != 0");
+            // type info via eachType()
+            {
+                int seen = 0;
+                int expected_z[] = {7, 13};
+                int expected_count[] = {2, 2};
+                for (auto&& t : atom.eachType()) {
+                    check(t.z == expected_z[seen], "eachType: Z mismatch");
+                    check(t.count == expected_count[seen], "eachType: count mismatch");
+                    ++seen;
+                }
+                check(seen == 2, "eachType: expected 2 types");
+                std::println("  ntyp = {}, eachType = [Z={}(x{}), Z={}(x{})] [OK]",
+                             atom.ntyp,
+                             expected_z[0], expected_count[0],
+                             expected_z[1], expected_count[1]);
+            }
 
-            // sorted_idx: groups by type → [type0=7, type0=7, type1=13, type1=13]
-            //             → original indices: [2, 3, 0, 1]
-            check(atom.sorted_idx[0] == 2, "sorted_idx[0] != 2");
-            check(atom.sorted_idx[1] == 3, "sorted_idx[1] != 3");
-            check(atom.sorted_idx[2] == 0, "sorted_idx[2] != 0");
-            check(atom.sorted_idx[3] == 1, "sorted_idx[3] != 1");
-            std::println("  sorted_idx = [{}, {}, {}, {}] [OK]",
-                         atom.sorted_idx[0], atom.sorted_idx[1],
-                         atom.sorted_idx[2], atom.sorted_idx[3]);
+            // iteration views below verify the grouping indirectly.
 
             // --- iteration views ---
             {
@@ -122,33 +118,50 @@ auto main() -> int {
                     if (seen_types == 0) {
                         check(t.z == 7, "eachType[0]: z != 7");
                         check(t.count == 2, "eachType[0]: count != 2");
+                        check(t.ityp == 0, "eachType[0]: ityp != 0");
                     } else {
                         check(t.z == 13, "eachType[1]: z != 13");
                         check(t.count == 2, "eachType[1]: count != 2");
+                        check(t.ityp == 1, "eachType[1]: ityp != 1");
                     }
                     ++seen_types;
                 }
                 check(seen_types == 2, "eachType: expected 2 types");
                 std::println("  eachType [OK]");
+
+                // eachType with custom order: Al then N
+                {
+                    int custom_order[] = {1, 0};
+                    int seen = 0;
+                    int expected_z[] = {13, 7};
+                    int expected_ityp[] = {1, 0};
+                    for (auto&& t : atom.eachType(custom_order)) {
+                        check(t.z == expected_z[seen], "eachType(order): Z mismatch");
+                        check(t.ityp == expected_ityp[seen], "eachType(order): ityp mismatch");
+                        ++seen;
+                    }
+                    check(seen == 2, "eachType(order): expected 2 types");
+                    std::println("  eachType(custom order) [OK]");
+                }
             }
 
             {
-                // eachAtom(0) = type N (Z=7): 2 atoms
+                // eachTypeAtom(0) = type N (Z=7): 2 atoms
                 int count0 = 0;
-                for (auto&& a : atom.eachAtom(0)) {
-                    check(a.specie == 7, std::format("eachAtom(0)[{}]: species != 7", count0));
+                for (auto&& a : atom.eachTypeAtom(0)) {
+                    check(a.species == 7, std::format("eachTypeAtom(0)[{}]: species != 7", count0));
                     ++count0;
                 }
-                check(count0 == 2, "eachAtom(0): expected 2 atoms");
+                check(count0 == 2, "eachTypeAtom(0): expected 2 atoms");
 
-                // eachAtom(1) = type Al (Z=13): 2 atoms
+                // eachTypeAtom(1) = type Al (Z=13): 2 atoms
                 int count1 = 0;
-                for (auto&& a : atom.eachAtom(1)) {
-                    check(a.specie == 13, std::format("eachAtom(1)[{}]: species != 13", count1));
+                for (auto&& a : atom.eachTypeAtom(1)) {
+                    check(a.species == 13, std::format("eachTypeAtom(1)[{}]: species != 13", count1));
                     ++count1;
                 }
-                check(count1 == 2, "eachAtom(1): expected 2 atoms");
-                std::println("  eachAtom [OK]");
+                check(count1 == 2, "eachTypeAtom(1): expected 2 atoms");
+                std::println("  eachTypeAtom [OK]");
             }
 
             {
@@ -156,46 +169,18 @@ auto main() -> int {
                 int idx = 0;
                 int expected[] = {13, 13, 7, 7};
                 for (auto&& a : atom.eachSpecie()) {
-                    check(a.specie == expected[idx],
-                          std::format("eachSpecie[{}]: species {} != expected {}", idx, a.specie, expected[idx]));
+                    check(a.species == expected[idx],
+                          std::format("eachSpecie[{}]: species {} != expected {}", idx, a.species, expected[idx]));
                     ++idx;
                 }
                 check(idx == 4, "eachSpecie: expected 4 atoms");
                 std::println("  eachSpecie [OK]");
             }
 
-            // sorted_idx is a valid permutation: each index 0..natom-1 appears exactly once
-            {
-                std::vector<bool> seen(atom.natom, false);
-                for (int k = 0; k < atom.natom; ++k) {
-                    int idx = atom.sorted_idx[k];
-                    check(idx >= 0 && idx < atom.natom, "sorted_idx: out of range");
-                    check(!seen[idx], "sorted_idx: duplicate");
-                    seen[idx] = true;
-                }
-                for (int i = 0; i < atom.natom; ++i) {
-                    check(seen[i], std::format("sorted_idx: index {} missing", i));
-                }
-            }
-
-            // sorted_idx groups atoms by type
-            for (int k = 1; k < atom.natom; ++k) {
-                int ta = atom.atom_types[atom.sorted_idx[k - 1]];
-                int tb = atom.atom_types[atom.sorted_idx[k]];
-                check(ta <= tb, std::format("sorted_idx: type out of order at k={}", k));
-            }
-            std::println("  sorted_idx groups by type [OK]");
-
             // --- move semantics ---
             ATOM moved = std::move(atom);
             check(moved.natom == 4, "natom lost after move");
             check(moved.ntyp  == 2, "ntyp lost after move");
-            check(moved.atomic_numbers.size() == 2, "atomic_numbers lost after move");
-            check(moved.sorted_idx.size() == 4, "sorted_idx lost after move");
-            // Default move leaves int members unchanged in source,
-            // but transfers vector ownership (empty after move).
-            check(atom.atomic_numbers.empty(), "source atomic_numbers not transferred after move");
-            check(atom.sorted_idx.empty(), "source sorted_idx not transferred after move");
             std::println("  move semantics [OK]");
 
             // --- print_info ---

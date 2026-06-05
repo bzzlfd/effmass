@@ -569,9 +569,8 @@ auto Hamiltonian::checkPart2() -> void {
     //  NCPP ↔ ATOM  —  every ATOM species has a matching UPF
     // ------------------------------------------------------------------
     if (!ncpps_.empty() && atom_) {
-        for (int it = 0; it < atom_->ntyp; ++it) {
-            int         atomic_number = atom_->atomic_numbers[it];
-            string_view expected = ATOM::elementName(atomic_number);
+        for (auto&& t : atom_->eachType()) {
+            string_view expected = ATOM::elementName(t.z);
             bool found = false;
             for (const auto& p : ncpps_) {
                 if (p.meta.element == expected) { found = true; break; }
@@ -582,7 +581,7 @@ auto Hamiltonian::checkPart2() -> void {
                 log.log(LogLevel::Info, "  ✗ element {} [NCPP vs ATOM]: no matching UPF", expected);
                 throw runtime_error(
                     format("Hamiltonian consistency: no NCPP for element {} (Z={})",
-                           expected, atomic_number));
+                           expected, t.z));
             }
         }
     }
@@ -649,13 +648,11 @@ auto Hamiltonian::checkConsistencyExtended(std::initializer_list<ExtendedCheck> 
             log.log(LogLevel::Info, "    skipped — missing data (need ATOM+RHO+NCPPs)");
         } else {
             double total_valence = 0.0;
-            for (int it = 0; it < atom_->ntyp; ++it) {
-                int atomic_number = atom_->atomic_numbers[it];
-                int count = atom_->type_counts[it];
-                std::string_view name = ATOM::elementName(atomic_number);
+            for (auto&& t : atom_->eachType()) {
+                std::string_view name = ATOM::elementName(t.z);
                 for (const auto& p : ncpps_) {
                     if (p.meta.element == name) {
-                        total_valence += p.meta.z_valence * count;
+                        total_valence += p.meta.z_valence * t.count;
                         break;
                     }
                 }
