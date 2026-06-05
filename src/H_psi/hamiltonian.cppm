@@ -7,6 +7,17 @@ import io;
 import pseudo;
 
 // ===================================================================
+//  ExtendedCheck  —  select which heavyweight checks to run in
+//                    checkConsistencyExtended()
+// ===================================================================
+export {
+    enum class ExtendedCheck : int {
+        RHOReconstruct,   // Σ occ·|WG|² → FFT → RHO'  vs  file RHO
+        ValenceCount,     // Σ(NCPP.z_valence × count)  ≈  ∫RHO d³r
+    };
+}
+
+// ===================================================================
 //  KDir — Cartesian direction specifier for gradient/hessian
 // ===================================================================
 export {
@@ -180,6 +191,10 @@ export {
         };
         auto hessian() const -> Hessian { return Hessian(this); }
 
+        // -- Part 3 (explicit user invocation) --
+        auto checkConsistencyExtended() -> void;
+        auto checkConsistencyExtended(std::initializer_list<ExtendedCheck> checks) -> void;
+
     private:
         std::filesystem::path base_dir_;
         std::optional<GKK>   gkk_;
@@ -215,6 +230,5 @@ export {
         auto checkConsistency() -> void;
         auto checkPart1() -> void;
         auto checkPart2() -> void;
-        auto checkConsistencyExtended() -> void;
     };
 }

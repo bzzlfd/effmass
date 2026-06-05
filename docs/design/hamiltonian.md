@@ -139,6 +139,19 @@ use(*canonical_lattice_);
 
 `checkConsistencyExtended()` — 用户按需调用，不自动触发。
 
+**选择性执行**：通过 `ExtendedCheck` 枚举指定要跑的检查，内部用 `std::uint64_t` bitmask 去重：
+
+```cpp
+// 全部重检查（数据未加载的 check 自动跳过）
+h.checkConsistencyExtended();
+
+// 只跑子集
+h.checkConsistencyExtended({
+    ExtendedCheck::RHOReconstruct,
+    ExtendedCheck::NCPPZVal,
+});
+```
+
 **定义**：需要通过 FFT、积分、或其他复杂计算才能验证物理自洽性的检查。
 
 **判定原则**：
@@ -146,10 +159,15 @@ use(*canonical_lattice_);
 - 验证的是物理自洽性而非文件一致性（例如"从 OCC+WG+GKK 重建的 RHO 是否与文件 RHO 一致"）
 - 通常是端到端的数据链路验证
 
-**计划中的 Part 3 检查：**
-- RHO 重建：OCC × |WG|² → FFT → 实空间累加 → vs 文件 RHO
-- 价电子数守恒：sum(ATOM.zvals) ≈ ∫RHO d³r
-- NCPP 价电子数 vs ATOM.zvals（每元素）
+**Part 3 检查清单：**
+
+| 检查 | 依赖数据 | 算法 | 容差 |
+|------|---------|------|------|
+| RHO 重建 | GKK+WG+OCC+RHO | OCC × |WG|² → FFT → 实空间 → vs 文件 RHO | RMSE < 1e-2 |
+| 价电子数 | ATOM+RHO+NCPPs | Σ(NCPP.z_val × count) ≈ ∫RHO d³r | diff ≤ 1.0 |
+| NCPP 价电子合理性 | NCPPs（及 ATOM 元素名） | 0 < z_val ≤ atomic_number | — |
+
+**实现模块**：重量级计算逻辑（`reconstructRHO`、`integrateRHO`、`compareRHO`）封装在 `H_psi.density_reconstruction` 模块中，可独立导入复用：
 
 ##### 三部分判定速查表
 

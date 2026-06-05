@@ -161,6 +161,38 @@ auto main() -> int {
         std::println("PASS: constructor rejects nonexistent directory");
     }
 
+    // =====================================================================
+    //  7. checkConsistencyExtended  —  Part 3 heavy checks
+    // =====================================================================
+    {
+        Hamiltonian h("test/data_io-nonlocal");
+        h.loadFromDirectory();
+
+        // All checks
+        h.checkConsistencyExtended();
+
+        // Individual checks
+        h.checkConsistencyExtended({ExtendedCheck::RHOReconstruct});
+        h.checkConsistencyExtended({ExtendedCheck::ValenceCount});
+
+        // Duplicate entries should be deduped
+        h.checkConsistencyExtended({
+            ExtendedCheck::RHOReconstruct,
+            ExtendedCheck::RHOReconstruct,
+        });
+
+        std::println("PASS: checkConsistencyExtended with all data");
+    }
+
+    {
+        // Partial data — checks that can't run should skip gracefully
+        Hamiltonian h("test/data_io-nonlocal");
+        h.loadATOM("atom.config");
+        h.loadGKK("OUT.GKK");
+        h.checkConsistencyExtended();   // all skip (no WG/OCC/RHO/NCPPs)
+        std::println("PASS: checkConsistencyExtended skips when data missing");
+    }
+
     std::println("\nAll tests passed.");
     return 0;
 }

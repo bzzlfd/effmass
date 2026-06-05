@@ -42,7 +42,7 @@ public:
     // advantage.  For this use-case (moderate natom) the choice is stylistic;
     // separate vectors are used here to match the project's flat-array idiom.
     int ntyp{};                     // number of distinct species types
-    std::vector<int> zvals;          // zvals[it] = atomic number, sorted ascending, length ntyp
+    std::vector<int> atomic_numbers;          // atomic_numbers[it] = atomic number, sorted ascending, length ntyp
     std::vector<int> type_counts;    // type_counts[it] = how many atoms of that type, length ntyp
     std::vector<int> atom_types;     // atom_types[ia] = which type (0..ntyp-1) atom ia belongs to
     std::vector<int> sorted_idx;    // sorted_idx[new] = old — permutation grouping atoms by type
@@ -62,7 +62,7 @@ public:
             int it_;
             Iterator(const ATOM* a, int it) : a_(a), it_(it) {}
           public:
-            auto operator*() const -> TypeEntry { return {a_->zvals[it_], a_->type_counts[it_]}; }
+            auto operator*() const -> TypeEntry { return {a_->atomic_numbers[it_], a_->type_counts[it_]}; }
             auto operator++() -> Iterator& { ++it_; return *this; }
             bool operator!=(const Iterator& o) const { return it_ != o.it_; }
         };
@@ -242,21 +242,21 @@ ATOM::ATOM(const std::string& filename) {
 
 
 auto ATOM::analyzeSpecies() -> void {
-    // 1. sort unique species → zvals
+    // 1. sort unique species → atomic_numbers
     auto sorted_species = species;
     std::ranges::sort(sorted_species);
-    zvals.clear();
+    atomic_numbers.clear();
     for (int z : sorted_species) {
-        if (zvals.empty() || zvals.back() != z) zvals.push_back(z);
+        if (atomic_numbers.empty() || atomic_numbers.back() != z) atomic_numbers.push_back(z);
     }
-    ntyp = static_cast<int>(zvals.size());
+    ntyp = static_cast<int>(atomic_numbers.size());
 
     // 2. count atoms per type
     type_counts.assign(ntyp, 0);
     atom_types.resize(natom);
     for (int i = 0; i < natom; ++i) {
-        auto it = std::ranges::lower_bound(zvals, species[i]);
-        int ityp = static_cast<int>(it - zvals.begin());
+        auto it = std::ranges::lower_bound(atomic_numbers, species[i]);
+        int ityp = static_cast<int>(it - atomic_numbers.begin());
         atom_types[i] = ityp;
         ++type_counts[ityp];
     }
@@ -324,7 +324,7 @@ auto ATOM::print_info() const -> void {
                      A_ang[i][0], A_ang[i][1], A_ang[i][2]);
     }
     for (int it = 0; it < ntyp; ++it) {
-        std::println("  type {}: Z = {}, count = {}", it, zvals[it], type_counts[it]);
+        std::println("  type {}: Z = {}, count = {}", it, atomic_numbers[it], type_counts[it]);
     }
     int nshow = (std::cmp_less(natom, 5)) ? natom : 5;
     for (int i = 0; i < nshow; ++i) {
@@ -357,7 +357,7 @@ class TypeView {
     friend ATOM;
     TypeView(const ATOM* a, int it) : a_(a), it_(it) {}
 public:
-    auto operator*() const -> ATOM::TypeEntry { return {a_->zvals[it_], a_->type_counts[it_]}; }
+    auto operator*() const -> ATOM::TypeEntry { return {a_->atomic_numbers[it_], a_->type_counts[it_]}; }
     auto operator++() -> TypeView& { ++it_; return *this; }
     bool operator!=(EndTag) const { return it_ < a_->ntyp; }
 

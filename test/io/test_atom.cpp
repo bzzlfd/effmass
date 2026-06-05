@@ -89,12 +89,12 @@ auto main() -> int {
 
             // --- species analysis ---
             check(atom.ntyp == 2, "ntyp != 2");
-            check(atom.zvals[0] ==  7, "zvals[0] != 7");
-            check(atom.zvals[1] == 13, "zvals[1] != 13");
+            check(atom.atomic_numbers[0] ==  7, "atomic_numbers[0] != 7");
+            check(atom.atomic_numbers[1] == 13, "atomic_numbers[1] != 13");
             check(atom.type_counts[0] == 2, "type_counts[0] != 2");
             check(atom.type_counts[1] == 2, "type_counts[1] != 2");
-            std::println("  ntyp = {}, zvals = [{}, {}], counts = [{}, {}] [OK]",
-                         atom.ntyp, atom.zvals[0], atom.zvals[1],
+            std::println("  ntyp = {}, atomic_numbers = [{}, {}], counts = [{}, {}] [OK]",
+                         atom.ntyp, atom.atomic_numbers[0], atom.atomic_numbers[1],
                          atom.type_counts[0], atom.type_counts[1]);
 
             // atom_types: original order: [13, 13, 7, 7] → type [1, 1, 0, 0]
@@ -190,11 +190,11 @@ auto main() -> int {
             ATOM moved = std::move(atom);
             check(moved.natom == 4, "natom lost after move");
             check(moved.ntyp  == 2, "ntyp lost after move");
-            check(moved.zvals.size() == 2, "zvals lost after move");
+            check(moved.atomic_numbers.size() == 2, "atomic_numbers lost after move");
             check(moved.sorted_idx.size() == 4, "sorted_idx lost after move");
             // Default move leaves int members unchanged in source,
             // but transfers vector ownership (empty after move).
-            check(atom.zvals.empty(), "source zvals not transferred after move");
+            check(atom.atomic_numbers.empty(), "source atomic_numbers not transferred after move");
             check(atom.sorted_idx.empty(), "source sorted_idx not transferred after move");
             std::println("  move semantics [OK]");
 

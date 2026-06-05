@@ -553,7 +553,7 @@ public:
 
     // species analysis (computed during construction)
     int ntyp{};
-    std::vector<int> zvals;       // ntyp
+    std::vector<int> atomic_numbers;       // ntyp
     std::vector<int> type_counts; // ntyp
     std::vector<int> atom_types;  // ntyp
     std::vector<int> sorted_idx; // natom
@@ -572,8 +572,8 @@ public:
 3. **解析辅助函数**：共同的解析逻辑放在模块内匿名命名空间（anonymous namespace）的 `parseAtomConfigFile` 函数中。匿名命名空间保证符号不跨模块泄露，避免 ODR 冲突。主实现和 `archived` 实现均调用此函数。
 
 4. **species 分析**：构造中解析完成后调用 `analyzeSpecies()`，计算：
-   - `ntyp` / `zvals[itype]` / `type_counts[itype]`：去重排序后的 species 种类、原子序数、每类数量
-   - `atom_types[iatom]`：第 `ia` 个原子属于哪一类型（按 `zvals` 的排序）
+   - `ntyp` / `atomic_numbers[itype]` / `type_counts[itype]`：去重排序后的 species 种类、原子序数、每类数量
+   - `atom_types[iatom]`：第 `ia` 个原子属于哪一类型（按 `atomic_numbers` 的排序）
    - `sorted_idx[new] = old`：将原子按类型分组的排列（`stable_sort`，同类型内保持原序）
    
    数据存储选型上，采用**分离的 vector**（`species`、`x`、`y`、`z`）而非 `vector<Atom>` 结构体数组。利弊：
@@ -629,7 +629,7 @@ for (auto&& a : atom.eachSpecie())        // ATOM::AtomEntry
 `operator*()` 按值返回 `TypeEntry` 或 `AtomEntry`，产生临时对象（右值）：
 
 ```cpp
-auto operator*() const -> TypeEntry { return {a_->zvals[it_], a_->type_counts[it_]}; }
+auto operator*() const -> TypeEntry { return {a_->atomic_numbers[it_], a_->type_counts[it_]}; }
 ```
 
 | 写法               | 能否编译 | 说明 |
@@ -673,7 +673,7 @@ class TypeView {
 };
 ```
 
-**不是**让 `TypeView` 能访问 `ATOM` 的私有成员——`ATOM` 的 `zvals`、`ntyp` 等本来就是 `public` 的。而是**让 `ATOM` 能构造 `TypeView`**：把构造设为 `private` 防止用户绕过 `eachType()` 直接实例化视图。
+**不是**让 `TypeView` 能访问 `ATOM` 的私有成员——`ATOM` 的 `atomic_numbers`、`ntyp` 等本来就是 `public` 的。而是**让 `ATOM` 能构造 `TypeView`**：把构造设为 `private` 防止用户绕过 `eachType()` 直接实例化视图。
 
 嵌套类读外围类的 `public` 成员不需要 `friend`；外围类读嵌套类的 `private` 成员才需要。详见 [`cpp_conventions.md`](cpp_conventions.md) 的迭代器设计风格约定。
 

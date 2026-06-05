@@ -34,3 +34,5 @@
 | `io` | `src/io.cppm` + `src/io/` | 读取 OUT.GKK、OUT.WG 等文件，提供 K 矢量、晶格、波函数系数 |
 | `pseudo` | `src/pseudo.cppm` + `src/pseudo/` | UPF 赝势文件解析（NCPPUPF） |
 | `math` | `src/math.cppm` + `src/math/` | 球贝塞尔函数、实球谐函数、1D/3D FFT |
+| `H_psi` | `src/H_psi.cppm` + `src/H_psi/` | Hamiltonian（H|ψ⟩ 算符、一致性检查） |
+| `support` | `src/support/density.cppm` | 密度构造与比较（buildDensity、integrateDensity、compareDensity） |

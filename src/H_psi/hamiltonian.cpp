@@ -2,6 +2,7 @@ module H_psi.hamiltonian;
 
 import std;
 import utils.logger;
+import support.density;
 
 // ===========================================================================
 //  Constructor
@@ -569,8 +570,8 @@ auto Hamiltonian::checkPart2() -> void {
     // ------------------------------------------------------------------
     if (!ncpps_.empty() && atom_) {
         for (int it = 0; it < atom_->ntyp; ++it) {
-            int         z        = atom_->zvals[it];
-            string_view expected = ATOM::elementName(z);
+            int         atomic_number = atom_->atomic_numbers[it];
+            string_view expected = ATOM::elementName(atomic_number);
             bool found = false;
             for (const auto& p : ncpps_) {
                 if (p.meta.element == expected) { found = true; break; }
@@ -581,7 +582,7 @@ auto Hamiltonian::checkPart2() -> void {
                 log.log(LogLevel::Info, "  ✗ element {} [NCPP vs ATOM]: no matching UPF", expected);
                 throw runtime_error(
                     format("Hamiltonian consistency: no NCPP for element {} (Z={})",
-                           expected, z));
+                           expected, atomic_number));
             }
         }
     }
@@ -592,13 +593,90 @@ auto Hamiltonian::checkPart2() -> void {
 //  Part 3  —  advanced consistency checks (computationally heavy)
 //
 //  Not called automatically — the user invokes this explicitly.
-//  Contains reconstruction and cross‑validation checks that require
-//  significant computation (FFT, integration).
+//  Each check independently handles missing data by logging a skip message.
 //
-//  (Implementation deferred — skeleton in place for the API shape.)
+//  Internal dedup:  std::initializer_list → std::uint64_t bitmask
+//  (supports up to 64 distinct check types).
 // ===========================================================================
 
 auto Hamiltonian::checkConsistencyExtended() -> void {
-    Logger::instance().log(LogLevel::Info,
-        "[Hamiltonian] checkConsistencyExtended — not yet implemented");
+    checkConsistencyExtended({
+        ExtendedCheck::RHOReconstruct,
+        ExtendedCheck::ValenceCount,
+    });
+}
+
+auto Hamiltonian::checkConsistencyExtended(std::initializer_list<ExtendedCheck> checks) -> void {
+    auto& log = Logger::instance();
+    log.log(LogLevel::Info, "[Hamiltonian] extended consistency check");
+
+    auto mask = 0ull;
+    for (auto c : checks)
+        mask |= (1ull << static_cast<int>(c));
+
+    auto const RHO = static_cast<int>(ExtendedCheck::RHOReconstruct);
+    auto const VAL = static_cast<int>(ExtendedCheck::ValenceCount);
+    // ------------------------------------------------------------------
+    //  1.  RHOReconstruct  —  Σ occ·|WG|² → FFT → compare vs file RHO
+    // ------------------------------------------------------------------
+    if (mask & (1ull << RHO)) {
+        log.log(LogLevel::Info, "  [RHOReconstruct]");
+        if (!gkk_ || !wg_ || !occ_ || !rho_) {
+            log.log(LogLevel::Info, "    skipped — missing data (need GKK+WG+OCC+RHO)");
+        } else {
+            auto reconstructed = buildDensity(*gkk_, *wg_, *occ_);
+            auto result = compareDensity(reconstructed, *rho_);
+
+            log.log(LogLevel::Info, "    max diff = {:.4e}", result.max_diff);
+            log.log(LogLevel::Info, "    RMSE     = {:.4e}  ({:.2f}% of avg|ref|)",
+                    result.rmse, result.rmse / result.avg_ref * 100.0);
+
+            if (result.rmse > 1e-2) {
+                throw std::runtime_error(std::format(
+                    "Hamiltonian checkConsistencyExtended: "
+                    "RHO reconstruction RMSE ({:.4e}) exceeds 1e-2", result.rmse));
+            }
+            log.log(LogLevel::Info, "    ✓");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  2.  ValenceCount  —  Σ(NCPP.z_valence × count)  ≈  ∫RHO d³r
+    // ------------------------------------------------------------------
+    if (mask & (1ull << VAL)) {
+        log.log(LogLevel::Info, "  [ValenceCount]");
+        if (!atom_ || !rho_ || ncpps_.empty()) {
+            log.log(LogLevel::Info, "    skipped — missing data (need ATOM+RHO+NCPPs)");
+        } else {
+            double total_valence = 0.0;
+            for (int it = 0; it < atom_->ntyp; ++it) {
+                int atomic_number = atom_->atomic_numbers[it];
+                int count = atom_->type_counts[it];
+                std::string_view name = ATOM::elementName(atomic_number);
+                for (const auto& p : ncpps_) {
+                    if (p.meta.element == name) {
+                        total_valence += p.meta.z_valence * count;
+                        break;
+                    }
+                }
+            }
+
+            double rho_int = integrateDensity(*rho_);
+
+            log.log(LogLevel::Info, "    Σ(NCPP.z_valence × count) = {:.1f}", total_valence);
+            log.log(LogLevel::Info, "    ∫RHO d³r                   = {:.6f}", rho_int);
+
+            double diff = std::abs(rho_int - total_valence);
+            if (diff > 1.0) {
+                throw std::runtime_error(std::format(
+                    "Hamiltonian checkConsistencyExtended: "
+                    "valence electron count mismatch: "
+                    "NCPP sum={:.1f}, ∫RHO={:.6f}, diff={:.4f}",
+                    total_valence, rho_int, diff));
+            }
+            log.log(LogLevel::Info, "    ✓");
+        }
+    }
+
+    log.log(LogLevel::Info, "[Hamiltonian] extended consistency check complete");
 }
