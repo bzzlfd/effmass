@@ -25,6 +25,7 @@
 - `design/pseudo_module.md`：赝势读取模块的接口设计、`NCPPUPF` 类结构与 UPF 文件 tag 的映射
 - `design/io_file_lifecycle.md`：IO 模块各类的文件句柄生命周期策略对比（一次性读取 vs 延迟加载）与设计取舍
 - `design/utils_types.md`：通用工具类型 `array2d`（动态/静态 2D 数组）和 `vector3d`（3 维向量）的设计与接口
+- `design/hamiltonian.md`：Hamiltonian 模块接口设计：Functor作为算符、数据加载（逐步加载 `loadXxx()`、checkConsistency）
 
 ## 实现的模块
 

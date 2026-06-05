@@ -194,24 +194,37 @@ auto Hamiltonian::ncpp(int atomic_number) const -> const NCPP& {
 
 // ===========================================================================
 //  Consistency check  —  runs after every load step
+//  Three-part structure:
+//    Part 1 — canonical physical quantities (first-load-sets-canonical)
+//    Part 2 — file‑to‑file integrity checks
+//    Part 3 — heavyweight computational verification (separate method)
 // ===========================================================================
 
 auto Hamiltonian::checkConsistency() -> void {
+    Logger::instance().log(LogLevel::Info, "[Hamiltonian] consistency check");
+    checkPart1();
+    checkPart2();
+    Logger::instance().log(LogLevel::Info, "[Hamiltonian] consistency check complete");
+}
+
+
+// ===========================================================================
+//  Part 1  —  canonical physical quantities
+//  Each quantity follows "first load sets the canonical, subsequent loads
+//  must match".  The canonical values are stored in Hamiltonian members
+//  and are available for H|ψ⟩ (Callable / gradient / hessian).
+// ===========================================================================
+
+auto Hamiltonian::checkPart1() -> void {
     using namespace std;
     auto& log = Logger::instance();
-
-    // -- helper: log a debug-level skip message ---------------------------------
-    auto debug = [&](string_view msg) {
-        log.log(LogLevel::Debug, "  — {}: skipped (data not loaded)", msg);
-    };
 
     // -- helper: check int equality, log at info-level --------------------------
     auto checkInt = [&](int a, int b, string_view label) -> void {
         bool ok = (a == b);
         log.log(LogLevel::Info, "  {} {}: {} vs {}", ok ? "✓" : "✗", label, a, b);
         if (!ok) throw runtime_error(
-            format("Hamiltonian consistency: {} mismatch ({} vs {})",
-                   label, a, b));
+            format("Hamiltonian consistency: {} mismatch ({} vs {})", label, a, b));
     };
 
     // -- helper: check lattice match -------------------------------------------
@@ -223,203 +236,338 @@ auto Hamiltonian::checkConsistency() -> void {
             format("Hamiltonian consistency: lattice mismatch [{}]", label));
     };
 
-    log.log(LogLevel::Info, "[Hamiltonian] consistency check");
-
-    // ----  pair: GKK  x  WG  ---------------------------------------------------
-    if (gkk_ && wg_ && !checked_[Pair_GKK_WG]) {
-        const auto& g = gkk_->meta;
-        const auto& w = wg_->meta;
-        checkInt(g.nkpt,  w.nkpt,  "nkpt  [GKK vs WG]");
-        checkInt(g.n1,    w.n1,    "n1    [GKK vs WG]");
-        checkInt(g.n2,    w.n2,    "n2    [GKK vs WG]");
-        checkInt(g.n3,    w.n3,    "n3    [GKK vs WG]");
-        checkInt(g.mg_nx, w.mg_nx, "mg_nx [GKK vs WG]");
-        checkInt(g.nnode, w.nnode, "nnode [GKK vs WG]");
-        checkInt(g.is_SO, w.is_SO, "is_SO [GKK vs WG]");
-        checkInt(g.islda, w.islda, "islda [GKK vs WG]");
-
-        bool ecut_ok = (abs(g.Ecut - w.Ecut) < 1e-12);
-        log.log(LogLevel::Info, "  {} Ecut  [GKK vs WG]: {} vs {}",
-                ecut_ok ? "✓" : "✗", g.Ecut, w.Ecut);
-        if (!ecut_ok) throw runtime_error(
-            "Hamiltonian consistency: Ecut mismatch");
-
-        bool ng_ok = (g.ng_tot_per_kpt == w.ng_tot_per_kpt);
-        log.log(LogLevel::Info, "  {} ng_tot_per_kpt [GKK vs WG]", ng_ok ? "✓" : "✗");
-        if (!ng_ok) throw runtime_error(
-            "Hamiltonian consistency: ng_tot_per_kpt mismatch");
-
-        checkLattice(g.lattice, w.lattice, "GKK vs WG");
-        checked_.set(Pair_GKK_WG);
-    } else {
-        debug("GKK vs WG");
+    // ------------------------------------------------------------------
+    //  lattice   (GKK, WG, VR, RHO, ATOM)
+    // ------------------------------------------------------------------
+    if (!canonical_lattice_) {
+        if      (gkk_)  canonical_lattice_ = gkk_->meta.lattice;
+        else if (wg_)   canonical_lattice_ = wg_->meta.lattice;
+        else if (vr_)   canonical_lattice_ = vr_->lattice;
+        else if (rho_)  canonical_lattice_ = rho_->lattice;
+        else if (atom_) canonical_lattice_ = atom_->lattice;
+        if (canonical_lattice_)
+            log.log(LogLevel::Info, "  ✓ canonical [lattice] set");
+    }
+    if (canonical_lattice_) {
+        if (gkk_)  checkLattice(gkk_->meta.lattice, *canonical_lattice_, "lattice [GKK]");
+        if (wg_)   checkLattice(wg_->meta.lattice,  *canonical_lattice_, "lattice [WG]");
+        if (vr_)   checkLattice(vr_->lattice,       *canonical_lattice_, "lattice [VR]");
+        if (rho_)  checkLattice(rho_->lattice,      *canonical_lattice_, "lattice [RHO]");
+        if (atom_) checkLattice(atom_->lattice,     *canonical_lattice_, "lattice [ATOM]");
     }
 
-    // ----  pair: GKK  x  VR  ---------------------------------------------------
-    if (gkk_ && vr_ && !checked_[Pair_GKK_VR]) {
-        const auto& g = gkk_->meta;
-        const auto& v = vr_->meta;
-        checkInt(g.n1,     v.n1,     "n1    [GKK vs VR]");
-        checkInt(g.n2,     v.n2,     "n2    [GKK vs VR]");
-        checkInt(g.n3,     v.n3,     "n3    [GKK vs VR]");
-        checkLattice(gkk_->meta.lattice, vr_->lattice, "GKK vs VR");
-        checked_.set(Pair_GKK_VR);
-    } else {
-        debug("GKK vs VR");
+    // ------------------------------------------------------------------
+    //  nkpt   (GKK, WG, EIGEN, OCC)
+    // ------------------------------------------------------------------
+    if (!canonical_nkpt_) {
+        if      (gkk_)   canonical_nkpt_ = gkk_->meta.nkpt;
+        else if (wg_)    canonical_nkpt_ = wg_->meta.nkpt;
+        else if (eigen_) canonical_nkpt_ = eigen_->meta.nkpt;
+        else if (occ_)   canonical_nkpt_ = occ_->meta.nkpt;
+        if (canonical_nkpt_)
+            log.log(LogLevel::Info, "  ✓ canonical [nkpt] = {}", *canonical_nkpt_);
+    }
+    if (canonical_nkpt_) {
+        if (gkk_)   checkInt(gkk_->meta.nkpt,   *canonical_nkpt_, "nkpt [GKK]");
+        if (wg_)    checkInt(wg_->meta.nkpt,    *canonical_nkpt_, "nkpt [WG]");
+        if (eigen_) checkInt(eigen_->meta.nkpt, *canonical_nkpt_, "nkpt [EIGEN]");
+        if (occ_)   checkInt(occ_->meta.nkpt,   *canonical_nkpt_, "nkpt [OCC]");
     }
 
-    // ----  pair: GKK  x  ATOM  ------------------------------------------------
-    if (gkk_ && atom_ && !checked_[Pair_GKK_ATOM]) {
-        checkLattice(gkk_->meta.lattice, atom_->lattice, "GKK vs ATOM");
-        checked_.set(Pair_GKK_ATOM);
-    } else {
-        debug("GKK vs ATOM");
+    // ------------------------------------------------------------------
+    //  nband   (WG, EIGEN, OCC)
+    // ------------------------------------------------------------------
+    if (!canonical_nband_) {
+        if      (wg_)    canonical_nband_ = wg_->meta.nband;
+        else if (eigen_) canonical_nband_ = eigen_->meta.nband;
+        else if (occ_)   canonical_nband_ = occ_->meta.nband;
+        if (canonical_nband_)
+            log.log(LogLevel::Info, "  ✓ canonical [nband] = {}", *canonical_nband_);
+    }
+    if (canonical_nband_) {
+        if (wg_)    checkInt(wg_->meta.nband,    *canonical_nband_, "nband [WG]");
+        if (eigen_) checkInt(eigen_->meta.nband, *canonical_nband_, "nband [EIGEN]");
+        if (occ_)   checkInt(occ_->meta.nband,   *canonical_nband_, "nband [OCC]");
     }
 
-    // ----  pair: GKK  x  EIGEN  -----------------------------------------------
-    if (gkk_ && eigen_ && !checked_[Pair_GKK_EIGEN]) {
-        const auto& g = gkk_->meta;
-        const auto& e = eigen_->meta;
-        checkInt(g.nkpt,  e.nkpt,  "nkpt  [GKK vs EIGEN]");
-        checkInt(g.is_SO, e.is_SO, "is_SO [GKK vs EIGEN]");
-        checkInt(g.islda, e.islda, "islda [GKK vs EIGEN]");
-        checkInt(g.nnode, e.nnode, "nnode [GKK vs EIGEN]");
+    // ------------------------------------------------------------------
+    //  FFT grid n1,n2,n3   (GKK, WG, VR, RHO)
+    // ------------------------------------------------------------------
+    if (!canonical_fft_grid_) {
+        if      (gkk_) canonical_fft_grid_ = FFTGrid{gkk_->meta.n1, gkk_->meta.n2, gkk_->meta.n3};
+        else if (wg_)  canonical_fft_grid_ = FFTGrid{wg_->meta.n1,  wg_->meta.n2,  wg_->meta.n3};
+        else if (vr_)  canonical_fft_grid_ = FFTGrid{vr_->meta.n1,  vr_->meta.n2,  vr_->meta.n3};
+        else if (rho_) canonical_fft_grid_ = FFTGrid{rho_->meta.n1, rho_->meta.n2, rho_->meta.n3};
+        if (canonical_fft_grid_)
+            log.log(LogLevel::Info, "  ✓ canonical [n1,n2,n3] = {},{},{}",
+                    canonical_fft_grid_->n1, canonical_fft_grid_->n2, canonical_fft_grid_->n3);
+    }
+    if (canonical_fft_grid_) {
+        auto checkGrid = [&](int n1, int n2, int n3, string_view tag) {
+            checkInt(n1, canonical_fft_grid_->n1, format("n1 [{}]", tag));
+            checkInt(n2, canonical_fft_grid_->n2, format("n2 [{}]", tag));
+            checkInt(n3, canonical_fft_grid_->n3, format("n3 [{}]", tag));
+        };
+        if (gkk_)  checkGrid(gkk_->meta.n1,  gkk_->meta.n2,  gkk_->meta.n3,  "GKK");
+        if (wg_)   checkGrid(wg_->meta.n1,   wg_->meta.n2,   wg_->meta.n3,   "WG");
+        if (vr_)   checkGrid(vr_->meta.n1,   vr_->meta.n2,   vr_->meta.n3,   "VR");
+        if (rho_)  checkGrid(rho_->meta.n1,  rho_->meta.n2,  rho_->meta.n3,  "RHO");
+    }
 
-        // Compare k-point vectors, allowing periodic translation
-        {
-            auto saved_view = gkk_->currentView();
-            gkk_->setDataView(saved_view | KVecsView::Integer);
-            bool kpts_ok = true;
+    // ------------------------------------------------------------------
+    //  is_SO   (GKK, WG, EIGEN)
+    // ------------------------------------------------------------------
+    if (!canonical_is_SO_) {
+        if      (gkk_)   canonical_is_SO_ = gkk_->meta.is_SO;
+        else if (wg_)    canonical_is_SO_ = wg_->meta.is_SO;
+        else if (eigen_) canonical_is_SO_ = eigen_->meta.is_SO;
+        if (canonical_is_SO_)
+            log.log(LogLevel::Info, "  ✓ canonical [is_SO] = {}", *canonical_is_SO_);
+    }
+    if (canonical_is_SO_) {
+        if (gkk_)   checkInt(gkk_->meta.is_SO,   *canonical_is_SO_, "is_SO [GKK]");
+        if (wg_)    checkInt(wg_->meta.is_SO,    *canonical_is_SO_, "is_SO [WG]");
+        if (eigen_) checkInt(eigen_->meta.is_SO, *canonical_is_SO_, "is_SO [EIGEN]");
+    }
+
+    // ------------------------------------------------------------------
+    //  islda   (GKK, WG, EIGEN, OCC)
+    // ------------------------------------------------------------------
+    if (!canonical_islda_) {
+        if      (gkk_)   canonical_islda_ = gkk_->meta.islda;
+        else if (wg_)    canonical_islda_ = wg_->meta.islda;
+        else if (eigen_) canonical_islda_ = eigen_->meta.islda;
+        else if (occ_)   canonical_islda_ = occ_->meta.islda;
+        if (canonical_islda_)
+            log.log(LogLevel::Info, "  ✓ canonical [islda] = {}", *canonical_islda_);
+    }
+    if (canonical_islda_) {
+        if (gkk_)   checkInt(gkk_->meta.islda,   *canonical_islda_, "islda [GKK]");
+        if (wg_)    checkInt(wg_->meta.islda,    *canonical_islda_, "islda [WG]");
+        if (eigen_) checkInt(eigen_->meta.islda, *canonical_islda_, "islda [EIGEN]");
+        if (occ_)   checkInt(occ_->meta.islda,   *canonical_islda_, "islda [OCC]");
+    }
+
+    // ------------------------------------------------------------------
+    //  Ecut   (GKK, WG)
+    // ------------------------------------------------------------------
+    if (!canonical_Ecut_) {
+        if      (gkk_) canonical_Ecut_ = gkk_->meta.Ecut;
+        else if (wg_)  canonical_Ecut_ = wg_->meta.Ecut;
+        if (canonical_Ecut_)
+            log.log(LogLevel::Info, "  ✓ canonical [Ecut] = {}", *canonical_Ecut_);
+    }
+    if (canonical_Ecut_) {
+        if (gkk_) {
+            bool ok = (abs(gkk_->meta.Ecut - *canonical_Ecut_) < 1e-12);
+            log.log(LogLevel::Info, "  {} Ecut [GKK]: {}", ok ? "✓" : "✗", gkk_->meta.Ecut);
+            if (!ok) throw runtime_error("Hamiltonian consistency: Ecut [GKK] mismatch");
+        }
+        if (wg_) {
+            bool ok = (abs(wg_->meta.Ecut - *canonical_Ecut_) < 1e-12);
+            log.log(LogLevel::Info, "  {} Ecut [WG]: {}", ok ? "✓" : "✗", wg_->meta.Ecut);
+            if (!ok) throw runtime_error("Hamiltonian consistency: Ecut [WG] mismatch");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  natom   (EIGEN, ATOM)
+    // ------------------------------------------------------------------
+    if (!canonical_natom_) {
+        if      (eigen_) canonical_natom_ = eigen_->meta.natom;
+        else if (atom_)  canonical_natom_ = atom_->natom;
+        if (canonical_natom_)
+            log.log(LogLevel::Info, "  ✓ canonical [natom] = {}", *canonical_natom_);
+    }
+    if (canonical_natom_) {
+        if (eigen_) checkInt(eigen_->meta.natom, *canonical_natom_, "natom [EIGEN]");
+        if (atom_)  checkInt(atom_->natom,        *canonical_natom_, "natom [ATOM]");
+    }
+
+    // ------------------------------------------------------------------
+    //  kpt_vec   (fractional coordinates;  GKK, EIGEN, OCC)
+    //
+    //  Setting the canonical requires either GKK (loadKPoint →
+    //  fractional) or EIGEN / OCC (Cartesian → fractional, needs
+    //  canonical_lattice_ for the conversion matrix).
+    //
+    //  Once set, each loaded source is compared against the canonical
+    //  every time checkPart1 runs.  Comparison allows periodic integer
+    //  translation (k  and  k+G  represent the same physical state).
+    // ------------------------------------------------------------------
+    if (!canonical_kpt_vec_ && canonical_nkpt_) {
+        if (gkk_) {
+            auto saved = gkk_->currentView();
+            gkk_->setDataView(saved | KVecsView::Integer);
+            vector<array<double,3>> kpts(*canonical_nkpt_);
+            for (int ik = 0; ik < *canonical_nkpt_; ++ik) {
+                auto& kv = gkk_->loadKPoint(ik);
+                kpts[ik] = {kv.kPoint.x, kv.kPoint.y, kv.kPoint.z};
+            }
+            gkk_->setDataView(saved);
+            canonical_kpt_vec_ = std::move(kpts);
+            log.log(LogLevel::Info, "  ✓ canonical [kpt_vec] set from GKK ({} pts)", *canonical_nkpt_);
+        } else if (canonical_lattice_ && eigen_) {
+            auto A = canonical_lattice_->A();
+            constexpr double TWO_PI = 2.0 * numbers::pi;
+            vector<array<double,3>> kpts(eigen_->meta.nkpt);
+            for (int ik = 0; ik < eigen_->meta.nkpt; ++ik) {
+                auto& v = eigen_->kpt_vec[ik];
+                kpts[ik] = {
+                    (A[0][0]*v.x + A[0][1]*v.y + A[0][2]*v.z) / TWO_PI,
+                    (A[1][0]*v.x + A[1][1]*v.y + A[1][2]*v.z) / TWO_PI,
+                    (A[2][0]*v.x + A[2][1]*v.y + A[2][2]*v.z) / TWO_PI
+                };
+            }
+            canonical_kpt_vec_ = std::move(kpts);
+            log.log(LogLevel::Info, "  ✓ canonical [kpt_vec] set from EIGEN ({} pts)", eigen_->meta.nkpt);
+        } else if (canonical_lattice_ && occ_) {
+            auto A = canonical_lattice_->A();
+            constexpr double TWO_PI = 2.0 * numbers::pi;
+            vector<array<double,3>> kpts(occ_->meta.nkpt);
+            for (int ik = 0; ik < occ_->meta.nkpt; ++ik) {
+                auto& v = occ_->kpt_vec[ik];
+                kpts[ik] = {
+                    (A[0][0]*v.x + A[0][1]*v.y + A[0][2]*v.z) / TWO_PI,
+                    (A[1][0]*v.x + A[1][1]*v.y + A[1][2]*v.z) / TWO_PI,
+                    (A[2][0]*v.x + A[2][1]*v.y + A[2][2]*v.z) / TWO_PI
+                };
+            }
+            canonical_kpt_vec_ = std::move(kpts);
+            log.log(LogLevel::Info, "  ✓ canonical [kpt_vec] set from OCC ({} pts)", occ_->meta.nkpt);
+        }
+    }
+    if (canonical_kpt_vec_) {
+        constexpr double TWO_PI = 2.0 * numbers::pi;
+
+        // Compare GKK k-points (loadKPoint → fractional) against canonical
+        if (gkk_ && canonical_lattice_) {
+            auto saved = gkk_->currentView();
+            gkk_->setDataView(saved | KVecsView::Integer);
+            bool ok = true;
             int bad_ik = -1;
-            double bad_gkk_x{}, bad_gkk_y{}, bad_gkk_z{};
-            double bad_eig_x{}, bad_eig_y{}, bad_eig_z{};
-            constexpr double TWO_PI = 2.0 * std::numbers::pi;
-            auto A = g.lattice.A();  // direct lattice (Bohr)
-            for (int ik = 0; ik < g.nkpt; ++ik) {
-                const auto& kv = gkk_->loadKPoint(ik);
-                const auto& eig_k = eigen_->kpt_vec[ik];
-                // EIGEN stores k-points in Cartesian (Bohr^-1).
-                // GKK infers fractional coordinates.  Convert EIGEN → fractional
-                // via  kf[i] = (A[i] · k_cart) / (2π).
-                double eig_kf_x = (A[0][0] * eig_k.x + A[0][1] * eig_k.y + A[0][2] * eig_k.z) / TWO_PI;
-                double eig_kf_y = (A[1][0] * eig_k.x + A[1][1] * eig_k.y + A[1][2] * eig_k.z) / TWO_PI;
-                double eig_kf_z = (A[2][0] * eig_k.x + A[2][1] * eig_k.y + A[2][2] * eig_k.z) / TWO_PI;
-                double dx = kv.kPoint.x - eig_kf_x;
-                double dy = kv.kPoint.y - eig_kf_y;
-                double dz = kv.kPoint.z - eig_kf_z;
-                constexpr double eps = 1e-8;
-                if (abs(dx - round(dx)) > eps ||
-                    abs(dy - round(dy)) > eps ||
-                    abs(dz - round(dz)) > eps) {
-                    kpts_ok = false;
-                    bad_ik = ik;
-                    bad_gkk_x = kv.kPoint.x; bad_gkk_y = kv.kPoint.y; bad_gkk_z = kv.kPoint.z;
-                    bad_eig_x = eig_k.x;      bad_eig_y = eig_k.y;      bad_eig_z = eig_k.z;
-                    break;
+            constexpr double eps = 1e-8;
+            for (int ik = 0; ik < static_cast<int>(canonical_kpt_vec_->size()) && ok; ++ik) {
+                auto& kv = gkk_->loadKPoint(ik);
+                double dx = kv.kPoint.x - (*canonical_kpt_vec_)[ik][0];
+                double dy = kv.kPoint.y - (*canonical_kpt_vec_)[ik][1];
+                double dz = kv.kPoint.z - (*canonical_kpt_vec_)[ik][2];
+                if (abs(dx - round(dx)) > eps || abs(dy - round(dy)) > eps || abs(dz - round(dz)) > eps) {
+                    ok = false; bad_ik = ik; break;
                 }
             }
-            gkk_->setDataView(saved_view);
-            if (!kpts_ok) throw runtime_error(format(
-                "Hamiltonian consistency: k-point[{}] mismatch (GKK vs EIGEN): "
-                "GKK_frac({},{},{}) EIGEN_cart({},{},{})",
-                bad_ik,
-                bad_gkk_x, bad_gkk_y, bad_gkk_z,
-                bad_eig_x, bad_eig_y, bad_eig_z));
-            log.log(LogLevel::Info, "  ✓ k-point vectors [GKK vs EIGEN]");
+            gkk_->setDataView(saved);
+            if (!ok) throw runtime_error(
+                format("Hamiltonian consistency: kpt_vec [GKK] mismatch at k-point {}", bad_ik));
+            log.log(LogLevel::Info, "  ✓ kpt_vec [GKK]");
         }
 
-        checked_.set(Pair_GKK_EIGEN);
-    } else {
-        debug("GKK vs EIGEN");
+        // Compare EIGEN k-points (Cartesian → fractional) against canonical
+        if (eigen_) {
+            auto A = canonical_lattice_->A();
+            bool ok = true;
+            int bad_ik = -1;
+            constexpr double eps = 1e-8;
+            for (int ik = 0; ik < eigen_->meta.nkpt && ok; ++ik) {
+                auto& v = eigen_->kpt_vec[ik];
+                double fx = (A[0][0]*v.x + A[0][1]*v.y + A[0][2]*v.z) / TWO_PI;
+                double fy = (A[1][0]*v.x + A[1][1]*v.y + A[1][2]*v.z) / TWO_PI;
+                double fz = (A[2][0]*v.x + A[2][1]*v.y + A[2][2]*v.z) / TWO_PI;
+                double dx = fx - (*canonical_kpt_vec_)[ik][0];
+                double dy = fy - (*canonical_kpt_vec_)[ik][1];
+                double dz = fz - (*canonical_kpt_vec_)[ik][2];
+                if (abs(dx - round(dx)) > eps || abs(dy - round(dy)) > eps || abs(dz - round(dz)) > eps) {
+                    ok = false; bad_ik = ik; break;
+                }
+            }
+            if (!ok) throw runtime_error(
+                format("Hamiltonian consistency: kpt_vec [EIGEN] mismatch at k-point {}", bad_ik));
+            log.log(LogLevel::Info, "  ✓ kpt_vec [EIGEN]");
+        }
+
+        // Compare OCC k-points (Cartesian → fractional; looser tolerance for text format)
+        if (occ_) {
+            auto A = canonical_lattice_->A();
+            bool ok = true;
+            int bad_ik = -1;
+            constexpr double eps = 1e-4;
+            for (int ik = 0; ik < occ_->meta.nkpt && ok; ++ik) {
+                auto& v = occ_->kpt_vec[ik];
+                double fx = (A[0][0]*v.x + A[0][1]*v.y + A[0][2]*v.z) / TWO_PI;
+                double fy = (A[1][0]*v.x + A[1][1]*v.y + A[1][2]*v.z) / TWO_PI;
+                double fz = (A[2][0]*v.x + A[2][1]*v.y + A[2][2]*v.z) / TWO_PI;
+                double dx = fx - (*canonical_kpt_vec_)[ik][0];
+                double dy = fy - (*canonical_kpt_vec_)[ik][1];
+                double dz = fz - (*canonical_kpt_vec_)[ik][2];
+                if (abs(dx - round(dx)) > eps || abs(dy - round(dy)) > eps || abs(dz - round(dz)) > eps) {
+                    ok = false; bad_ik = ik; break;
+                }
+            }
+            if (!ok) throw runtime_error(
+                format("Hamiltonian consistency: kpt_vec [OCC] mismatch at k-point {}", bad_ik));
+            log.log(LogLevel::Info, "  ✓ kpt_vec [OCC]");
+        }
+    }
+}
+
+
+// ===========================================================================
+//  Part 2  —  file‑to‑file integrity checks
+//  Pure data‑integrity checks that are not needed for H|ψ⟩ computation.
+//  No bitset / dirty‑flag tracking — all checks are O(1) and repeated
+//  on every checkConsistency() call (negligible cost).
+// ===========================================================================
+
+auto Hamiltonian::checkPart2() -> void {
+    using namespace std;
+    auto& log = Logger::instance();
+
+    auto checkInt = [&](int a, int b, string_view label) -> void {
+        bool ok = (a == b);
+        log.log(LogLevel::Info, "  {} {}: {} vs {}", ok ? "✓" : "✗", label, a, b);
+        if (!ok) throw runtime_error(
+            format("Hamiltonian consistency: {} mismatch ({} vs {})", label, a, b));
+    };
+
+    // ------------------------------------------------------------------
+    //  mg_nx  —  GKK vs WG
+    // ------------------------------------------------------------------
+    if (gkk_ && wg_) {
+        checkInt(gkk_->meta.mg_nx, wg_->meta.mg_nx, "mg_nx [GKK vs WG]");
     }
 
-    // ----  pair: EIGEN  x  ATOM  ---------------------------------------------
-    if (eigen_ && atom_ && !checked_[Pair_EIGEN_ATOM]) {
-        checkInt(eigen_->meta.natom, atom_->natom, "natom [EIGEN vs ATOM]");
-        checked_.set(Pair_EIGEN_ATOM);
-    } else {
-        debug("EIGEN vs ATOM");
+    // ------------------------------------------------------------------
+    //  ng_tot_per_kpt  —  GKK vs WG
+    // ------------------------------------------------------------------
+    if (gkk_ && wg_) {
+        bool ok = (gkk_->meta.ng_tot_per_kpt == wg_->meta.ng_tot_per_kpt);
+        log.log(LogLevel::Info, "  {} ng_tot_per_kpt [GKK vs WG]", ok ? "✓" : "✗");
+        if (!ok) throw runtime_error("Hamiltonian consistency: ng_tot_per_kpt mismatch");
     }
 
-    // ----  pair: WG  x  EIGEN  ------------------------------------------------
-    if (wg_ && eigen_ && !checked_[Pair_WG_EIGEN]) {
-        checkInt(wg_->meta.nband, eigen_->meta.nband, "nband [WG vs EIGEN]");
-        checkInt(wg_->meta.nkpt,  eigen_->meta.nkpt,  "nkpt  [WG vs EIGEN]");
-        checkInt(wg_->meta.is_SO, eigen_->meta.is_SO, "is_SO [WG vs EIGEN]");
-        checkInt(wg_->meta.islda, eigen_->meta.islda, "islda [WG vs EIGEN]");
-        checked_.set(Pair_WG_EIGEN);
-    } else {
-        debug("WG vs EIGEN");
+    // ------------------------------------------------------------------
+    //  nnode  —  three‑way: GKK ↔ WG ↔ EIGEN
+    //  (VR / RHO nnode is not required to match GKK — different parallel
+    //   partitioning.  Only wavefunction‑bearing files must agree.)
+    // ------------------------------------------------------------------
+    if (gkk_ && wg_) {
+        checkInt(gkk_->meta.nnode, wg_->meta.nnode, "nnode [GKK vs WG]");
+    }
+    if (gkk_ && eigen_) {
+        checkInt(gkk_->meta.nnode, eigen_->meta.nnode, "nnode [GKK vs EIGEN]");
     }
 
-    // ----  pair: VR  x  ATOM  -------------------------------------------------
-    if (vr_ && atom_ && !checked_[Pair_VR_ATOM]) {
-        checkLattice(vr_->lattice, atom_->lattice, "VR vs ATOM");
-        checked_.set(Pair_VR_ATOM);
-    } else {
-        debug("VR vs ATOM");
+    // ------------------------------------------------------------------
+    //  nstate  —  VR vs RHO
+    // ------------------------------------------------------------------
+    if (vr_ && rho_) {
+        checkInt(vr_->meta.nstate, rho_->meta.nstate, "nstate [VR vs RHO]");
     }
 
-    // ----  pair: VR  x  WG  ---------------------------------------------------
-    if (vr_ && wg_ && !checked_[Pair_VR_WG]) {
-        checkInt(vr_->meta.n1, wg_->meta.n1, "n1 [VR vs WG]");
-        checkInt(vr_->meta.n2, wg_->meta.n2, "n2 [VR vs WG]");
-        checkInt(vr_->meta.n3, wg_->meta.n3, "n3 [VR vs WG]");
-        checked_.set(Pair_VR_WG);
-    } else {
-        debug("VR vs WG");
-    }
-
-    // ----  pair: RHO  x  VR  -------------------------------------------------
-    if (rho_ && vr_ && !checked_[Pair_RHO_VR]) {
-        const auto& r = rho_->meta;
-        const auto& v = vr_->meta;
-        checkInt(r.n1,     v.n1,     "n1    [RHO vs VR]");
-        checkInt(r.n2,     v.n2,     "n2    [RHO vs VR]");
-        checkInt(r.n3,     v.n3,     "n3    [RHO vs VR]");
-        checkInt(r.nstate, v.nstate, "nstate[RHO vs VR]");
-        checkLattice(rho_->lattice, vr_->lattice, "RHO vs VR");
-        checked_.set(Pair_RHO_VR);
-    } else {
-        debug("RHO vs VR");
-    }
-
-    // ----  pair: RHO  x  ATOM  -----------------------------------------------
-    if (rho_ && atom_ && !checked_[Pair_RHO_ATOM]) {
-        checkLattice(rho_->lattice, atom_->lattice, "RHO vs ATOM");
-        checked_.set(Pair_RHO_ATOM);
-    } else {
-        debug("RHO vs ATOM");
-    }
-
-    // ----  pair: RHO  x  GKK  ------------------------------------------------
-    if (rho_ && gkk_ && !checked_[Pair_RHO_GKK]) {
-        const auto& r = rho_->meta;
-        const auto& g = gkk_->meta;
-        checkInt(r.n1,     g.n1,     "n1    [RHO vs GKK]");
-        checkInt(r.n2,     g.n2,     "n2    [RHO vs GKK]");
-        checkInt(r.n3,     g.n3,     "n3    [RHO vs GKK]");
-        checkInt(r.nnode, g.nnode, "nnode [RHO vs GKK]");
-        checkLattice(rho_->lattice, g.lattice, "RHO vs GKK");
-        checked_.set(Pair_RHO_GKK);
-    } else {
-        debug("RHO vs GKK");
-    }
-
-    // ----  pair: RHO  x  WG  -------------------------------------------------
-    if (rho_ && wg_ && !checked_[Pair_RHO_WG]) {
-        checkInt(rho_->meta.n1, wg_->meta.n1, "n1 [RHO vs WG]");
-        checkInt(rho_->meta.n2, wg_->meta.n2, "n2 [RHO vs WG]");
-        checkInt(rho_->meta.n3, wg_->meta.n3, "n3 [RHO vs WG]");
-        checked_.set(Pair_RHO_WG);
-    } else {
-        debug("RHO vs WG");
-    }
-
-    // ----  NCPPs  x  ATOM  ----------------------------------------------------
-    if (!ncpps_.empty() && atom_ && !checked_[Pair_NCPP_ATOM]) {
-        // Only check that every ATOM species has a matching NCPP.
-        // Extra NCPPs are allowed (over-loading).
+    // ------------------------------------------------------------------
+    //  NCPP ↔ ATOM  —  every ATOM species has a matching UPF
+    // ------------------------------------------------------------------
+    if (!ncpps_.empty() && atom_) {
         for (int it = 0; it < atom_->ntyp; ++it) {
             int         z        = atom_->zvals[it];
             string_view expected = ATOM::elementName(z);
@@ -436,81 +584,21 @@ auto Hamiltonian::checkConsistency() -> void {
                            expected, z));
             }
         }
-        checked_.set(Pair_NCPP_ATOM);
-    } else {
-        debug("NCPP vs ATOM");
     }
+}
 
-    // ----  pair: EIGEN  x  VR  -------------------------------------------------
-    if (eigen_ && vr_ && !checked_[Pair_EIGEN_VR]) {
-        checkInt(eigen_->meta.nnode, vr_->meta.nnode, "nnode [EIGEN vs VR]");
-        if (atom_) {
-            checkLattice(vr_->lattice, atom_->lattice, "EIGEN vs VR");
-        }
-        checked_.set(Pair_EIGEN_VR);
-    } else {
-        debug("EIGEN vs VR");
-    }
 
-    // ----  pair: EIGEN  x  RHO  ------------------------------------------------
-    if (eigen_ && rho_ && !checked_[Pair_EIGEN_RHO]) {
-        checkInt(eigen_->meta.nnode, rho_->meta.nnode, "nnode [EIGEN vs RHO]");
-        if (atom_) {
-            checkLattice(rho_->lattice, atom_->lattice, "EIGEN vs RHO");
-        }
-        checked_.set(Pair_EIGEN_RHO);
-    } else {
-        debug("EIGEN vs RHO");
-    }
+// ===========================================================================
+//  Part 3  —  advanced consistency checks (computationally heavy)
+//
+//  Not called automatically — the user invokes this explicitly.
+//  Contains reconstruction and cross‑validation checks that require
+//  significant computation (FFT, integration).
+//
+//  (Implementation deferred — skeleton in place for the API shape.)
+// ===========================================================================
 
-    // ----  pair: OCC  x  EIGEN  ------------------------------------------------
-    if (occ_ && eigen_ && !checked_[Pair_OCC_EIGEN]) {
-        const auto& o = occ_->meta;
-        const auto& e = eigen_->meta;
-        checkInt(o.islda, e.islda, "islda [OCC vs EIGEN]");
-        checkInt(o.nkpt,  e.nkpt,  "nkpt  [OCC vs EIGEN]");
-        checkInt(o.nband, e.nband, "nband [OCC vs EIGEN]");
-
-        // Compare k-point vectors directly (OCC text format has ~4 dp precision)
-        bool kpts_ok = true;
-        int bad_ik = -1;
-        constexpr double eps = 1e-4;
-        for (int ik = 0; ik < o.nkpt; ++ik) {
-            auto dx = std::abs(occ_->kpt_vec[ik].x - eigen_->kpt_vec[ik].x);
-            auto dy = std::abs(occ_->kpt_vec[ik].y - eigen_->kpt_vec[ik].y);
-            auto dz = std::abs(occ_->kpt_vec[ik].z - eigen_->kpt_vec[ik].z);
-            if (dx > eps || dy > eps || dz > eps) {
-                kpts_ok = false;
-                bad_ik = ik;
-                break;
-            }
-        }
-        if (!kpts_ok) throw runtime_error(format(
-            "Hamiltonian consistency: k-point[{}] mismatch (OCC vs EIGEN)",
-            bad_ik));
-        log.log(LogLevel::Info, "  ✓ k-point vectors [OCC vs EIGEN]");
-
-        checked_.set(Pair_OCC_EIGEN);
-    } else {
-        debug("OCC vs EIGEN");
-    }
-
-    // ----  pair: OCC  x  WG  --------------------------------------------------
-    if (occ_ && wg_ && !checked_[Pair_OCC_WG]) {
-        checkInt(occ_->meta.nkpt,  wg_->meta.nkpt,  "nkpt  [OCC vs WG]");
-        checkInt(occ_->meta.nband, wg_->meta.nband, "nband [OCC vs WG]");
-        checked_.set(Pair_OCC_WG);
-    } else {
-        debug("OCC vs WG");
-    }
-
-    // ----  pair: OCC  x  GKK  -------------------------------------------------
-    if (occ_ && gkk_ && !checked_[Pair_OCC_GKK]) {
-        checkInt(occ_->meta.nkpt, gkk_->meta.nkpt, "nkpt [OCC vs GKK]");
-        checked_.set(Pair_OCC_GKK);
-    } else {
-        debug("OCC vs GKK");
-    }
-
-    log.log(LogLevel::Info, "[Hamiltonian] consistency check complete");
+auto Hamiltonian::checkConsistencyExtended() -> void {
+    Logger::instance().log(LogLevel::Info,
+        "[Hamiltonian] checkConsistencyExtended — not yet implemented");
 }

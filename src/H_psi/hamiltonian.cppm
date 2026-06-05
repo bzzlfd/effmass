@@ -191,35 +191,30 @@ export {
         std::optional<OCC>   occ_;
         std::vector<NCPP>    ncpps_;
 
-        // Consistency-check pair tracking: mark verified after
-        // first successful check to skip re-verification on later loads.
-        enum PairId : int {
-            Pair_GKK_WG,
-            Pair_GKK_VR,
-            Pair_GKK_ATOM,
-            Pair_GKK_EIGEN,
-            Pair_EIGEN_ATOM,
-            Pair_WG_EIGEN,
-            Pair_VR_ATOM,
-            Pair_VR_WG,
-            Pair_RHO_VR,
-            Pair_RHO_ATOM,
-            Pair_RHO_GKK,
-            Pair_RHO_WG,
-            Pair_NCPP_ATOM,
-            Pair_EIGEN_VR,
-            Pair_EIGEN_RHO,
-            Pair_OCC_EIGEN,
-            Pair_OCC_WG,
-            Pair_OCC_GKK,
-            Pair_COUNT
-        };
-        mutable std::bitset<Pair_COUNT> checked_{};
+        // -------------------------------------------------------------------
+        //  Part 1  —  canonical physical quantities (quantity-centered check)
+        //  First-loaded file sets the value; subsequent files must match.
+        //  These are available for H|ψ⟩ (Callable / gradient / hessian).
+        // -------------------------------------------------------------------
+        struct FFTGrid { int n1, n2, n3; };
+
+        std::optional<Lattice>                   canonical_lattice_;
+        std::optional<int>                       canonical_nkpt_;
+        std::optional<int>                       canonical_nband_;
+        std::optional<FFTGrid>                   canonical_fft_grid_;
+        std::optional<int>                       canonical_is_SO_;
+        std::optional<int>                       canonical_islda_;
+        std::optional<double>                    canonical_Ecut_;
+        std::optional<int>                       canonical_natom_;
+        std::optional<std::vector<std::array<double, 3>>> canonical_kpt_vec_;
 
         /// Resolve a user-provided path against base_dir_.
         /// Absolute paths are returned as-is; relative paths are prefixed with base_dir_.
         auto resolve(const std::string& path) const -> std::string;
 
         auto checkConsistency() -> void;
+        auto checkPart1() -> void;
+        auto checkPart2() -> void;
+        auto checkConsistencyExtended() -> void;
     };
 }
