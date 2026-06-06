@@ -132,6 +132,41 @@ auto main() -> int {
         if (kv_int.g_idx.size() != 1737) {
             throw std::runtime_error("integer g_idx size mismatch");
         }
+        // Verify G-vectors are centered around origin: both signs present,
+        // and each component's sum is near zero (indicating no systematic offset).
+        {
+            const auto& gs = kv_int.g_idx;
+            int cnt_pos_x = 0, cnt_neg_x = 0;
+            int cnt_pos_y = 0, cnt_neg_y = 0;
+            int cnt_pos_z = 0, cnt_neg_z = 0;
+            long long sum_x = 0, sum_y = 0, sum_z = 0;
+
+            for (const auto& g : gs) {
+                     if (g.x > 0) ++cnt_pos_x; else if (g.x < 0) ++cnt_neg_x;
+                     if (g.y > 0) ++cnt_pos_y; else if (g.y < 0) ++cnt_neg_y;
+                     if (g.z > 0) ++cnt_pos_z; else if (g.z < 0) ++cnt_neg_z;
+                sum_x += g.x; sum_y += g.y; sum_z += g.z;
+            }
+            std::println("sum_x={}, sum_y={}, sum_z={} (ng={})", sum_x, sum_y, sum_z, gs.size());
+
+            if (cnt_pos_x == 0 || cnt_neg_x == 0)
+                throw std::runtime_error("g_idx.x must have both positive and negative values");
+            if (cnt_pos_y == 0 || cnt_neg_y == 0)
+                throw std::runtime_error("g_idx.y must have both positive and negative values");
+            if (cnt_pos_z == 0 || cnt_neg_z == 0)
+                throw std::runtime_error("g_idx.z must have both positive and negative values");
+
+            int ng = static_cast<int>(gs.size());
+            if (std::abs(sum_x) > ng)
+                throw std::runtime_error("g_idx.x sum too large: "
+                    + std::to_string(sum_x) + " (|sum| > ng=" + std::to_string(ng) + ")");
+            if (std::abs(sum_y) > ng)
+                throw std::runtime_error("g_idx.y sum too large: "
+                    + std::to_string(sum_y) + " (|sum| > ng=" + std::to_string(ng) + ")");
+            if (std::abs(sum_z) > ng)
+                throw std::runtime_error("g_idx.z sum too large: "
+                    + std::to_string(sum_z) + " (|sum| > ng=" + std::to_string(ng) + ")");
+        }
         // Per-k-point metadata available in Integer view
         // kpt=0 is Gamma (0,0,0)
 
