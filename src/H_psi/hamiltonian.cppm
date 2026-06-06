@@ -113,6 +113,7 @@ export {
             const Hamiltonian* parent_{nullptr};
             int ikpt_{0};
             int ng_{0};
+            int n1_{0}, n2_{0}, n3_{0};             // FFT grid dimensions
         };
         auto at_k(int ikpt) const -> Callable { return Callable(this, ikpt); }
 

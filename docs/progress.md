@@ -24,11 +24,17 @@ hpsi[ig] += kinetic[ig] * psi[ig]
 - `Callable` 保持 `const Hamiltonian*`，`at_k` 保持 const
 
 ## 局域势
+### 已实现
 通过傅里叶变换快速实现：
 ```
-WG --[FFT:G2R]--> WR --> WR * VR --[FFT:R2G]--> WVG
-H_psi[g] += WVG[g]
+psi[G] --[FFT:G2R]--> psi(r) --> psi(r) * VR(r) --[FFT:R2G]--> (V_loc|ψ⟩)[G]
+hpsi[G] += (V_loc|ψ⟩)[G]
 ```
+
+- Callable 构造时启用 Integer view，捕获 g_idx 和 FFT 网格尺寸 n1,n2,n3
+- `operator()` 中：放置系数 → G2R → 乘 VR → R2G → 提取回 hpsi
+- FFT 变换使用 `math.FFT3D`（基于 pocketfft）
+- G2R 后不含 1/N 因子（forward R2G 已包含缩放）
 
 
 ## Pseudo Potential 非局域项
