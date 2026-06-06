@@ -83,6 +83,7 @@ target_sources(H_psi
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
             src/H_psi.cppm
             src/H_psi/hamiltonian.cppm
+            src/H_psi/structure_factor.cppm
             src/support/density.cppm
     PRIVATE
         src/H_psi/hamiltonian.cpp

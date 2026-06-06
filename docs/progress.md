@@ -40,18 +40,15 @@ hpsi[G] += (V_loc|ψ⟩)[G]
 ## Pseudo Potential 非局域项
 
 ### 结构因子
-- [ ] 命名
-Pseudo Potential 和原子位置有关。对于平面波 exp(iqr), 和原子位置 tau，
-相对于原子位于原点，pseudopotential对平面波的作用会额外多一个 exp(iq tau)的系数
-
-具体实现上，
-1. 我们 GKK IntegerView 时把其中的数据向量看成 -K=-(k+G)
-2. exp函数内部的加法可以拆分成外面的乘法
-所以我们不采用 n1*n2*n3 大小的数组记录，而是使用三个数组，大小分别是 n1 n2 n3 记录 exp(-i b1 tau)^iG exp(-i b2 tau)^jG  exp(-i b3 tau)^kG，然后再乘 exp(-i k tau)
+- [x] 实现 StructureFactor 类（`H_psi.structure_factor`）
+  - 单原子对象，`set_tau`/`set_frac_atomic_position` 设分数坐标，默认 τ=0 → S=1.0
+  - 三种访问入口：不缓存 `operator()(g, k)`（直接 exp）、缓存 `prepare(gs)` + `operator()(ig, k)`（三数组查表）、批处理 `operator()(gs, k, out)`
+- [ ] 命名（已完成，使用 StructureFactor 类）
 
 ### 非局域势计算
 
 - 在 SphericalHarmonics 中加入 reset(l_max), 更改常驻 Y_lm(GKK) 的数量
+- [x] RealSphericalHarmonics::get(l,m) → operator()(l,m) API 统一
 
 - simpson积分 meshtype 从 ncpp 到 bessel_fourier 转换
 ```cpp
