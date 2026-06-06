@@ -11,10 +11,17 @@ H_psi[:] = 0
 ```
 
 ## 动能
-验证 GKK中 kinetic 是否可靠，然后直接使用这个kinetic数据。进行数据累加
+### 已实现
+- Callable 构造时加载 GKK k 点数据 (`loadKPoint`) + 验证 `kinetic = 0.5*(Kx²+Ky²+Kz²)` (`validateKineticConsistency`)
+- 直接使用 GKK 的 kinetic 数据，逐 G-矢量累积到 hpsi：
 ```
-H_psi[g] += kinetic[g] * WG[g]
+hpsi[ig] += kinetic[ig] * psi[ig]
 ```
+- `dim()` 返回 `ng_`（该 k 点的 G-矢量数量）
+
+### 设计决策
+- `gkk_` 标记为 `mutable`，`gkk() const` 返回 `GKK&`，允许在 `Callable::operator()`（const）中调用 `loadKPoint`
+- `Callable` 保持 `const Hamiltonian*`，`at_k` 保持 const
 
 ## 局域势
 通过傅里叶变换快速实现：

@@ -147,12 +147,12 @@ auto Hamiltonian::loadFromDirectory() -> void {
 //  Data accessors
 // ===========================================================================
 
-auto Hamiltonian::gkk() const -> const GKK& {
+auto Hamiltonian::gkk() const -> GKK& {
     if (!gkk_) throw std::runtime_error("Hamiltonian: GKK not loaded");
     return *gkk_;
 }
 
-auto Hamiltonian::wg() const -> const WG& {
+auto Hamiltonian::wg() const -> WG& {
     if (!wg_) throw std::runtime_error("Hamiltonian: WG not loaded");
     return *wg_;
 }

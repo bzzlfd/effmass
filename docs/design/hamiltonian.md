@@ -2,6 +2,10 @@
 
 ## 接口设计
 
+Hamiltonian 作为纯粹的数据综合，通过 `.at_k(ikpt)` 返回内嵌 functor 类 Hamiltonian::Callable，可作为参数传入其他函数。
+callable functor 访问/使用 Hamiltonian 中的数据。
+
+此外，还有两个 `Gradient`、`Hessian` 内嵌类，有别于 $H \ket{\psi}$，它们代表操作 $\frac{\partial H}{\partial k_\alpha} \ket{\psi}$、$\frac{\partial^2 H}{\partial k_{\alpha}\partial k_{\beta} } \ket{\psi}$，二者内部也有类似 `at_k` 成员函数返回内嵌 `Callable` 类作为 functor。
 
 ### H|ψ⟩ 计算接口
 

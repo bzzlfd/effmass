@@ -79,8 +79,8 @@ export {
         auto hasOCC()   const -> bool { return occ_.has_value(); }
 
         // --- owned data access (throws if not loaded) ---
-        auto gkk()    const -> const GKK&;
-        auto wg()     const -> const WG&;
+        auto gkk()    const -> GKK&;
+        auto wg()     const -> WG&;
         auto vr()     const -> const VR&;
         auto rho()    const -> const RHO&;
         auto atom()   const -> const ATOM&;
@@ -112,6 +112,7 @@ export {
 
             const Hamiltonian* parent_{nullptr};
             int ikpt_{0};
+            int ng_{0};
         };
         auto at_k(int ikpt) const -> Callable { return Callable(this, ikpt); }
 
@@ -197,8 +198,8 @@ export {
 
     private:
         std::filesystem::path base_dir_;
-        std::optional<GKK>   gkk_;
-        std::optional<WG>    wg_;
+        mutable std::optional<GKK>   gkk_;
+        mutable std::optional<WG>    wg_;
         std::optional<VR>    vr_;
         std::optional<RHO>   rho_;
         std::optional<ATOM>  atom_;
