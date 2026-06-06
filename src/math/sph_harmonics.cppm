@@ -247,22 +247,41 @@ public:
 
     // Return Y_lm for all G-vectors from the precomputed cache.
     // Requires CacheMode::Full and l <= l_max_resident.
-    auto operator()(int l, int m) -> const std::vector<double>& {
+    auto get(int l, int m) -> const std::vector<double>& {
         if (l < 0 || std::abs(m) > l) {
             throw std::invalid_argument(
-                std::format("RealSphericalHarmonics::operator(): invalid quantum numbers (l={}, m={})", l, m));
+                std::format("RealSphericalHarmonics::get(): invalid quantum numbers (l={}, m={})", l, m));
         }
         if (mode_ == CacheMode::None) {
             throw std::runtime_error(
-                "RealSphericalHarmonics::operator(): not available in CacheMode::None, use compute()");
+                "RealSphericalHarmonics::get(): not available in CacheMode::None, use compute()");
         }
         if (l > l_max_resident_) {
             throw std::runtime_error(
-                std::format("RealSphericalHarmonics::operator(): l={} > l_max_resident_={}, use compute()", l, l_max_resident_));
+                std::format("RealSphericalHarmonics::get(): l={} > l_max_resident_={}, call reset({}) first, or use compute()", l, l_max_resident_, l));
         }
 
         int block = l * l + (m + l);
         return y_lm_[static_cast<std::size_t>(block)];
+    }
+
+    // Convenience: dispatches based on CacheMode.
+    //   Full → get() (cached, by copy)
+    //   None → compute() (on-the-fly, by move)
+    auto operator()(int l, int m) -> std::vector<double> {
+        if (l < 0 || std::abs(m) > l) {
+            throw std::invalid_argument(
+                std::format("RealSphericalHarmonics::operator(): invalid quantum numbers (l={}, m={})", l, m));
+        }
+        if (mode_ == CacheMode::Full) {
+            if (l > l_max_resident_) {
+                throw std::runtime_error(
+                    std::format("RealSphericalHarmonics::operator(): l={} > l_max_resident_={}, call reset({}) first, or use compute()", l, l_max_resident_, l));
+            }
+            return get(l, m);
+        } else {
+            return compute(l, m);
+        }
     }
 
     // Compute Y_lm on the fly. Works in any mode, for any (l,m).

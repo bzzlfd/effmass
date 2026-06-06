@@ -23,7 +23,7 @@ auto test_spherical_harmonics() -> void {
     {
         double theta = 0.0, phi = 0.0;
         RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1), 3};
-        const auto& y00 = sh(0, 0);
+        const auto& y00 = sh.get(0, 0);
         check(near(y00[0], 1.0 / (2.0 * std::sqrt(std::numbers::pi)), eps), "Y_00 constant");
     }
 
@@ -31,7 +31,7 @@ auto test_spherical_harmonics() -> void {
     {
         double theta0 = 0.5, phi0 = 0.0;
         RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
-        const auto& y10 = sh(1, 0);
+        const auto& y10 = sh.get(1, 0);
         double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::cos(theta0);
         check(near(y10[0], expected, eps), "Y_10(theta)");
     }
@@ -40,7 +40,7 @@ auto test_spherical_harmonics() -> void {
     {
         double theta0 = 0.5, phi0 = 0.3;
         RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
-        const auto& y11 = sh(1, 1);
+        const auto& y11 = sh.get(1, 1);
         double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::cos(phi0);
         check(near(y11[0], expected, eps), "Y_11(theta,phi)");
     }
@@ -49,7 +49,7 @@ auto test_spherical_harmonics() -> void {
     {
         double theta0 = 0.5, phi0 = 0.3;
         RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
-        const auto& y1m1 = sh(1, -1);
+        const auto& y1m1 = sh.get(1, -1);
         double expected = std::sqrt(3.0 / (4.0 * std::numbers::pi)) * std::sin(theta0) * std::sin(phi0);
         check(near(y1m1[0], expected, eps), "Y_1,-1(theta,phi)");
     }
@@ -59,7 +59,7 @@ auto test_spherical_harmonics() -> void {
         double theta0 = 0.5, phi0 = 0.3;
         RealSphericalHarmonics sh{std::span<const double>(&theta0, 1), std::span<const double>(&phi0, 1), 3};
         try {
-            sh(2, 3);
+            sh.get(2, 3);
             check(false, "Y_{2,3} should have thrown");
         } catch (const std::invalid_argument&) {
             check(true, "Y_{2,3} throws (|m| > l)");
@@ -79,7 +79,7 @@ auto test_spherical_harmonics_batch() -> void {
 
     for (int l = 0; l <= l_max; ++l) {
         for (int m = -l; m <= l; ++m) {
-            const auto& y_lm = sh(l, m);
+            const auto& y_lm = sh.get(l, m);
             check(y_lm.size() == 1, std::format("batch Y_{{{},{}}} size", l, m));
         }
     }
@@ -97,7 +97,7 @@ auto test_compute() -> void {
         RealSphericalHarmonics sh{std::span<const double>(&theta, 1), std::span<const double>(&phi, 1), 3};
         for (int l = 0; l <= 3; ++l) {
             for (int m = -l; m <= l; ++m) {
-                const auto& cached = sh(l, m);
+                const auto& cached = sh.get(l, m);
                 auto computed = sh.compute(l, m);
                 check(near(cached[0], computed[0], eps),
                       std::format("compute({},{}) matches get", l, m));
@@ -150,7 +150,7 @@ auto test_cache_mode_none() -> void {
 
     // get() throws
     try {
-        sh(0, 0);
+        sh.get(0, 0);
         check(false, "get() should throw in None mode");
     } catch (const std::exception&) {
         check(true, "get() throws in CacheMode::None");
@@ -166,7 +166,7 @@ auto test_get_out_of_range() -> void {
 
     // l > l_max_resident should throw
     try {
-        sh(3, 0);
+        sh.get(3, 0);
         check(false, "get(3,0) should have thrown (l > l_max_resident)");
     } catch (const std::runtime_error&) {
         check(true, "get(3,0) throws (l > l_max_resident)");
@@ -186,20 +186,20 @@ auto test_reset_shrink_expand() -> void {
     // Save pre-shrink references
     int n4 = 2 * l_max + 1;
     int n5 = 2 * (l_max + 1) + 1;
-    auto ref_low = sh(2, 1);
+    auto ref_low = sh.get(2, 1);
     std::vector<std::vector<double>> ref_high(static_cast<std::size_t>(n4));
     std::vector<std::vector<double>> ref_beyond(static_cast<std::size_t>(n5));
     for (int m = -l_max; m <= l_max; ++m)
-        ref_high[static_cast<std::size_t>(m + l_max)] = sh(l_max, m);
+        ref_high[static_cast<std::size_t>(m + l_max)] = sh.get(l_max, m);
     for (int m = -(l_max + 1); m <= (l_max + 1); ++m)
         ref_beyond[static_cast<std::size_t>(m + l_max + 1)] = sh.compute(l_max + 1, m);
 
     // Shrink and verify remaining cache intact
     sh.reset(2);
-    check(near(sh(2, 1)[0], ref_low[0], eps),
+    check(near(sh.get(2, 1)[0], ref_low[0], eps),
           "get(2,1) unchanged after shrink");
     try {
-        sh(3, 0);
+        sh.get(3, 0);
         check(false, "get(3,0) should throw after shrink");
     } catch (const std::runtime_error&) {
         check(true, "get(3,0) throws after shrink");
@@ -208,7 +208,7 @@ auto test_reset_shrink_expand() -> void {
     // Expand back and verify get() and compute() match pre-shrink
     sh.reset(l_max);
     for (int m = -l_max; m <= l_max; ++m) {
-        const auto& y = sh(l_max, m);
+        const auto& y = sh.get(l_max, m);
         check(near(y[0], ref_high[static_cast<std::size_t>(m + l_max)][0], eps),
               std::format("get({},{}) matches pre-shrink after expand", l_max, m));
     }
