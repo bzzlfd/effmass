@@ -54,10 +54,41 @@ auto test_beta_q_interpolator() -> void {
     check(interp0.angularMomentum() == 0, "l check");
 }
 
+auto test_reset_beta() -> void {
+    std::println("\n=== BetaqInterpolator::reset_beta ===");
+
+    int n = 401;
+    double dr = 0.02;
+    std::vector<double> r(n), rab(n, dr), beta1(n), beta2(n);
+    for (int i = 0; i < n; ++i) {
+        r[i] = i * dr;
+        beta1[i] = std::exp(-r[i] * r[i]);
+        beta2[i] = 0.5 * beta1[i];
+    }
+
+    double dq = 0.01, q_max = 10.0;
+    BetaqInterpolator interp(r, rab, beta1, 0, dq, q_max, RadialMeshType::Uniform);
+
+    double v1_0 = interp(0.0);
+    double v1_2 = interp(2.0);
+    check(v1_0 > 0.0, "initial beta: β(0) > 0");
+
+    auto sz_before = interp.table().size();
+    interp.reset_beta(r, rab, beta2);
+
+    double v2_0 = interp(0.0);
+    double v2_2 = interp(2.0);
+    check(near(v2_0, 0.5 * v1_0, 1e-12), "reset_beta halved amplitude: β(0) halved");
+    check(near(v2_2, 0.5 * v1_2, 1e-12), "reset_beta halved amplitude: β(2) halved");
+    check(interp.table().size() == sz_before, "table_ not reallocated after reset_beta");
+    check(interp.step() == dq, "dq unchanged after reset_beta");
+}
+
 auto main() -> int {
     try {
         std::println("=== Fourier-Bessel / Beta(q) Interpolator Tests ===");
         test_beta_q_interpolator();
+        test_reset_beta();
         std::println("\nAll Fourier-Bessel tests passed!");
         return 0;
     } catch (const std::exception& e) {

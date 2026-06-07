@@ -232,7 +232,7 @@ public:
         std::span<const double> beta,
         int l,
         double dq = 0.01,
-        double q_max = 50.0,
+        double q_max = 10.0,  // q_max^2 = 100 Hartree is sufficient for most pseudopotentials; can be increased if needed
         RadialMeshType mesh_type = RadialMeshType::General
     ) : dq_(dq), q_max_(q_max), l_(l), mesh_type_(mesh_type) {
         if (dq <= 0.0) throw std::invalid_argument("BetaqInterpolator: dq must be positive");
@@ -286,6 +286,21 @@ public:
 
         return lagrangeCubicDerivative(
             table_[i0], table_[i0 + 1], table_[i0 + 2], table_[i0 + 3], px, dq_);
+    }
+
+    /// Replace the radial data without reallocating the table vector.
+    /// r, rab, beta become the new source functions; l, dq, q_max and mesh_type
+    /// remain unchanged from construction.
+    auto reset_beta(
+        std::span<const double> r,
+        std::span<const double> rab,
+        std::span<const double> beta
+    ) -> void {
+        int n = static_cast<int>(table_.size());
+        for (int i = 0; i < n; ++i) {
+            double q = i * dq_;
+            table_[static_cast<std::size_t>(i)] = computeBetaq(r, rab, beta, l_, q, mesh_type_);
+        }
     }
 
     auto table() const -> std::span<const double> { return table_; }
