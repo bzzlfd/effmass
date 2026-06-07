@@ -41,9 +41,13 @@ hpsi[G] += (V_loc|ψ⟩)[G]
 
 ### 结构因子
 - [x] 实现 StructureFactor 类（`H_psi.structure_factor`）
-  - 单原子对象，`set_tau`/`set_frac_atomic_position` 设分数坐标，默认 τ=0 → S=1.0
-  - 三种访问入口：不缓存 `operator()(g, k)`（直接 exp）、缓存 `prepare(gs)` + `operator()(ig, k)`（三数组查表）、批处理 `operator()(gs, k, out)`
-- [ ] 命名（已完成，使用 StructureFactor 类）
+  - 两种模式：`CacheMode::None`（直接 exp 计算，不缓存）和 `CacheMode::Separable`（分离式 1D 相位表缓存，默认模式）
+  - Separable 模式利用恒等式：
+    `S(g,k) = exp(-i·2π·(k+g)·τ) = exp(-i·2π·k·τ) × p_x[g.x] × p_y[g.y] × p_z[g.z]`
+    其中 `p_x[i] = exp(-i·2π·(i - n1/2)·τ_x)`（p_y, p_z 同理）
+  - 缓存：三个 1D 复数向量，大小 `n_i + 2*CACHE_BUFFER`，`CACHE_BUFFER = 4`，构造时预计算
+  - `cacheIndex(g, n) = g + n/2 + CACHE_BUFFER` 映射 G 矢量分量到缓存索引
+  - `reset_tau()` / `reset_frac_atomic_position()` 重建缓存
 
 ### 非局域势计算
 
@@ -67,7 +71,7 @@ for(ityp: ATOM.eachtype())
         for(l=0; l<=l_max; ++l)
             V_NL_l = V_psp.projectorBlock(l)
             for(ib=0; ib<=nb; ++ib)
-                beta_q_interpolaror = BetaQInterpolator(V_psp.mesh, V_NL_l.beta[ib])  // handle q_max 
+                beta_q_interpolaror = BetaqInterpolator(V_psp.mesh, V_NL_l.beta[ib])  // handle q_max 
                 beta_q = (GKK => beta_q_interpolaror)
                 for(m=-l; m<=l; ++m)
                     projector = (beta_q .* Y_lm .* structure_factor)

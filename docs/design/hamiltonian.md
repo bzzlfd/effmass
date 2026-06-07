@@ -187,3 +187,64 @@ h.checkConsistencyExtended({
 - **规范量集中存储**：避免 H|ψ⟩ 计算在多个文件对象间查找所需数据
 - **三部分分离**：轻量级自动检查与重量级计算验证解耦
 - **可扩展**：新数据类型只需在对应 Part 的检查块中增加条目，无需新增 N 个 pair
+
+
+
+
+
+
+
+
+
+# 结构因子（StructureFactor）
+
+在原点的原子见到的平面波是 $\exp(iqr)$。在 $\tau$ 处看到的这个平面波，等价于在原点看到的 $\exp(iq(r+\tau))$（平面波向 $-\tau$ 平移）。
+因此对于通用程序，应该为位于 $\tau$ 的原子引入结构因子 $\exp(iq\tau)$。
+
+`StructureFactor`（`H_psi.structure_factor`）用于非局域赝势计算中的结构因子项：
+
+$$S(g,k) = \exp(-i \cdot 2\pi \cdot (k+g) \cdot \tau)$$
+
+其中 $\tau$ 为原子位置（分数坐标），$k$ 为 k 点（分数坐标），$g$ 为整数 G 矢量三元组。
+
+## 缓存策略
+
+**`CacheMode::None`** — 每次 `operator()(g, k)` 直接调用 `std::exp` 计算复数相位。适合原子数少、调用次数不频繁的场景。
+
+**`CacheMode::Separable`**（默认）— 利用指数函数的可分离性将 3D 计算拆为 3 个 1D 查表：
+
+```
+S(g,k) = exp(-i·2π·k·τ) × p_x[g.x] × p_y[g.y] × p_z[g.z]
+p_x[i] = exp(-i·2π·(i - n₁/2)·τ_x)
+```
+
+缓存数组大小为 `n_i + 2·CACHE_BUFFER`（`CACHE_BUFFER = 4`），构造时通过 `buildCache()` 预计算全部 `p_x_, p_y_, p_z_`。G 矢量分量到索引的映射：
+
+```
+cacheIndex(g, n) = static_cast<size_t>(g + n/2 + CACHE_BUFFER)
+```
+
+`CACHE_BUFFER` 为两侧各预留 4 个额外槽位，防止 G 矢量分量恰好等于边界值（`±n/2`）时越界。调用者需保证 G 分量在 `[-n/2 - B, n/2 - 1 + B]` 范围内。
+
+## 使用方式
+
+```cpp
+// Separable 模式（默认）：构造时预计算 1D 相位表
+StructureFactor sf(tau, n1, n2, n3, StructureFactor::CacheMode::Separable);
+
+// None 模式：每次调用直接 exp
+StructureFactor sf(tau, n1, n2, n3, StructureFactor::CacheMode::None);
+
+// 计算 S(g, k)
+auto s = sf(g, k);
+
+// 更新原子位置（Separable 模式下自动重建缓存）
+sf.reset_tau(new_tau);
+sf.reset_frac_atomic_position(new_tau);  // 语义别名
+```
+
+## 设计要点
+
+- **分离式缓存仅在构造时构建**：缓存内容完全由 `τ` 和 FFT 网格 `n1,n2,n3` 决定，因此 `reset_tau()` 时必须重建
+- **`CACHE_BUFFER` 是边界安全垫**：不是可调参数（`constexpr`），因为 G 矢量的合理范围由物理截断保证，Buffer 仅防止极端边界情况
+- **None 模式零额外内存**：不分配 p_x/y/z 缓存，适合一次性使用或内存敏感场景
