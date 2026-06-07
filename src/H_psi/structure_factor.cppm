@@ -25,9 +25,9 @@ export {
 ///                                     × exp(-i·2π·g_z·τ_z)
 ///
 /// In Separable mode the cache stores:
-///   p_x[i] = exp(-i·2π·(i - n1/2)·τ_x)   i = 0 … n1-1
+///   p_x[i] = exp(-i·2π·(G_x)·τ_x)   G_x = i - n1/2 - B,  B = CACHE_BUFFER
 ///   (p_y, p_z similarly)
-/// so that S(g,k) = exp(-i·2π·k·τ) × p_x[g.x + n1/2] × p_y[g.y + n2/2] × p_z[g.z + n3/2]
+/// so that S(g,k) = exp(-i·2π·k·τ) × p_x[g.x + n1/2 + B] × p_y[g.y + n2/2 + B] × p_z[g.z + n3/2 + B]
 /// with G-vector components from the centered integer convention (e.g. GKK integer view).
 class StructureFactor {
 public:
@@ -56,14 +56,18 @@ public:
     auto reset_frac_atomic_position(vector3d<double> fc) -> void;
 
 private:
+    static constexpr int CACHE_BUFFER = 4;   // extra entries on each side of p_?_
     CacheMode mode_;
     vector3d<double> tau_{};
     int n1_{}, n2_{}, n3_{};
     std::vector<std::complex<double>> p_x_, p_y_, p_z_;
 
-    /// Map G integer component (centered convention, [-n/2, n/2-1]) to cache index [0, n-1].
+    /// Map G integer component (centered convention) to cache index.
+    /// Valid range: g ∈ [-n/2 - CACHE_BUFFER, n/2 - 1 + CACHE_BUFFER].
     static auto cacheIndex(int g, int n) -> std::size_t {
-        return static_cast<std::size_t>(g + n / 2);
+        int idx = g + n / 2 + CACHE_BUFFER;
+        assert(idx >= 0);
+        return static_cast<std::size_t>(idx);
     }
 
     auto buildCache() -> void;
@@ -97,11 +101,11 @@ auto StructureFactor::operator()(
     }
 
     // Separable mode:
-    //   exp(-i·2π·k·τ) × p_x[g.x + n1/2] × p_y[g.y + n2/2] × p_z[g.z + n3/2]
+    //   exp(-i·2π·k·τ) × p_x[g.x + n1/2 + B] × p_y[g.y + n2/2 + B] × p_z[g.z + n3/2 + B]
+    //   where B = CACHE_BUFFER.
     //
-    // Precondition: FFT grid guarantees g components in [-n/2, n/2-1], so
-    //   g.x + n1/2 ∈ [0, n1-1]  (and similarly for y, z).
-    // See H_psi/structure_factor.cppm design notes for proof.
+    // Precondition: g components stay within the buffered range,
+    //   g ∈ [-n/2 - B, n/2 - 1 + B], guaranteed by the caller.
     double kd = -2.0 * std::numbers::pi
               * (k.x * tau_.x + k.y * tau_.y + k.z * tau_.z);
     auto kp = std::exp(std::complex<double>(0, kd));
@@ -129,24 +133,26 @@ auto StructureFactor::reset_frac_atomic_position(vector3d<double> fc) -> void {
 }
 
 auto StructureFactor::buildCache() -> void {
-    p_x_.resize(static_cast<std::size_t>(n1_));
-    p_y_.resize(static_cast<std::size_t>(n2_));
-    p_z_.resize(static_cast<std::size_t>(n3_));
+    auto buf = static_cast<int>(CACHE_BUFFER);
+    p_x_.resize(static_cast<std::size_t>(n1_) + CACHE_BUFFER * 2);
+    p_y_.resize(static_cast<std::size_t>(n2_) + CACHE_BUFFER * 2);
+    p_z_.resize(static_cast<std::size_t>(n3_) + CACHE_BUFFER * 2);
 
     int shift_x = n1_ / 2;
     int shift_y = n2_ / 2;
     int shift_z = n3_ / 2;
 
-    // p_x[i] = exp(-i·2π·(i - n1/2)·τ_x)
-    // Uses the SAME n_/2 (integer) as cacheIndex(), so that lookup and build
-    // refer to the same centered-convention G:  index = g + n/2 ↔ G = i - n/2.
-    for (int i = 0; i < n1_; ++i)
-        p_x_[static_cast<std::size_t>(i)]
-            = std::exp(std::complex<double>(0, -2.0 * std::numbers::pi * (i - shift_x) * tau_.x));
-    for (int i = 0; i < n2_; ++i)
-        p_y_[static_cast<std::size_t>(i)]
-            = std::exp(std::complex<double>(0, -2.0 * std::numbers::pi * (i - shift_y) * tau_.y));
-    for (int i = 0; i < n3_; ++i)
-        p_z_[static_cast<std::size_t>(i)]
-            = std::exp(std::complex<double>(0, -2.0 * std::numbers::pi * (i - shift_z) * tau_.z));
+    // Iterate over the full G range (including buffer) and use cacheIndex
+    // directly, so that build and lookup share the identical mapping.
+    int g_min = -shift_x - buf;
+    int g_max = n1_ - shift_x + buf;   // exclusive
+    for (int g = g_min; g < g_max; ++g)
+        p_x_[cacheIndex(g, n1_)]
+            = std::exp(std::complex<double>(0, -2.0 * std::numbers::pi * g * tau_.x));
+    for (int g = -shift_y - buf; g < n2_ - shift_y + buf; ++g)
+        p_y_[cacheIndex(g, n2_)]
+            = std::exp(std::complex<double>(0, -2.0 * std::numbers::pi * g * tau_.y));
+    for (int g = -shift_z - buf; g < n3_ - shift_z + buf; ++g)
+        p_z_[cacheIndex(g, n3_)]
+            = std::exp(std::complex<double>(0, -2.0 * std::numbers::pi * g * tau_.z));
 }
