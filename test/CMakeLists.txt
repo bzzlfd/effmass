@@ -67,11 +67,11 @@ target_link_libraries(test-wg-fft PRIVATE io math)
 add_test(NAME test-wg-fft COMMAND test-wg-fft WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Hamiltonian tests
-add_executable(test-hamiltonian test_hamiltonian.cpp)
+add_executable(test-hamiltonian H_psi/test_hamiltonian.cpp)
 target_link_libraries(test-hamiltonian PRIVATE H_psi)
 add_test(NAME test-hamiltonian COMMAND test-hamiltonian WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # StructureFactor tests
-add_executable(test-structure-factor test_structure_factor.cpp)
+add_executable(test-structure-factor H_psi/test_structure_factor.cpp)
 target_link_libraries(test-structure-factor PRIVATE H_psi)
 add_test(NAME test-structure-factor COMMAND test-structure-factor WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
