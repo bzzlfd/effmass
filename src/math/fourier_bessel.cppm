@@ -5,14 +5,25 @@ import math.sph_bessel;
 
 export {
     enum class RadialMeshType : int;
-    class BetaQInterpolator;
+    class BetaqInterpolator;
 }
 
 
-enum class RadialMeshType {
+// =============================================================================
+//  Enums
+// =============================================================================
+
+enum class RadialMeshType : int {
     Uniform,
     General,
 };
+
+
+// =============================================================================
+//  Internal helpers — not exported, used by BetaqInterpolator
+// =============================================================================
+
+namespace {
 
 constexpr double FOUR_PI = 4.0 * std::numbers::pi;
 
@@ -79,7 +90,7 @@ auto simpson(std::span<const double> f, std::span<const double> rab,
     }
 }
 
-auto integrateBetaQ(
+auto computeBetaq(
     std::span<const double> r,
     std::span<const double> rab,
     std::span<const double> beta,
@@ -127,7 +138,7 @@ auto integrateBetaQ(
 // Batch version: evaluate at multiple q points while reusing the
 // SphericalBesselJ buffers (r_ / j_curr_ / j_next_) and the integrand
 // vector across reset() calls, avoiding repeated heap allocations.
-auto integrateBetaQ(
+auto computeBetaq(
     std::span<const double> r,
     std::span<const double> rab,
     std::span<const double> beta,
@@ -138,7 +149,7 @@ auto integrateBetaQ(
 ) -> void {
     int nq = static_cast<int>(qs.size());
     if (static_cast<std::size_t>(nq) != out.size()) {
-        throw std::invalid_argument("integrateBetaQ: qs and out size mismatch");
+        throw std::invalid_argument("computeBetaq: qs and out size mismatch");
     }
     if (nq == 0) return;
 
@@ -204,48 +215,18 @@ auto lagrangeCubicDerivative(
             f3 * ( ux*vx - px*vx - px*ux) / 6.0) / dq;
 }
 
-
-namespace archived {
-
-// Single-q Fourier-Bessel transform of a radial beta function.
-// Returns: 4*pi * integral_0^R  beta(r) * r * j_l(q*r) * dr  (without (-i)^l)
-auto fourierBesselBeta(
-    std::span<const double> r,
-    std::span<const double> rab,
-    std::span<const double> beta,
-    int l,
-    double q,
-    RadialMeshType mesh_type = RadialMeshType::General
-) -> double {
-    double out = 0.0;
-    integrateBetaQ(r, rab, beta, l,
-                           std::span<const double>(&q, 1),
-                           std::span<double>(&out, 1), mesh_type);
-    return out;
-}
-
-// Batch version: evaluate at multiple q points.
-auto fourierBesselBeta(
-    std::span<const double> r,
-    std::span<const double> rab,
-    std::span<const double> beta,
-    int l,
-    std::span<const double> qs,
-    std::span<double> out,
-    RadialMeshType mesh_type = RadialMeshType::General
-) -> void {
-    integrateBetaQ(r, rab, beta, l, qs, out, mesh_type);
-}
+} // anonymous namespace (internal helpers)
 
 
-} // namespace archived
-
+// =============================================================================
+//  BetaqInterpolator — exported class
+// =============================================================================
 
 // Tabulated interpolator for beta(q) = 4*pi * integral beta(r) * r * j_l(qr) * dr.
 // Uses 4-point Lagrange cubic interpolation, matching QE's interp_beta / interp_dbeta.
-class BetaQInterpolator {
+class BetaqInterpolator {
 public:
-    BetaQInterpolator(
+    BetaqInterpolator(
         std::span<const double> r,
         std::span<const double> rab,
         std::span<const double> beta,
@@ -254,8 +235,8 @@ public:
         double q_max = 50.0,
         RadialMeshType mesh_type = RadialMeshType::General
     ) : dq_(dq), q_max_(q_max), l_(l), mesh_type_(mesh_type) {
-        if (dq <= 0.0) throw std::invalid_argument("BetaQInterpolator: dq must be positive");
-        if (q_max < 0.0) throw std::invalid_argument("BetaQInterpolator: q_max must be non-negative");
+        if (dq <= 0.0) throw std::invalid_argument("BetaqInterpolator: dq must be positive");
+        if (q_max < 0.0) throw std::invalid_argument("BetaqInterpolator: q_max must be non-negative");
 
         // Build table up to q_max + 3*dq so that cubic interpolation
         // has full 4-point support throughout [0, q_max].
@@ -263,14 +244,14 @@ public:
         table_.resize(n);
         for (int i = 0; i < n; ++i) {
             double q = i * dq;
-            table_[i] = integrateBetaQ(r, rab, beta, l, q, mesh_type);
+            table_[i] = computeBetaq(r, rab, beta, l, q, mesh_type);
         }
     }
 
     // Function value at q using centered 4-point Lagrange cubic interpolation.
     auto operator()(double q) const -> double {
-        if (q < 0.0) throw std::domain_error("BetaQInterpolator: q must be non-negative");
-        if (q > q_max_) throw std::domain_error("BetaQInterpolator: q exceeds q_max");
+        if (q < 0.0) throw std::domain_error("BetaqInterpolator: q must be non-negative");
+        if (q > q_max_) throw std::domain_error("BetaqInterpolator: q exceeds q_max");
         if (q == 0.0) return table_.front();
 
         double s = q / dq_;
@@ -289,8 +270,8 @@ public:
 
     // Derivative d/dq of beta(q) using centered 4-point Lagrange cubic interpolation.
     auto derivative(double q) const -> double {
-        if (q < 0.0) throw std::domain_error("BetaQInterpolator: q must be non-negative");
-        if (q > q_max_) throw std::domain_error("BetaQInterpolator: q exceeds q_max");
+        if (q < 0.0) throw std::domain_error("BetaqInterpolator: q must be non-negative");
+        if (q > q_max_) throw std::domain_error("BetaqInterpolator: q exceeds q_max");
         if (q == 0.0) return 0.0;
 
         double s = q / dq_;
@@ -321,13 +302,48 @@ private:
 };
 
 
+// =============================================================================
+//  Archived — retained for reference, not used by exported API
+// =============================================================================
+
 namespace archived {
+
+// Single-q Fourier-Bessel transform of a radial beta function.
+// Returns: 4*pi * integral_0^R  beta(r) * r * j_l(q*r) * dr  (without (-i)^l)
+auto fourierBesselBeta(
+    std::span<const double> r,
+    std::span<const double> rab,
+    std::span<const double> beta,
+    int l,
+    double q,
+    RadialMeshType mesh_type = RadialMeshType::General
+) -> double {
+    double out = 0.0;
+    computeBetaq(r, rab, beta, l,
+                   std::span<const double>(&q, 1),
+                   std::span<double>(&out, 1), mesh_type);
+    return out;
+}
+
+// Batch version: evaluate at multiple q points.
+auto fourierBesselBeta(
+    std::span<const double> r,
+    std::span<const double> rab,
+    std::span<const double> beta,
+    int l,
+    std::span<const double> qs,
+    std::span<double> out,
+    RadialMeshType mesh_type = RadialMeshType::General
+) -> void {
+    computeBetaq(r, rab, beta, l, qs, out, mesh_type);
+}
+
 
 // Estimate the maximum interpolation error by evaluating at half-integer
 // multiples of the table step and comparing with the direct integral.
 // Returns the maximum absolute deviation.
 auto estimateInterpolationError(
-    const BetaQInterpolator& interp,
+    const BetaqInterpolator& interp,
     std::span<const double> r,
     std::span<const double> rab,
     std::span<const double> beta,
@@ -344,7 +360,7 @@ auto estimateInterpolationError(
     for (int i = 0; i < n_check; ++i) {
         double q = (i + 0.5) * dq;
         if (q > q_max) break;
-        double exact = integrateBetaQ(r, rab, beta, l, q, mesh_type);
+        double exact = computeBetaq(r, rab, beta, l, q, mesh_type);
         double approx = interp(q);
         double err = std::abs(exact - approx);
         if (err > max_err) max_err = err;

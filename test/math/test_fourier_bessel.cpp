@@ -32,7 +32,7 @@ auto test_beta_q_interpolator() -> void {
     double q_max = 10.0;
 
     // l=0 interpolator
-    BetaQInterpolator interp0(r, rab, beta, 0, dq, q_max, RadialMeshType::Uniform);
+    BetaqInterpolator interp0(r, rab, beta, 0, dq, q_max, RadialMeshType::Uniform);
     double val0 = interp0(0.0);
     check(val0 > 0.0, "beta(0) > 0 for Gaussian-like l=0");
 
@@ -45,7 +45,7 @@ auto test_beta_q_interpolator() -> void {
     check(near(interp0.derivative(0.0), 0.0, 1e-12), "d(beta)/dq = 0 at q=0 for l=0");
 
     // l=1 interpolator
-    BetaQInterpolator interp1(r, rab, beta, 1, dq, q_max, RadialMeshType::Uniform);
+    BetaqInterpolator interp1(r, rab, beta, 1, dq, q_max, RadialMeshType::Uniform);
     check(near(interp1(0.0), 0.0, 1e-14), "beta(0) = 0 for l=1 (j_1(0)=0)");
 
     // Table properties
