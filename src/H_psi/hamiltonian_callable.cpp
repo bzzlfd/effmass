@@ -53,7 +53,16 @@ void Hamiltonian::Callable::operator()(
     //  kinetic[ig] = |G+k|²/2, read from OUT.GKK.  Since T is diagonal in
     //  G-space, each plane-wave coefficient is multiplied independently.
     // ---------------------------------------------------------------------------
+#ifdef HPSI_DEBUG
+    double dbg_psi_norm2 = 0.0;
+    double dbg_e_kin = 0.0;
+#endif
     for (int ig = 0; ig < ng_; ++ig) {
+#ifdef HPSI_DEBUG
+        auto nrm = std::norm(psi[ig]);
+        dbg_psi_norm2 += nrm;
+        dbg_e_kin += kv.kinetic[ig] * nrm;
+#endif
         hpsi[ig] += kv.kinetic[ig] * psi[ig];
     }
 
@@ -96,6 +105,10 @@ void Hamiltonian::Callable::operator()(
 
     fft(grid, R2G);
 
+#ifdef HPSI_DEBUG
+    std::vector<std::complex<double>> dbg_vloc_contrib(
+        static_cast<std::size_t>(ng_));
+#endif
     for (int ig = 0; ig < ng_; ++ig) {
         auto i = ((kv.g_idx[ig].x % n1_) + n1_) % n1_;
         auto j = ((kv.g_idx[ig].y % n2_) + n2_) % n2_;
@@ -103,6 +116,9 @@ void Hamiltonian::Callable::operator()(
         auto idx = static_cast<std::size_t>(i) * n2_ * n3_
                  + static_cast<std::size_t>(j) * n3_
                  + static_cast<std::size_t>(k);
+#ifdef HPSI_DEBUG
+        dbg_vloc_contrib[ig] = grid[idx];
+#endif
         hpsi[ig] += grid[idx];
     }
 
@@ -132,6 +148,10 @@ void Hamiltonian::Callable::operator()(
     const auto& atom = parent_->atom();
     double q_max = std::sqrt(2.0 * parent_->gkk().meta.Ecut) + 2.0;
     double norm_coeff = 1.0 / std::sqrt(parent_->gkk().meta.lattice.volume());
+
+#ifdef HPSI_DEBUG
+    double dbg_e_nl = 0.0;
+#endif
 
     for (auto&& type : atom.eachType()) {
         const auto& ncp = parent_->ncpp(type.z);
@@ -204,6 +224,10 @@ void Hamiltonian::Callable::operator()(
                             inner += std::conj(p) * psi[ig];
                         }
 
+#ifdef HPSI_DEBUG
+                        dbg_e_nl += lambda * std::norm(inner);
+#endif
+
                         // Second pass:  hpsi += λ · inner · |projector⟩
                         for (int ig = 0; ig < ng_; ++ig) {
                             auto p = std::complex<double>(
@@ -215,4 +239,55 @@ void Hamiltonian::Callable::operator()(
             }
         }
     }
+
+#ifdef HPSI_DEBUG
+    // --- debug: per-term expectation values (all include ×Ω) ---
+    //  ⟨ψ|O|ψ⟩ = Ω · Σ_g ψ*[g] · (O|ψ⟩)[g]
+    //  where Ω is the cell volume.
+    //
+    //  Eigenvalue:  E = ⟨ψ|H|ψ⟩ / ⟨ψ|ψ⟩
+    // -----------------------------------------------------------------------
+    std::complex<double> dbg_e_loc = 0.0;
+    for (int ig = 0; ig < ng_; ++ig) {
+        dbg_e_loc += std::conj(psi[ig]) * dbg_vloc_contrib[ig];
+    }
+
+    std::complex<double> dbg_e_total = 0.0;
+    for (int ig = 0; ig < ng_; ++ig) {
+        dbg_e_total += std::conj(psi[ig]) * hpsi[ig];
+    }
+
+    double vol = parent_->gkk().meta.lattice.volume();
+
+    // True expectation values (include cell volume)
+    double exp_psi   = dbg_psi_norm2 * vol;          // ⟨ψ|ψ⟩  — should be 1
+    double exp_T     = dbg_e_kin     * vol;          // ⟨ψ|T|ψ⟩
+    double exp_V     = std::real(dbg_e_loc) * vol;   // ⟨ψ|V_loc|ψ⟩
+    double exp_NL    = dbg_e_nl      * vol;          // ⟨ψ|V_NL|ψ⟩
+    double exp_H     = std::real(dbg_e_total) * vol; // ⟨ψ|H|ψ⟩
+
+    // Normalised eigenvalue contributions (divide by ⟨ψ|ψ⟩)
+    double e_kin     = exp_T  / exp_psi;
+    double e_loc     = exp_V  / exp_psi;
+    double e_nl      = exp_NL / exp_psi;
+    double e_sum     = (exp_T + exp_V + exp_NL) / exp_psi;
+    double e_total   = exp_H / exp_psi;
+
+    int wg_iband = parent_->hasWG() ? parent_->wg().current_iband() : -1;
+    std::println("");
+    std::println("[HPSI_DEBUG] ikpt={}  iband(WG)={}  ng={}", ikpt_, wg_iband, ng_);
+    std::println("[HPSI_DEBUG]   ⟨ψ|ψ⟩       = {:>18.10f}  (should = 1)", exp_psi);
+    std::println("[HPSI_DEBUG]   ─────────────── expectation values ───────────────");
+    std::println("[HPSI_DEBUG]   ⟨ψ|T|ψ⟩     = {:>18.10f}", exp_T);
+    std::println("[HPSI_DEBUG]   ⟨ψ|V_loc|ψ⟩ = {:>18.10f}", exp_V);
+    std::println("[HPSI_DEBUG]   ⟨ψ|V_NL|ψ⟩  = {:>18.10f}", exp_NL);
+    std::println("[HPSI_DEBUG]   ─────────────── eigenvalues (÷⟨ψ|ψ⟩) ─────────────");
+    std::println("[HPSI_DEBUG]   E_kin       = {:>18.10f}", e_kin);
+    std::println("[HPSI_DEBUG]   E_loc       = {:>18.10f}", e_loc);
+    std::println("[HPSI_DEBUG]   E_NL        = {:>18.10f}", e_nl);
+    std::println("[HPSI_DEBUG]   ──────────────────────────────────────────────────");
+    std::println("[HPSI_DEBUG]   E_sum       = {:>18.10f}", e_sum);
+    std::println("[HPSI_DEBUG]   E_total     = {:>18.10f}  (Rayleigh)", e_total);
+    std::println("[HPSI_DEBUG]   Im(E_total) = {:>18.10e}", std::imag(dbg_e_total) / dbg_psi_norm2);
+#endif
 }

@@ -78,6 +78,10 @@ target_link_libraries(math PRIVATE utils)
 
 # Library target for H_psi module
 add_library(H_psi)
+option(HPSI_DEBUG "Print per-term H|psi> expectation value breakdown" OFF)
+if(HPSI_DEBUG)
+    target_compile_definitions(H_psi PRIVATE HPSI_DEBUG=1)
+endif()
 target_sources(H_psi
     PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES

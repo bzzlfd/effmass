@@ -42,6 +42,7 @@
 *.dwo
 
 /reference/
+Testing/
 *.immature
 memo*.md
 .tree
