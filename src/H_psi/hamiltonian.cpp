@@ -109,6 +109,7 @@ auto Hamiltonian::loadNCPPs(const std::string& directory) -> void {
         auto ext = entry.path().extension();
         if (ext == ".UPF" || ext == ".upf") {
             ncpps_.emplace_back(UPF(entry.path().string()));
+            ncpps_.back().advance.diagonalizeNonlocal();
             std::println("  loaded: {}", entry.path().filename().string());
         }
     }

@@ -75,3 +75,8 @@ add_test(NAME test-hamiltonian COMMAND test-hamiltonian WORKING_DIRECTORY ${CMAK
 add_executable(test-structure-factor H_psi/test_structure_factor.cpp)
 target_link_libraries(test-structure-factor PRIVATE H_psi)
 add_test(NAME test-structure-factor COMMAND test-structure-factor WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# H|ψ⟩ = E|ψ⟩ eigenstate test
+add_executable(test-hpsi-eigen H_psi/test_hpsi_eigen.cpp)
+target_link_libraries(test-hpsi-eigen PRIVATE H_psi)
+add_test(NAME test-hpsi-eigen COMMAND test-hpsi-eigen WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

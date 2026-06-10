@@ -34,7 +34,8 @@ public:
     enum class CacheMode { None, Separable };
 
     /// Construct a StructureFactor.
-    /// @param tau   atomic position in fractional coordinates
+    /// @param tau   atomic position in fractional coordinates, each component
+    ///              in (-0.5, 0.5] (the convention from GKK's inferkPoint)
     /// @param n1,n2,n3   FFT grid dimensions (used in Separable mode only)
     /// @param mode  None or Separable (default: Separable)
     explicit StructureFactor(

@@ -5,6 +5,7 @@ export module H_psi.hamiltonian;
 import std;
 import io;
 import pseudo;
+import math;
 
 // ===================================================================
 //  ExtendedCheck  —  select which heavyweight checks to run in

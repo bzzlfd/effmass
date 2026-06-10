@@ -233,8 +233,9 @@ public:
         int l,
         double dq = 0.01,
         double q_max = 10.0,  // q_max^2 = 100 Hartree is sufficient for most pseudopotentials; can be increased if needed
-        RadialMeshType mesh_type = RadialMeshType::General
-    ) : dq_(dq), q_max_(q_max), l_(l), mesh_type_(mesh_type) {
+        RadialMeshType mesh_type = RadialMeshType::General,
+        double norm_coeff = 1.0  // plane-wave normalization factor, e.g. 1/sqrt(Omega)
+    ) : dq_(dq), q_max_(q_max), l_(l), mesh_type_(mesh_type), norm_coeff_(norm_coeff) {
         if (dq <= 0.0) throw std::invalid_argument("BetaqInterpolator: dq must be positive");
         if (q_max < 0.0) throw std::invalid_argument("BetaqInterpolator: q_max must be non-negative");
 
@@ -244,7 +245,7 @@ public:
         table_.resize(n);
         for (int i = 0; i < n; ++i) {
             double q = i * dq;
-            table_[i] = computeBetaq(r, rab, beta, l, q, mesh_type);
+            table_[i] = computeBetaq(r, rab, beta, l, q, mesh_type) * norm_coeff_;
         }
     }
 
@@ -299,7 +300,7 @@ public:
         int n = static_cast<int>(table_.size());
         for (int i = 0; i < n; ++i) {
             double q = i * dq_;
-            table_[static_cast<std::size_t>(i)] = computeBetaq(r, rab, beta, l_, q, mesh_type_);
+            table_[static_cast<std::size_t>(i)] = computeBetaq(r, rab, beta, l_, q, mesh_type_) * norm_coeff_;
         }
     }
 
@@ -307,11 +308,13 @@ public:
     auto step() const -> double { return dq_; }
     auto maxQ() const -> double { return q_max_; }
     auto angularMomentum() const -> int { return l_; }
+    auto normCoeff() const -> double { return norm_coeff_; }
 
 private:
     int l_;
     double dq_;
     double q_max_;
+    double norm_coeff_;
     RadialMeshType mesh_type_;
     std::vector<double> table_;
 };

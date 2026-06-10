@@ -49,30 +49,43 @@ hpsi[G] += (V_loc|ψ⟩)[G]
   - `cacheIndex(g, n) = g + n/2 + CACHE_BUFFER` 映射 G 矢量分量到缓存索引
   - `reset_tau()` / `reset_frac_atomic_position()` 重建缓存
 
+
+### 傅里叶-贝塞尔变换
+在目前 fourier_bessel.cppm 中，实现的是用 $e^{i\bm{q}\cdot\bm{r}}$ 变换 $\beta(r)$。
+
+然而平面波 $\ket{\bm{q}}=e^{i\bm{q}\cdot\bm{r}}$ 的归一化系数依赖于晶格体积。
+$$
+\int_\Omega \mathrm{d}\bm{r} \braket{\bm{q}|\bm{q}} = 1 \cdot \Omega
+$$
+所以归一化系数应该是 $1/\sqrt{\Omega}$。
+
+我们在构造函数里多引入一个归一化系数参数。
+
+
 ### 非局域势计算
 
-- 在 SphericalHarmonics 中加入 reset(l_max), 更改常驻 Y_lm(GKK) 的数量
-- [x] RealSphericalHarmonics::get(l,m) → operator()(l,m) API 统一
+实现了非局域项在 `Callable::operator()` 中的计算，位置在动能和局域势项之后。
 
-- simpson积分 meshtype 从 ncpp 到 bessel_fourier 转换
-```cpp
-  auto mt = (ncpp.mesh.type == MeshType::Uniform)
-            ? RadialMeshType::Uniform : RadialMeshType::General;
-  simpson(f, rab, mt);
-```
+利用 `RealSphericalHarmonics`、`StructureFactor`、`BetaqInterpolator` 的 reset 接口避免循环中重复创建：
+
+
+#### 数据流
 
 
 ```cpp
+Y_lm = SphericalHarmonics.reset(GKK, l_max)
+structure_factor = StructureFactor.init(n1, n2, n3, mode=Separable)
 for(ityp: ATOM.eachtype())
+    auto& V_psp = ncpp[ityp];
+    V_psp.diagnoalizeNonlocal()
+    beta_q_interpolaror = BetaqInterpolator.init(V_psp.mesh.r, V_psp.mesh.rab, l=0, q_max)
     for(iatm: ATOM.eachatom(ityp))
-        V_psp = ncpp(ityp)
-        Y_lm = SphericalHarmonics.reset(GKK, l_max)
-        structure_factor = structure_factor(GKK)
+        structure_factor.reset_tau(tau)
         for(l=0; l<=l_max; ++l)
             V_NL_l = V_psp.projectorBlock(l)
             for(ib=0; ib<=nb; ++ib)
-                beta_q_interpolaror = BetaqInterpolator(V_psp.mesh, V_NL_l.beta[ib])  // handle q_max 
-                beta_q = (GKK => beta_q_interpolaror)
+                beta_q_interpolaror.reset_beta(V_NL_l.beta[ib], l)  // handle q_max 
+                beta_q = beta_q_interpolaror(GKK::KVecs.q)
                 for(m=-l; m<=l; ++m)
                     projector = (beta_q .* Y_lm .* structure_factor)
                     H_psi[:] +=
@@ -80,7 +93,6 @@ for(ityp: ATOM.eachtype())
                         V_NL_l.B[ib, ib] * 
                         projector[:]
 ```
-
 
 
 
