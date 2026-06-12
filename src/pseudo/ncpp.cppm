@@ -429,39 +429,86 @@ auto NCPP::Advance::diagonalizeNonlocal() -> void {
     const int n = p.meta.number_of_proj;
     if (n == 0) return;
 
-    // Diagonalize B = U * Lambda * U^T
-    auto result = diagonalize_jacobi(p.nonlocal.B.data, n);
-    if (!result.converged) {
-        throw std::runtime_error("NCPP::Advance::diagonalizeNonlocal: Jacobi diagonalization did not converge");
-    }
+    // B matrix is block-diagonal in angular momentum l: projectors with
+    // different l couple to different spherical harmonics and must NOT mix.
+    // Diagonalize each l-block independently.
 
-    // B <- Lambda (diagonal)
-    std::ranges::fill(p.nonlocal.B.data, 0.0);
+    // 1. Group projector indices by angular momentum
+    int l_max = p.meta.l_max;
+    std::vector<std::vector<int>> l_indices(l_max + 1);
     for (int i = 0; i < n; ++i) {
-        p.nonlocal.B[i, i] = result.eigenvalues[static_cast<std::size_t>(i)];
+        int l = p.nonlocal.angular_momentum[i];
+        if (l < 0 || l > l_max) {
+            throw std::runtime_error(
+                "NCPP::Advance::diagonalizeNonlocal: projector " + std::to_string(i)
+                + " has angular_momentum=" + std::to_string(l)
+                + ", expected [0, " + std::to_string(l_max) + "]");
+        }
+        l_indices[l].push_back(i);
     }
 
-    // beta_new[k][r] = sum_i beta[i][r] * U[i][k]
-    // eigenvectors row-major, row k <-> eigenvector k -> U[i][k] = eigvec[k, i]
-    int max_cutoff = 0;
-    for (const auto& b : p.nonlocal.beta) {
-        max_cutoff = std::max(max_cutoff, static_cast<int>(b.size()));
-    }
-
+    // 2. Save old beta and determine max cutoff
     auto beta_old = std::move(p.nonlocal.beta);
+    int max_cutoff = 1;
+    for (const auto& b : beta_old) {
+        // b can be empty (zero-size); skip to avoid zero-size allocation
+        int sz = static_cast<int>(b.size());
+        if (sz > max_cutoff) max_cutoff = sz;
+    }
+
+    // 3. Save original B and reset (will fill eigenvalues per block)
+    auto B_orig = std::move(p.nonlocal.B.data);
+    p.nonlocal.B.data.assign(static_cast<std::size_t>(n * n), 0.0);
+
+    // 4. Prepare new beta storage (all zeros, max cutoff size)
     p.nonlocal.beta.resize(n);
-    for (int k = 0; k < n; ++k) {
-        p.nonlocal.beta[k].assign(max_cutoff, 0.0);
-        for (int i = 0; i < n; ++i) {
-            double u_ik = result.eigenvectors[k][i];
-            const auto& beta_i = beta_old[i];
-            for (int r = 0; r < static_cast<int>(beta_i.size()); ++r) {
-                p.nonlocal.beta[k][r] += beta_i[r] * u_ik;
+    for (auto& b : p.nonlocal.beta) {
+        b.assign(static_cast<std::size_t>(max_cutoff), 0.0);
+    }
+
+    // 5. Process each l-block independently
+    for (int l = 0; l <= l_max; ++l) {
+        const auto& idx = l_indices[l];
+        const int nbl = static_cast<int>(idx.size());
+        if (nbl == 0) continue;
+
+        // 5a. Extract B_l submatrix from saved original B
+        std::vector<double> B_l(static_cast<std::size_t>(nbl * nbl));
+        for (int i = 0; i < nbl; ++i) {
+            for (int j = 0; j < nbl; ++j) {
+                B_l[static_cast<std::size_t>(i * nbl + j)] = B_orig[static_cast<std::size_t>(idx[i] * n + idx[j])];
+            }
+        }
+
+        // 5b. Diagonalize this l-block
+        auto result = diagonalize_jacobi(B_l, nbl);
+        if (!result.converged) {
+            throw std::runtime_error(
+                "NCPP::Advance::diagonalizeNonlocal: Jacobi diagonalization "
+                "did not converge for l=" + std::to_string(l));
+        }
+
+        // 5c. Store eigenvalues into diagonal of full B
+        for (int i = 0; i < nbl; ++i) {
+            p.nonlocal.B[idx[i], idx[i]] = result.eigenvalues[static_cast<std::size_t>(i)];
+        }
+
+        // 5d. Rotate beta projectors within this l-block
+        //     beta_new[idx[k]][r] = sum_i beta_old[idx[i]][r] * U[i][k]
+        //     U[i][k] = eigvec[k, i] (eigenvectors row-major)
+        for (int k = 0; k < nbl; ++k) {
+            auto& beta_k = p.nonlocal.beta[idx[k]];
+            for (int i = 0; i < nbl; ++i) {
+                double u_ik = result.eigenvectors[k][i];
+                const auto& beta_i = beta_old[idx[i]];
+                for (int r = 0; r < static_cast<int>(beta_i.size()); ++r) {
+                    beta_k[r] += beta_i[r] * u_ik;
+                }
             }
         }
     }
 
-    // Update cutoff_index and cutoff_radius to max cutoff
+    // 6. Update cutoff_index and cutoff_radius to max cutoff
     std::ranges::fill(p.nonlocal.cutoff_index, max_cutoff);
     if (max_cutoff > 0 && !p.mesh.r.empty()) {
         std::ranges::fill(p.nonlocal.cutoff_radius, p.mesh.r[static_cast<std::size_t>(max_cutoff - 1)]);
