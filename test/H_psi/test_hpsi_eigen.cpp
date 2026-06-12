@@ -53,11 +53,9 @@ auto main() -> int {
         tests.size(), nband, gkk.meta.nkpt, volume);
 
     // Column headers
-    std::println("{:>4} {:>5}  {:>18}  {:>18}  {:>10}  {:>10}  {:>10}  {:>10}",
-                 "ikpt", "iband", "E_file", "E_Rayleigh", "ΔE",
-                 "Im(E)", "rel_res", "‖ψ‖²Ω");
-
-    int n_passed = 0;
+    struct Result { int ikpt{}, iband{}; double e_file{}, e_rayleigh{}, delta{}, im_e{}, rel_res{}, norm_check{}; bool pass{}; };
+    std::vector<Result> results;
+    results.reserve(tests.size());
 
     for (auto [ikpt, iband] : tests) {
         auto op = h.at_k(ikpt);
@@ -119,16 +117,28 @@ auto main() -> int {
         double const tol = 2.0e-5;
         bool pass = (delta < tol) && (std::imag(e_rayleigh) < tol);
 
-        if (pass) ++n_passed;
-
-        std::println(
-            "{:4d} {:5d}  {:>18.10f}  {:>18.10f}  {:>10.2e}  {:>10.2e}  {:>10.2e}  {:>10.6f}",
-            ikpt, iband,
-            e_file, std::real(e_rayleigh), delta,
-            std::imag(e_rayleigh), rel_residual, norm_check);
+        results.push_back({ikpt, iband, e_file, std::real(e_rayleigh), delta,
+                           std::imag(e_rayleigh), rel_residual, norm_check, pass});
     }
 
+    // Summary table — printed after all H|ψ⟩ computations (and their HPSI_DEBUG
+    // output) so the table is not interleaved with per-band diagnostics.
     std::println("");
+    std::println("{}", std::string(100, '='));
+    std::println("{:>4} {:>5}  {:>18}  {:>18}  {:>10}  {:>10}  {:>10}  {:>10}",
+                 "ikpt", "iband", "E_file", "E_Rayleigh", "ΔE",
+                 "Im(E)", "rel_res", "‖ψ‖²Ω");
+    std::println("{}", std::string(100, '-'));
+    int n_passed = 0;
+    for (const auto& r : results) {
+        if (r.pass) ++n_passed;
+        std::println(
+            "{:4d} {:5d}  {:>18.10f}  {:>18.10f}  {:>10.2e}  {:>10.2e}  {:>10.2e}  {:>10.6f}",
+            r.ikpt, r.iband,
+            r.e_file, r.e_rayleigh, r.delta,
+            r.im_e, r.rel_res, r.norm_check);
+    }
+    std::println("{}", std::string(100, '-'));
     std::println("Passed {}/{} tests  (tol={:.0e} Ha)", n_passed, tests.size(), 2.0e-5);
     std::println("");
 

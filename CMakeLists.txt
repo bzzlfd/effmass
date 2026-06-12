@@ -78,9 +78,9 @@ target_link_libraries(math PRIVATE utils)
 
 # Library target for H_psi module
 add_library(H_psi)
-option(HPSI_DEBUG "Print per-term H|psi> expectation value breakdown" OFF)
+set(HPSI_DEBUG 0 CACHE STRING "H|psi> debug level: 0=off, 1=summary, 2=detailed")
 if(HPSI_DEBUG)
-    target_compile_definitions(H_psi PRIVATE HPSI_DEBUG=1)
+    target_compile_definitions(H_psi PRIVATE HPSI_DEBUG=${HPSI_DEBUG})
 endif()
 target_sources(H_psi
     PUBLIC

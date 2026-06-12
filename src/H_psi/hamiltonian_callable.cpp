@@ -53,12 +53,12 @@ void Hamiltonian::Callable::operator()(
     //  kinetic[ig] = |G+k|²/2, read from OUT.GKK.  Since T is diagonal in
     //  G-space, each plane-wave coefficient is multiplied independently.
     // ---------------------------------------------------------------------------
-#ifdef HPSI_DEBUG
+#if HPSI_DEBUG >= 1
     double dbg_psi_norm2 = 0.0;
     double dbg_e_kin = 0.0;
 #endif
     for (int ig = 0; ig < ng_; ++ig) {
-#ifdef HPSI_DEBUG
+#if HPSI_DEBUG >= 1
         auto nrm = std::norm(psi[ig]);
         dbg_psi_norm2 += nrm;
         dbg_e_kin += kv.kinetic[ig] * nrm;
@@ -105,7 +105,7 @@ void Hamiltonian::Callable::operator()(
 
     fft(grid, R2G);
 
-#ifdef HPSI_DEBUG
+#if HPSI_DEBUG >= 1
     std::vector<std::complex<double>> dbg_vloc_contrib(
         static_cast<std::size_t>(ng_));
 #endif
@@ -116,7 +116,7 @@ void Hamiltonian::Callable::operator()(
         auto idx = static_cast<std::size_t>(i) * n2_ * n3_
                  + static_cast<std::size_t>(j) * n3_
                  + static_cast<std::size_t>(k);
-#ifdef HPSI_DEBUG
+#if HPSI_DEBUG >= 1
         dbg_vloc_contrib[ig] = grid[idx];
 #endif
         hpsi[ig] += grid[idx];
@@ -149,8 +149,11 @@ void Hamiltonian::Callable::operator()(
     double q_max = std::sqrt(2.0 * parent_->gkk().meta.Ecut) + 2.0;
     double norm_coeff = 1.0 / std::sqrt(parent_->gkk().meta.lattice.volume());
 
-#ifdef HPSI_DEBUG
+#if HPSI_DEBUG >= 1
     double dbg_e_nl = 0.0;
+#endif
+#if HPSI_DEBUG >= 2
+    int dbg_natom = atom.natom;
 #endif
 
     for (auto&& type : atom.eachType()) {
@@ -189,6 +192,13 @@ void Hamiltonian::Callable::operator()(
                 sf_vals[ig] = sf(kv.g_idx[ig], kv.kPoint);
             }
 
+#if HPSI_DEBUG >= 2
+        double dbg_nl_this_atom = 0.0;
+        double vol = parent_->gkk().meta.lattice.volume();
+        std::println("[HPSI_DEBUG:2]   atom {}#{} tau=({:.6f},{:.6f},{:.6f})",
+                     ncp.meta.element, type.ityp, tau.x, tau.y, tau.z);
+#endif
+
             for (const auto& bi : blocks) {
                 // --- Beta(q) interpolation for all projectors in this block ---
                 // Create one interpolator for the first projector, then
@@ -224,8 +234,24 @@ void Hamiltonian::Callable::operator()(
                             inner += std::conj(p) * psi[ig];
                         }
 
-#ifdef HPSI_DEBUG
+#if HPSI_DEBUG >= 1
                         dbg_e_nl += lambda * std::norm(inner);
+#endif
+
+#if HPSI_DEBUG >= 2
+                        double proj_norm2 = 0.0;
+                        for (int ig = 0; ig < ng_; ++ig) {
+                            auto p = std::complex<double>(
+                                beta_q[ig] * ylm_lm[ig], 0.0) * sf_vals[ig];
+                            proj_norm2 += std::norm(p);
+                        }
+                        dbg_nl_this_atom += lambda * std::norm(inner);
+                        double dbg_ip_scaled = std::norm(inner) * vol;
+                        double dbg_threshold = 1e-8 / dbg_natom;
+                        if (dbg_ip_scaled > dbg_threshold)
+                            std::println("[HPSI_DEBUG:2]     l={} m={:+d} ib={}  lambda={:.10f}  |<p|psi>|^2={:.12e}  <p|p>={:.12e}",
+                                         bi.l, m, ib, lambda,
+                                         dbg_ip_scaled, proj_norm2);
 #endif
 
                         // Second pass:  hpsi += λ · inner · |projector⟩
@@ -237,10 +263,14 @@ void Hamiltonian::Callable::operator()(
                     }
                 }
             }
+#if HPSI_DEBUG >= 2
+        std::println("[HPSI_DEBUG:2]   total_V_NL(atom)={:.12e}  ×Ω={:.12e}",
+                     dbg_nl_this_atom, dbg_nl_this_atom * vol);
+#endif
         }
     }
 
-#ifdef HPSI_DEBUG
+#if HPSI_DEBUG >= 1
     // --- debug: per-term expectation values (all include ×Ω) ---
     //  ⟨ψ|O|ψ⟩ = Ω · Σ_g ψ*[g] · (O|ψ⟩)[g]
     //  where Ω is the cell volume.
