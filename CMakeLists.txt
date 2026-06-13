@@ -52,6 +52,7 @@ target_sources(pseudo
             src/pseudo.cppm
             src/pseudo/io/upf.cppm
             src/pseudo/ncpp.cppm
+            src/pseudo/ncpp_advance.cppm
 )
 target_link_libraries(pseudo PRIVATE pugixml::pugixml utils math)
 

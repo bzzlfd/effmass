@@ -108,8 +108,8 @@ auto Hamiltonian::loadNCPPs(const std::string& directory) -> void {
     for (const auto& entry : std::filesystem::directory_iterator(upf_dir)) {
         auto ext = entry.path().extension();
         if (ext == ".UPF" || ext == ".upf") {
-            ncpps_.emplace_back(UPF(entry.path().string()));
-            ncpps_.back().advance.diagonalizeNonlocal();
+            auto& ncpp = ncpps_.emplace_back(UPF(entry.path().string()));
+            diagonalizeNonlocal(ncpp);
             std::println("  loaded: {}", entry.path().filename().string());
         }
     }

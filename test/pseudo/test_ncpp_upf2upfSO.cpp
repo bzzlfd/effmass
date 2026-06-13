@@ -9,7 +9,7 @@ auto main() -> int {
         // ================================================================
         UPF soc_in("test/data_io_upf/Si-PD04-FR.upf");
         NCPP pot(soc_in);
-        pot.advance.upf2upfSO();
+        upf2upfSO(pot);
 
         const auto& meta = pot.meta;
         const auto& nl = pot.nonlocal;
