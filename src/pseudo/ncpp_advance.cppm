@@ -5,6 +5,60 @@ import pseudo.ncpp;
 import math.linalg;
 
 
+export auto sortByL(NCPP& ncpp) -> void {
+    const int n = ncpp.meta.number_of_proj;
+    if (n <= 1) return;
+
+    std::vector<int> idx(static_cast<std::size_t>(n));
+    std::iota(idx.begin(), idx.end(), 0);
+
+    bool has_jjj = !ncpp.nonlocal.jjj.empty();
+
+    if (has_jjj) {
+        std::ranges::stable_sort(idx, [&](int a, int b) {
+            int la = ncpp.nonlocal.angular_momentum[a];
+            int lb = ncpp.nonlocal.angular_momentum[b];
+            if (la != lb) return la < lb;
+            return ncpp.nonlocal.jjj[a] < ncpp.nonlocal.jjj[b];
+        });
+    } else {
+        std::ranges::stable_sort(idx, [&](int a, int b) {
+            return ncpp.nonlocal.angular_momentum[a] < ncpp.nonlocal.angular_momentum[b];
+        });
+    }
+
+    // idx[i] == i for all i → permutation is identity, the data was already
+    // ordered by l and stable_sort was a no-op. Skip reordering below.
+    bool is_identity = true;
+    for (int i = 0; i < n; ++i) {
+        if (idx[i] != i) { is_identity = false; break; }
+    }
+    if (is_identity) return;
+
+    // Apply permutation to per-projector vectors (move semantics for efficiency)
+    auto reorder = [&]<typename T>(std::vector<T>& vec) -> void {
+        auto copy = std::move(vec);
+        vec.resize(static_cast<std::size_t>(n));
+        for (int i = 0; i < n; ++i)
+            vec[i] = std::move(copy[static_cast<std::size_t>(idx[i])]);
+    };
+
+    reorder(ncpp.nonlocal.beta);
+    reorder(ncpp.nonlocal.angular_momentum);
+    reorder(ncpp.nonlocal.cutoff_index);
+    reorder(ncpp.nonlocal.cutoff_radius);
+    if (has_jjj) reorder(ncpp.nonlocal.jjj);
+
+    // Permute B matrix symmetrically: B_new[i,j] = B_old[idx[i], idx[j]]
+    auto B_old = ncpp.nonlocal.B.data;
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            ncpp.nonlocal.B[i, j] = B_old[static_cast<std::size_t>(idx[i] * n + idx[j])];
+        }
+    }
+}
+
+
 export auto diagonalizeNonlocal(NCPP& ncpp) -> void {
     const int n = ncpp.meta.number_of_proj;
     if (n == 0) return;

@@ -138,3 +138,20 @@ ncpp.cppm 当中，advance 成员的设计
 ```
 
 
+## 2. Betaq table
+
+重构 hamiltonian_callable.cpp 中计算nonlocal pseudopotentail 的部分，涉及的代码包括 
+  hamiltonian.cppm, hamiltonian_callable.cpp, fourier_bessel.cppm, ncpp_advance.cppm, ncpp.cppm
+  1. 现在的计算瓶颈很大程度上在于每次要把ncpp中实空间的径向beta变换到q空间，而这里计算大量的simpson积分，这些计算被重复计算。然而，BetaqIntepolator不是
+  每次at_k 得到 Callable对象之后需要重新计算的，它可以放在 Hamiltonian类内部，甚至直接在ncpp对象里面（具体我打算放到 ncpp_advance.cppm 下）
+  2. 目前的fourier_bessel.cppm 的框架设计，对于计算一个type 的原子，即计算一个ncpp数据，是一个不错的框架。
+    2.1. 一个 原子类型/ncpp 只有一种 mesh(r, rab)
+    2.2. 球贝塞尔函数采用递推方式，仅仅在 l=0 初始化时因三角函数涉及较多计算量
+    2.3. 我们可以让 beta 从 r 到 q 的计算（积分）从 l 小的beta开始，一步步升高，这样可以搭球贝塞尔函数递推的便车
+  3. 目前的fourier_bessel.cppm 的框架设计，对于 多l,多beta table_缓存 来说，不是好设计，让我们先讨论这部分的设计
+    3.1. BetaqInterpolator 降级成函数，无需保留内部状态
+    3.2. BetaqInterpolator 升级成 多l, 多table 记录
+    3.3. Betaq 和 interpolator 函数
+
+### 重构方案
+1. 添加 sort beta
