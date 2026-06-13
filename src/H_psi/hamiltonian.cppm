@@ -209,6 +209,11 @@ export {
         std::optional<OCC>   occ_;
         std::vector<NCPP>    ncpps_;
 
+        /// Bitmask to run each Part 2 file-pair integrity check exactly once.
+        /// Reset by loadXxx() when a file is loaded/reloaded so affected pairs
+        /// are re-checked.
+        std::uint64_t part2_done_{0};
+
         // -------------------------------------------------------------------
         //  Part 1  —  canonical physical quantities (quantity-centered check)
         //  First-loaded file sets the value; subsequent files must match.

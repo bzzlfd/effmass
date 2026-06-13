@@ -42,6 +42,15 @@ auto latticesMatch(const Lattice& a, const Lattice& b) -> bool {
 
 } // anonymous namespace
 
+namespace {
+    enum : std::uint64_t {
+        PART2_GKK_WG    = 1ull << 0,   // mg_nx, ng_tot_per_kpt, nnode
+        PART2_GKK_EIGEN = 1ull << 1,   // nnode
+        PART2_VR_RHO    = 1ull << 2,   // nstate
+        PART2_NCPP_ATOM = 1ull << 3,   // element coverage
+    };
+}
+
 
 // ===========================================================================
 //  Step-by-step loading
@@ -51,6 +60,7 @@ auto Hamiltonian::loadGKK(const std::string& path) -> void {
     auto full = resolve(path);
     std::println("[Hamiltonian] loading GKK: {}", full);
     gkk_.emplace(full);
+    part2_done_ &= ~(PART2_GKK_WG | PART2_GKK_EIGEN);
     checkConsistency();
 }
 
@@ -58,6 +68,7 @@ auto Hamiltonian::loadWG(const std::string& path) -> void {
     auto full = resolve(path);
     std::println("[Hamiltonian] loading WG: {}", full);
     wg_.emplace(full);
+    part2_done_ &= ~PART2_GKK_WG;
     checkConsistency();
 }
 
@@ -65,6 +76,7 @@ auto Hamiltonian::loadVR(const std::string& path) -> void {
     auto full = resolve(path);
     std::println("[Hamiltonian] loading VR: {}", full);
     vr_.emplace(full);
+    part2_done_ &= ~PART2_VR_RHO;
     checkConsistency();
 }
 
@@ -72,6 +84,7 @@ auto Hamiltonian::loadRHO(const std::string& path) -> void {
     auto full = resolve(path);
     std::println("[Hamiltonian] loading RHO: {}", full);
     rho_.emplace(full);
+    part2_done_ &= ~PART2_VR_RHO;
     checkConsistency();
 }
 
@@ -79,6 +92,7 @@ auto Hamiltonian::loadATOM(const std::string& path) -> void {
     auto full = resolve(path);
     std::println("[Hamiltonian] loading ATOM: {}", full);
     atom_.emplace(full);
+    part2_done_ &= ~PART2_NCPP_ATOM;
     checkConsistency();
 }
 
@@ -86,6 +100,7 @@ auto Hamiltonian::loadEIGEN(const std::string& path) -> void {
     auto full = resolve(path);
     std::println("[Hamiltonian] loading EIGEN: {}", full);
     eigen_.emplace(full);
+    part2_done_ &= ~PART2_GKK_EIGEN;
     checkConsistency();
 }
 
@@ -93,6 +108,7 @@ auto Hamiltonian::loadOCC(const std::string& path) -> void {
     auto full = resolve(path);
     std::println("[Hamiltonian] loading OCC: {}", full);
     occ_.emplace(full);
+    // OCC does not participate in any Part 2 pair check.
     checkConsistency();
 }
 
@@ -114,6 +130,7 @@ auto Hamiltonian::loadNCPPs(const std::string& directory) -> void {
         }
     }
     std::println("  total NCPP objects: {}", ncpps_.size());
+    part2_done_ &= ~PART2_NCPP_ATOM;
     checkConsistency();
 }
 
@@ -516,8 +533,9 @@ auto Hamiltonian::checkPart1() -> void {
 // ===========================================================================
 //  Part 2  —  file‑to‑file integrity checks
 //  Pure data‑integrity checks that are not needed for H|ψ⟩ computation.
-//  No bitset / dirty‑flag tracking — all checks are O(1) and repeated
-//  on every checkConsistency() call (negligible cost).
+//  Each file‑pair check runs exactly once (first time both files are
+//  present).  The `part2_done_` bitmask tracks which pairs have been
+//  checked; loadXxx() resets the relevant bits when data is replaced.
 // ===========================================================================
 
 auto Hamiltonian::checkPart2() -> void {
@@ -532,44 +550,41 @@ auto Hamiltonian::checkPart2() -> void {
     };
 
     // ------------------------------------------------------------------
-    //  mg_nx  —  GKK vs WG
+    //  mg_nx, ng_tot_per_kpt, nnode  —  GKK vs WG
     // ------------------------------------------------------------------
-    if (gkk_ && wg_) {
-        checkInt(gkk_->meta.mg_nx, wg_->meta.mg_nx, "mg_nx [GKK vs WG]");
-    }
+    if (gkk_ && wg_ && !(part2_done_ & PART2_GKK_WG)) {
+        part2_done_ |= PART2_GKK_WG;
 
-    // ------------------------------------------------------------------
-    //  ng_tot_per_kpt  —  GKK vs WG
-    // ------------------------------------------------------------------
-    if (gkk_ && wg_) {
+        checkInt(gkk_->meta.mg_nx, wg_->meta.mg_nx, "mg_nx [GKK vs WG]");
+
         bool ok = (gkk_->meta.ng_tot_per_kpt == wg_->meta.ng_tot_per_kpt);
         log.log(LogLevel::Info, "  {} ng_tot_per_kpt [GKK vs WG]", ok ? "✓" : "✗");
         if (!ok) throw runtime_error("Hamiltonian consistency: ng_tot_per_kpt mismatch");
+
+        checkInt(gkk_->meta.nnode, wg_->meta.nnode, "nnode [GKK vs WG]");
     }
 
     // ------------------------------------------------------------------
-    //  nnode  —  three‑way: GKK ↔ WG ↔ EIGEN
-    //  (VR / RHO nnode is not required to match GKK — different parallel
-    //   partitioning.  Only wavefunction‑bearing files must agree.)
+    //  nnode  —  GKK vs EIGEN
     // ------------------------------------------------------------------
-    if (gkk_ && wg_) {
-        checkInt(gkk_->meta.nnode, wg_->meta.nnode, "nnode [GKK vs WG]");
-    }
-    if (gkk_ && eigen_) {
+    if (gkk_ && eigen_ && !(part2_done_ & PART2_GKK_EIGEN)) {
+        part2_done_ |= PART2_GKK_EIGEN;
         checkInt(gkk_->meta.nnode, eigen_->meta.nnode, "nnode [GKK vs EIGEN]");
     }
 
     // ------------------------------------------------------------------
     //  nstate  —  VR vs RHO
     // ------------------------------------------------------------------
-    if (vr_ && rho_) {
+    if (vr_ && rho_ && !(part2_done_ & PART2_VR_RHO)) {
+        part2_done_ |= PART2_VR_RHO;
         checkInt(vr_->meta.nstate, rho_->meta.nstate, "nstate [VR vs RHO]");
     }
 
     // ------------------------------------------------------------------
     //  NCPP ↔ ATOM  —  every ATOM species has a matching UPF
     // ------------------------------------------------------------------
-    if (!ncpps_.empty() && atom_) {
+    if (!ncpps_.empty() && atom_ && !(part2_done_ & PART2_NCPP_ATOM)) {
+        part2_done_ |= PART2_NCPP_ATOM;
         for (auto&& t : atom_->eachType()) {
             string_view expected = ATOM::elementName(t.z);
             bool found = false;

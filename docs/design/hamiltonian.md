@@ -122,7 +122,26 @@ use(*canonical_lattice_);
 
 **定义**：纯验证文件间数据一致性的检查，不涉及计算语义。
 
-**判定原则**：该量只用于"文件是否来自同一次计算"的验证，H|ψ⟩ 计算不需要直接访问它。这类检查保留 pair 风格，每次 `checkConsistency()` 全量重查（均为 O(1) 整数/浮点比较）。
+**判定原则**：该量只用于"文件是否来自同一次计算"的验证，H|ψ⟩ 计算不需要直接访问它。
+
+**执行策略**：每组文件对儿仅检查一次——首次两个文件都存在时执行。`part2_done_` bitmask 追踪哪些对儿已完成检查；当某文件被重新加载时，`loadXxx()` 重置涉及其的对儿的标志位，使其在下一次 `checkConsistency()` 中重新检查。
+
+**Bitmask 操作拆解**（以 `loadGKK` 为例）：
+
+```cpp
+part2_done_ &= ~(PART2_GKK_WG | PART2_GKK_EIGEN);
+```
+
+- `PART2_GKK_WG | PART2_GKK_EIGEN` — **按位或**：将两个标志位组合成一个位域值，表示"GKK↔WG 检查"和"GKK↔EIGEN 检查"两个位
+- `~(PART2_GKK_WG | PART2_GKK_EIGEN)` — **按位取反**：将上一步得到的位域翻转，生成一个"除这两位为 0，其余位为 1"的掩码，用于清除这两个位而不影响其他位（下一步 & 时，0位会被清除）。
+- `part2_done_ &= ~(...)` — **按位与赋值**：将 `part2_done_` 中 GKK↔WG 和 GKK↔EIGEN 对应的位置 0（重置），其他对儿的标志位保持不变。这样下次 `checkConsistency()` 中 `checkPart2()` 会重新检查这两组对儿
+
+对应地，在 `checkPart2()` 中每完成一组检查时用 `|=` 设置标志位：
+
+```cpp
+part2_done_ |= PART2_GKK_WG;   // 置位：标记 GKK↔WG 已检查，后续不再重复
+part2_done_ |= PART2_GKK_EIGEN; // 置位：标记 GKK↔EIGEN 已检查
+```
 
 **当前 Part 2 检查（4 组）：**
 
