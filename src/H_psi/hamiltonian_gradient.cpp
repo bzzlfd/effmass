@@ -17,7 +17,7 @@ Hamiltonian::Gradient::Callable::Callable(
     if (!parent_->wg_)   throw std::runtime_error("gradient H|ψ⟩ requires WG");
     if (!parent_->vr_)   throw std::runtime_error("gradient H|ψ⟩ requires VR");
     if (!parent_->atom_) throw std::runtime_error("gradient H|ψ⟩ requires ATOM");
-    if (parent_->ncpps_.empty()) throw std::runtime_error("gradient H|ψ⟩ requires NCPPs");
+    if (parent_->elements_.empty()) throw std::runtime_error("gradient H|ψ⟩ requires NCPPs");
 }
 
 void Hamiltonian::Gradient::Callable::operator()(

@@ -124,12 +124,13 @@ auto Hamiltonian::loadNCPPs(const std::string& directory) -> void {
     for (const auto& entry : std::filesystem::directory_iterator(upf_dir)) {
         auto ext = entry.path().extension();
         if (ext == ".UPF" || ext == ".upf") {
-            auto& ncpp = ncpps_.emplace_back(UPF(entry.path().string()));
+            auto ncpp = NCPP(UPF(entry.path().string()));
             diagonalizeNonlocal(ncpp);
+            elements_.push_back({std::move(ncpp), std::nullopt});
             std::println("  loaded: {}", entry.path().filename().string());
         }
     }
-    std::println("  total NCPP objects: {}", ncpps_.size());
+    std::println("  total NCPP objects: {}", elements_.size());
     part2_done_ &= ~PART2_NCPP_ATOM;
     checkConsistency();
 }
@@ -158,6 +159,7 @@ auto Hamiltonian::loadFromDirectory() -> void {
     loadRHO("OUT.RHO");
     loadEIGEN("OUT.EIGEN");
     loadOCC("OUT.OCC");
+    finalize();
 }
 
 
@@ -200,13 +202,56 @@ auto Hamiltonian::occ() const -> const OCC& {
     return *occ_;
 }
 
+
+
+// -------------------------------------------------------------------------
+//  finalize  —  post-load initialisation
+// -------------------------------------------------------------------------
+
+auto Hamiltonian::finalize() -> void {
+    if (!canonical_lattice_) throw std::runtime_error("finalize: no lattice loaded");
+    if (elements_.empty()) return;
+
+    std::println("[Hamiltonian] finalize: constructing BetaqTables...");
+    double omega = canonical_lattice_->volume();
+
+    for (auto& elem : elements_) {
+        const auto& ncpp = elem.ncpp;
+        auto mesh_type = (ncpp.mesh.type == MeshType::Uniform)
+                         ? SimpsonMeshType::Uniform : SimpsonMeshType::General;
+        elem.betaq_tables.emplace(
+            ncpp.mesh.r, ncpp.mesh.rab, mesh_type,
+            ncpp.nonlocal.beta, ncpp.nonlocal.angular_momentum);
+        elem.betaq_tables->setVolume(omega);
+    }
+    std::println("  done ({} element(s), omega={:.6f})",
+                 elements_.size(), omega);
+}
+
 auto Hamiltonian::ncpp(int atomic_number) const -> const NCPP& {
     std::string_view want = ATOM::elementName(atomic_number);
-    for (const auto& p : ncpps_) {
-        if (p.meta.element == want) return p;
+    for (const auto& elem : elements_) {
+        if (elem.ncpp.meta.element == want) return elem.ncpp;
     }
     throw std::out_of_range(
         "Hamiltonian: no NCPP for element " + std::string(want) +
+        " (Z=" + std::to_string(atomic_number) + ')');
+}
+
+auto Hamiltonian::betaqTables(int atomic_number) const -> const BetaqTables& {
+    std::string_view want = ATOM::elementName(atomic_number);
+    for (const auto& elem : elements_) {
+        if (elem.ncpp.meta.element == want) {
+            if (!elem.betaq_tables) {
+                throw std::runtime_error(
+                    "Hamiltonian: BetaqTables not initialised for element "
+                    + std::string(want) + " (did you call finalize()?)");
+            }
+            return *elem.betaq_tables;
+        }
+    }
+    throw std::out_of_range(
+        "Hamiltonian: no BetaqTables for element " + std::string(want) +
         " (Z=" + std::to_string(atomic_number) + ')');
 }
 
@@ -583,13 +628,13 @@ auto Hamiltonian::checkPart2() -> void {
     // ------------------------------------------------------------------
     //  NCPP ↔ ATOM  —  every ATOM species has a matching UPF
     // ------------------------------------------------------------------
-    if (!ncpps_.empty() && atom_ && !(part2_done_ & PART2_NCPP_ATOM)) {
+    if (!elements_.empty() && atom_ && !(part2_done_ & PART2_NCPP_ATOM)) {
         part2_done_ |= PART2_NCPP_ATOM;
         for (auto&& t : atom_->eachType()) {
             string_view expected = ATOM::elementName(t.z);
             bool found = false;
-            for (const auto& p : ncpps_) {
-                if (p.meta.element == expected) { found = true; break; }
+            for (const auto& elem : elements_) {
+                if (elem.ncpp.meta.element == expected) { found = true; break; }
             }
             if (found) {
                 log.log(LogLevel::Info, "  ✓ element {} [NCPP vs ATOM]", expected);
@@ -660,15 +705,15 @@ auto Hamiltonian::checkConsistencyExtended(std::initializer_list<ExtendedCheck> 
     // ------------------------------------------------------------------
     if (mask & (1ull << VAL)) {
         log.log(LogLevel::Info, "  [ValenceCount]");
-        if (!atom_ || !rho_ || ncpps_.empty()) {
+        if (!atom_ || !rho_ || elements_.empty()) {
             log.log(LogLevel::Info, "    skipped — missing data (need ATOM+RHO+NCPPs)");
         } else {
             double total_valence = 0.0;
             for (auto&& t : atom_->eachType()) {
                 std::string_view name = ATOM::elementName(t.z);
-                for (const auto& p : ncpps_) {
-                    if (p.meta.element == name) {
-                        total_valence += p.meta.z_valence * t.count;
+                for (const auto& elem : elements_) {
+                    if (elem.ncpp.meta.element == name) {
+                        total_valence += elem.ncpp.meta.z_valence * t.count;
                         break;
                     }
                 }

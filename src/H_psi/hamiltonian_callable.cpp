@@ -13,7 +13,7 @@ Hamiltonian::Callable::Callable(const Hamiltonian* parent, int ikpt)
     if (!parent_->gkk_)  throw std::runtime_error("H|ψ⟩ requires GKK");
     if (!parent_->vr_)   throw std::runtime_error("H|ψ⟩ requires VR");
     if (!parent_->atom_) throw std::runtime_error("H|ψ⟩ requires ATOM");
-    if (parent_->ncpps_.empty()) throw std::runtime_error("H|ψ⟩ requires NCPPs");
+    if (parent_->elements_.empty()) throw std::runtime_error("H|ψ⟩ requires NCPPs (did you call finalize()?)");
 
     // Enable Integer view alongside Cartesian and Spherical — needed for
     // FFT grid placement (Integer), Y_lm evaluation (Spherical theta/phi),
@@ -138,16 +138,14 @@ void Hamiltonian::Callable::operator()(
     // Check whether any pseudopotential has nonlocal projectors.
     // If none, the nonlocal contribution is zero.
     int global_max_l = -1;
-    for (const auto& ncpp : parent_->ncpps_) {
-        if (ncpp.meta.l_max > global_max_l) global_max_l = ncpp.meta.l_max;
+    for (const auto& elem : parent_->elements_) {
+        if (elem.ncpp.meta.l_max > global_max_l) global_max_l = elem.ncpp.meta.l_max;
     }
     if (global_max_l < 0) return;
 
     RealSphericalHarmonics ylm(kv.theta, kv.phi, global_max_l);
 
     const auto& atom = parent_->atom();
-    double q_max = std::sqrt(2.0 * parent_->gkk().meta.Ecut) + 2.0;
-    double norm_coeff = 1.0 / std::sqrt(parent_->gkk().meta.lattice.volume());
 
 #if HPSI_DEBUG >= 1
     double dbg_e_nl = 0.0;
@@ -160,11 +158,6 @@ void Hamiltonian::Callable::operator()(
         const auto& ncp = parent_->ncpp(type.z);
         int l_max = ncp.meta.l_max;
         if (l_max < 0) continue;
-
-        // Convert radial mesh type for BetaqInterpolator
-        auto mesh_type = (ncp.mesh.type == MeshType::Uniform)
-                         ? RadialMeshType::Uniform
-                         : RadialMeshType::General;
 
         // Collect all projector blocks for this atom type so we don't
         // recompute them for every atom of the same element.
@@ -199,28 +192,17 @@ void Hamiltonian::Callable::operator()(
                      ncp.meta.element, type.ityp, tau.x, tau.y, tau.z);
 #endif
 
+            const auto& betaq_tables = parent_->betaqTables(type.z);
+
             for (const auto& bi : blocks) {
-                // --- Beta(q) interpolation for all projectors in this block ---
-                // Create one interpolator for the first projector, then
-                // reset_beta for subsequent ones to reuse table memory.
-                auto first_beta = bi.block.beta[0];
-                BetaqInterpolator betaq_interp(
-                    ncp.mesh.r, ncp.mesh.rab, first_beta,
-                    bi.l, 0.01, q_max, mesh_type, norm_coeff);
-
                 for (int ib = 0; ib < bi.nb; ++ib) {
-                    if (ib > 0) {
-                        betaq_interp.reset_beta(
-                            ncp.mesh.r, ncp.mesh.rab, bi.block.beta[ib]);
-                    }
-
                     double lambda = bi.block.B[ib, ib];
                     if (std::abs(lambda) < 1e-15) continue;
 
-                    // Precompute β(q) for all G-vectors
+                    // Precompute β(q) for all G-vectors via table interpolation
                     std::vector<double> beta_q(static_cast<std::size_t>(ng_));
                     for (int ig = 0; ig < ng_; ++ig) {
-                        beta_q[ig] = betaq_interp(kv.q[ig]);
+                        beta_q[ig] = betaq_tables.interpolate(bi.l, ib, kv.q[ig]);
                     }
 
                     for (int m = -bi.l; m <= bi.l; ++m) {

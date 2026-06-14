@@ -65,6 +65,7 @@ target_sources(math
             src/math/sph_bessel.cppm
             src/math/sph_harmonics.cppm
             src/math/fft.cppm
+            src/math/numerical.cppm
             src/math/fourier_bessel.cppm
             src/math/linalg.cppm
     PRIVATE

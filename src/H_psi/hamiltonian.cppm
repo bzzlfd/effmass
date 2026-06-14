@@ -67,6 +67,11 @@ export {
         auto loadOCC(const std::string& path) -> void;
         auto loadNCPPs(const std::string& directory) -> void;
 
+        /// Post-load initialisation.  Constructs BetaqTables from NCPP data and
+        /// GKK cell volume.  Must be called after all loadXxx() and before
+        /// at_k() / gradient() / hessian().
+        auto finalize() -> void;
+
         /// Convenience: load all standard files from the base directory.
         auto loadFromDirectory() -> void;
 
@@ -88,6 +93,7 @@ export {
         auto eigen()  const -> const EIGEN&;
         auto occ()    const -> const OCC&;
         auto ncpp(int atomic_number) const -> const NCPP&;
+        auto betaqTables(int atomic_number) const -> const BetaqTables&;
 
         // -------------------------------------------------------------------
         //  1.  Callable  —  H|ψ⟩ at fixed k
@@ -207,7 +213,8 @@ export {
         std::optional<ATOM>  atom_;
         std::optional<EIGEN> eigen_;
         std::optional<OCC>   occ_;
-        std::vector<NCPP>    ncpps_;
+        struct ElementData { NCPP ncpp; std::optional<BetaqTables> betaq_tables; };
+        std::vector<ElementData> elements_;
 
         /// Bitmask to run each Part 2 file-pair integrity check exactly once.
         /// Reset by loadXxx() when a file is loaded/reloaded so affected pairs

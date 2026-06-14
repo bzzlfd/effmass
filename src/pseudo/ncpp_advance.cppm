@@ -3,6 +3,9 @@ export module pseudo.ncpp.advance;
 import std;
 import pseudo.ncpp;
 import math.linalg;
+import math.numerical;
+import math.fourier_bessel;
+import math.sph_bessel;
 
 
 export auto sortByL(NCPP& ncpp) -> void {
@@ -501,3 +504,198 @@ export auto upf2upfSO(NCPP& ncpp) -> void {
     ncpp.pseudoWfc.jchi.clear();
     ncpp.pseudoWfc.occupation = std::move(new_oc);
 }
+
+// =============================================================================
+//  BetaqTables  —  precomputed multi-l, multi-projector beta(q) lookup tables
+//
+//  The Fourier-Bessel integral  beta(q) = 4π∫ β(r)·r·j_l(qr)·dr  is evaluated
+//  on a uniform q-grid once during construction.  The loop nests as
+//  q (outer) → l (middle) → projector (inner) so that the spherical Bessel
+//  recurrence seeds j_0 exactly once per q-point and walks upward through l
+//  via cheap three-term recurrence.
+//
+//  Raw radial beta(q) values are stored; plane-wave normalisation (1/√Ω) is
+//  applied inside interpolate() and can be updated via setVolume() without
+//  rebuilding the tables.
+// =============================================================================
+
+export class BetaqTables {
+public:
+    BetaqTables(
+        std::span<const double> r,
+        std::span<const double> rab,
+        SimpsonMeshType mesh_type,
+        const std::vector<std::vector<double>>& betas,
+        const std::vector<int>& angular_momentum,
+        double dq = 0.01,
+        double q_max = 20.0
+    ) : dq_(dq), q_max_(q_max) {
+        if (dq <= 0.0) throw std::invalid_argument("BetaqTables: dq must be positive");
+        if (q_max < 0.0) throw std::invalid_argument("BetaqTables: q_max must be non-negative");
+
+        const int n_proj = static_cast<int>(betas.size());
+        if (n_proj == 0) return;
+        if (static_cast<int>(angular_momentum.size()) != n_proj) {
+            throw std::invalid_argument("BetaqTables: betas and angular_momentum size mismatch");
+        }
+
+        int nr = static_cast<int>(r.size());
+        if (nr == 0) return;
+
+        // 1. Group betas by angular momentum l
+        int l_max = -1;
+        for (int l : angular_momentum) {
+            if (l > l_max) l_max = l;
+        }
+        if (l_max < 0) return;
+
+        std::vector<std::vector<std::pair<int, std::span<const double>>>> groups(l_max + 1);
+        for (int ip = 0; ip < n_proj; ++ip) {
+            int l = angular_momentum[ip];
+            if (l < 0) continue;
+            groups[l].push_back({ip, betas[ip]});
+        }
+
+        // 2. Build index:  l → (offset, count) into tables_
+        l_offset_.resize(l_max + 1, -1);
+        l_count_.resize(l_max + 1, 0);
+
+        int total = 0;
+        for (int l = 0; l <= l_max; ++l) {
+            if (groups[l].empty()) continue;
+            l_offset_[l] = total;
+            l_count_[l] = static_cast<int>(groups[l].size());
+            total += l_count_[l];
+        }
+
+        // 3. Determine radial extent for shared Bessel grid (max non-zero
+        //    extent across all betas).
+        int nmax_bessel = 0;
+        for (int l = 0; l <= l_max; ++l) {
+            for (const auto& [orig_idx, beta] : groups[l]) {
+                int nb = static_cast<int>(beta.size());
+                if (nb > nr) nb = nr;
+                while (nb > 0 && beta[nb - 1] == 0.0) --nb;
+                if (nb > nmax_bessel) nmax_bessel = nb;
+            }
+        }
+        if (nmax_bessel == 0) return;
+
+        auto r_bessel = r.subspan(0, nmax_bessel);
+
+        // 4. Allocate tables and q-grid (+3 for cubic stencil support)
+        tables_.resize(total);
+        int nq = static_cast<int>(std::ceil(q_max / dq)) + 1 + 3;
+        std::vector<double> qs(nq);
+        for (int i = 0; i < nq; ++i) qs[i] = i * dq;
+
+        for (int l = 0; l <= l_max; ++l) {
+            int off = l_offset_[l];
+            if (off < 0) continue;
+            for (int ib = 0; ib < l_count_[l]; ++ib) {
+                auto& t = tables_[off + ib];
+                t.l = l;
+                t.ib_in_l = ib;
+                t.values.resize(nq);
+            }
+        }
+
+        // 5. Precompute: q outer → l middle → projector inner.
+        //    SphericalBesselJ is seeded once per q-point (expensive sin/cos
+        //    for j_0), then walked upward through l via cheap recurrence.
+        SphericalBesselJ bessel{r_bessel, qs.front()};
+
+        for (int iq = 0; iq < nq; ++iq) {
+            bessel.reset(qs[iq]);
+
+            for (int l = 0; l <= l_max; ++l) {
+                int off = l_offset_[l];
+
+                if (off >= 0 && qs[iq] < 1e-15 && l > 0) {
+                    // j_l(0) = 0 for l > 0
+                    for (int ib = 0; ib < l_count_[l]; ++ib)
+                        tables_[off + ib].values[iq] = 0.0;
+                } else if (off >= 0) {
+                    auto jl = bessel.value();
+
+                    for (int ib = 0; ib < l_count_[l]; ++ib) {
+                        const auto& beta = groups[l][ib].second;
+
+                        int nmax = static_cast<int>(beta.size());
+                        if (nmax > nmax_bessel) nmax = nmax_bessel;
+                        while (nmax > 0 && beta[nmax - 1] == 0.0) --nmax;
+                        if (nmax == 0) continue;
+
+                        tables_[off + ib].values[iq] = fourierBesselIntegrateR1(
+                            beta.subspan(0, static_cast<std::size_t>(nmax)),
+                            r_bessel.subspan(0, static_cast<std::size_t>(nmax)),
+                            jl.subspan(0, static_cast<std::size_t>(nmax)),
+                            rab.subspan(0, static_cast<std::size_t>(nmax)),
+                            mesh_type);
+                    }
+                }
+
+                bessel.advance(1);
+            }
+        }
+    }
+
+    // Interpolate beta(q) at given q (plane-wave normalisation applied).
+    auto interpolate(int l, int ib_in_l, double q) const -> double {
+        if (l < 0 || l >= static_cast<int>(l_offset_.size())) {
+            throw std::out_of_range("BetaqTables::interpolate: l out of range");
+        }
+        int off = l_offset_[l];
+        if (off < 0) {
+            throw std::out_of_range(
+                "BetaqTables::interpolate: no tables for l=" + std::to_string(l));
+        }
+        if (ib_in_l < 0 || ib_in_l >= l_count_[l]) {
+            throw std::out_of_range("BetaqTables::interpolate: ib_in_l out of range");
+        }
+        if (q < 0.0) {
+            throw std::domain_error("BetaqTables::interpolate: q must be non-negative");
+        }
+        if (q > q_max_) {
+            throw std::domain_error("BetaqTables::interpolate: q exceeds q_max");
+        }
+
+        const auto& t = tables_[off + ib_in_l];
+        if (q == 0.0) return t.values.front() * norm_coeff_;
+
+        double s = q / dq_;
+        int i0 = static_cast<int>(std::floor(s)) - 1;
+        double px = s - static_cast<double>(i0);
+        if (i0 < 0) { i0 = 0; px = s; }
+
+        return lagrangeCubic(
+            t.values[i0], t.values[i0 + 1],
+            t.values[i0 + 2], t.values[i0 + 3], px) * norm_coeff_;
+    }
+
+    auto setVolume(double omega) -> void {
+        norm_coeff_ = 1.0 / std::sqrt(omega);
+    }
+
+    auto step()   const -> double { return dq_; }
+    auto maxQ()   const -> double { return q_max_; }
+
+    auto numProjectors(int l) const -> int {
+        if (l < 0 || l >= static_cast<int>(l_count_.size())) return 0;
+        return l_count_[l];
+    }
+
+private:
+    struct Table {
+        int l;
+        int ib_in_l;
+        std::vector<double> values;   // raw beta(q_i), no normalisation applied
+    };
+
+    double dq_;
+    double q_max_;
+    double norm_coeff_{1.0};
+    std::vector<Table> tables_;
+    std::vector<int> l_offset_;
+    std::vector<int> l_count_;
+};

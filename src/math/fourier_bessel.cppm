@@ -1,159 +1,102 @@
 export module math.fourier_bessel;
 
+// All functions return the real radial part of the Fourier-Bessel transform.
+// The (-i)^l phase factor from the plane-wave expansion is intentionally
+// omitted — apply it at the other complex layer.
+
 import std;
+import math.numerical;
 import math.sph_bessel;
 
 export {
-    enum class RadialMeshType : int;
-    class BetaqInterpolator;
+    // --- High-level: complete Fourier-Bessel transform --------------------------
+    //  beta(q) = 4π ∫ f(r)·r²·j_l(qr)·dr
+    //  Single (l,q): self-contained, manages Bessel internally.
+    auto fourierBesselTransform(
+        std::span<const double> r, std::span<const double> rab,
+        std::span<const double> f, int l, double q,
+        SimpsonMeshType mesh_type) -> double;
+
+    //  Batch: single l, multiple q (reuses Bessel buffer).
+    auto fourierBesselTransform(
+        std::span<const double> r, std::span<const double> rab,
+        std::span<const double> f, int l,
+        std::span<const double> qs, std::span<double> out,
+        SimpsonMeshType mesh_type) -> void;
+
+    // --- Low-level: integrand + simpson, j_l(qr) provided by caller ------------
+    //  Fourier-Bessel integral with single radial power: 4π ∫ f(r)·r·j_l(qr)·dr.
+    //  For callers whose f(r) already includes one factor of r (e.g. UPF beta
+    //  projectors are stored as r·β(r)).  Callers needing the standard r² form
+    //  should absorb the extra r into f before calling.
+    auto fourierBesselIntegrateR1(
+        std::span<const double> f,
+        std::span<const double> r,
+        std::span<const double> jl,
+        std::span<const double> rab,
+        SimpsonMeshType mesh_type) -> double;
+
+    //  Standard form:  4π ∫ f(r)·r²·j_l(qr)·dr.
+    auto fourierBesselIntegrate(
+        std::span<const double> f,
+        std::span<const double> r,
+        std::span<const double> jl,
+        std::span<const double> rab,
+        SimpsonMeshType mesh_type) -> double;
 }
 
 
 // =============================================================================
-//  Enums
-// =============================================================================
-
-enum class RadialMeshType : int {
-    Uniform,
-    General,
-};
-
-
-// =============================================================================
-//  Internal helpers — not exported, used by BetaqInterpolator
+//  Implementation
 // =============================================================================
 
 namespace {
 
 constexpr double FOUR_PI = 4.0 * std::numbers::pi;
 
-// Simpson integration on the index i (dr/di encoded in rab).
-// For a Uniform mesh, rab(i) is constant (dr) and the formula is simplified.
-// Handles even number of points without dropping the last point by combining
-// Simpson 3/8 rule for the first 4 points and Simpson 1/3 for the remainder.
-auto simpson(std::span<const double> f, std::span<const double> rab,
-             RadialMeshType mesh_type) -> double {
-    int n = static_cast<int>(f.size());
-    int nrab = static_cast<int>(rab.size());
-    if (n == 0) return 0.0;
-    if (n == 1) return f[0] * rab[0];
-    if (nrab < n) {
-        throw std::invalid_argument("simpson: rab size must be >= f size");
-    }
+} // anonymous namespace
 
-    if (mesh_type == RadialMeshType::Uniform) {
-        double dr = rab[0];
-        if (n % 2 == 1) {
-            // Odd number of points: standard composite Simpson 1/3
-            double sum = f[0] + f[n - 1];
-            for (int i = 1; i < n - 1; ++i) {
-                sum += (i % 2 == 0 ? 2.0 : 4.0) * f[i];
-            }
-            return dr * sum / 3.0;
-        } else {
-            if (n == 2) {
-                return dr * 0.5 * (f[0] + f[1]);
-            }
-            // Even number of points >= 4:
-            // Simpson 3/8 for indices 0..3 (3 intervals),
-            // Simpson 1/3 for indices 3..n-1 (n-3 points, odd).
-            double sum38 = f[0] + 3.0 * f[1] + 3.0 * f[2] + f[3];
-            double sum13 = f[3] + f[n - 1];
-            for (int i = 4; i < n - 1; ++i) {
-                sum13 += (i % 2 == 0 ? 4.0 : 2.0) * f[i];
-            }
-            return dr * (3.0 / 8.0 * sum38 + sum13 / 3.0);
-        }
-    } else {
-        // General mesh: g(i) = f(i) * rab(i), integrate over uniform index i.
-        if (n % 2 == 1) {
-            double sum = f[0] * rab[0] + f[n - 1] * rab[n - 1];
-            for (int i = 1; i < n - 1; ++i) {
-                sum += (i % 2 == 0 ? 2.0 : 4.0) * f[i] * rab[i];
-            }
-            return sum / 3.0;
-        } else {
-            if (n == 2) {
-                return 0.5 * (f[0] * rab[0] + f[1] * rab[1]);
-            }
-            double g0 = f[0] * rab[0];
-            double g1 = f[1] * rab[1];
-            double g2 = f[2] * rab[2];
-            double g3 = f[3] * rab[3];
-            double sum38 = g0 + 3.0 * g1 + 3.0 * g2 + g3;
-            double sum13 = g3 + f[n - 1] * rab[n - 1];
-            for (int i = 4; i < n - 1; ++i) {
-                sum13 += (i % 2 == 0 ? 4.0 : 2.0) * f[i] * rab[i];
-            }
-            return 3.0 / 8.0 * sum38 + sum13 / 3.0;
-        }
-    }
-}
 
-auto computeBetaq(
+// -----------------------------------------------------------------------------
+//  fourierBesselTransform  —  single (l,q)
+// -----------------------------------------------------------------------------
+
+auto fourierBesselTransform(
     std::span<const double> r,
     std::span<const double> rab,
-    std::span<const double> beta,
+    std::span<const double> f,
     int l,
     double q,
-    RadialMeshType mesh_type
+    SimpsonMeshType mesh_type
 ) -> double {
-    int n = static_cast<int>(beta.size());
-    if (n == 0) return 0.0;
-
-    int nr = static_cast<int>(r.size());
-    int nrab = static_cast<int>(rab.size());
-    int nmax = std::min({n, nr, nrab});
-    // Defensive: beta is already truncated when the UPF object is constructed,
-    // but if there are still trailing zeros within the provided span,
-    // shrink nmax further to avoid unnecessary j_l evaluations.
-    while (nmax > 0 && beta[static_cast<std::size_t>(nmax) - 1] == 0.0) {
-        --nmax;
-    }
-    if (nmax == 0) return 0.0;
-
-    // Build integrand: beta(r) * r * j_l(qr)
-    // For q=0 and l=0, j_0(0)=1; for l>0, j_l(0)=0.
-    std::vector<double> integrand(nmax);
-    if (q < 1e-15) {
-        if (l == 0) {
-            for (int i = 0; i < nmax; ++i) {
-                integrand[i] = beta[i] * r[i];
-            }
-        } else {
-            return 0.0;
-        }
-    } else {
-        SphericalBesselJ bessel{r.subspan(0, static_cast<std::size_t>(nmax)), q};
-        bessel.advance(l);
-        auto jl = bessel.value();
-        for (int i = 0; i < nmax; ++i) {
-            integrand[i] = beta[i] * r[i] * jl[i];
-        }
-    }
-
-    return FOUR_PI * simpson(integrand, rab.subspan(0, nmax), mesh_type);
+    double out = 0.0;
+    fourierBesselTransform(r, rab, f, l,
+                           std::span<const double>(&q, 1),
+                           std::span<double>(&out, 1), mesh_type);
+    return out;
 }
 
-// Batch version: evaluate at multiple q points while reusing the
-// SphericalBesselJ buffers (r_ / j_curr_ / j_next_) and the integrand
-// vector across reset() calls, avoiding repeated heap allocations.
-auto computeBetaq(
+
+// -----------------------------------------------------------------------------
+//  fourierBesselTransform  —  single l, batch q
+// -----------------------------------------------------------------------------
+
+auto fourierBesselTransform(
     std::span<const double> r,
     std::span<const double> rab,
-    std::span<const double> beta,
+    std::span<const double> f,
     int l,
     std::span<const double> qs,
     std::span<double> out,
-    RadialMeshType mesh_type
+    SimpsonMeshType mesh_type
 ) -> void {
     int nq = static_cast<int>(qs.size());
     if (static_cast<std::size_t>(nq) != out.size()) {
-        throw std::invalid_argument("computeBetaq: qs and out size mismatch");
+        throw std::invalid_argument("fourierBesselTransform: qs and out size mismatch");
     }
     if (nq == 0) return;
 
-    int n = static_cast<int>(beta.size());
+    int n = static_cast<int>(f.size());
     if (n == 0) {
         std::fill(out.begin(), out.end(), 0.0);
         return;
@@ -162,7 +105,7 @@ auto computeBetaq(
     int nr = static_cast<int>(r.size());
     int nrab = static_cast<int>(rab.size());
     int nmax = std::min({n, nr, nrab});
-    while (nmax > 0 && beta[static_cast<std::size_t>(nmax) - 1] == 0.0) {
+    while (nmax > 0 && f[static_cast<std::size_t>(nmax) - 1] == 0.0) {
         --nmax;
     }
     if (nmax == 0) {
@@ -172,6 +115,7 @@ auto computeBetaq(
 
     auto r_sub = r.subspan(0, static_cast<std::size_t>(nmax));
     auto rab_sub = rab.subspan(0, static_cast<std::size_t>(nmax));
+    auto f_sub = f.subspan(0, static_cast<std::size_t>(nmax));
 
     std::vector<double> integrand(nmax);
     SphericalBesselJ bessel{r_sub, qs.front()};
@@ -180,210 +124,62 @@ auto computeBetaq(
         bessel.reset(qs[iq]);
         bessel.advance(l);
         auto jl = bessel.value();
-        for (int i = 0; i < nmax; ++i) {
-            integrand[i] = beta[i] * r[i] * jl[i];
-        }
+
+        for (int i = 0; i < nmax; ++i)
+            integrand[i] = f_sub[i] * r_sub[i] * jl[i];
+
         out[iq] = FOUR_PI * simpson(integrand, rab_sub, mesh_type);
     }
 }
 
-// Lagrange 4-point cubic interpolation (same as QE interp_beta)
-auto lagrangeCubic(
-    double f0, double f1, double f2, double f3,
-    double px
-) -> double {
-    double ux = 1.0 - px;
-    double vx = 2.0 - px;
-    double wx = 3.0 - px;
-    return f0 * ux * vx * wx / 6.0 +
-           f1 * px * vx * wx / 2.0 -
-           f2 * px * ux * wx / 2.0 +
-           f3 * px * ux * vx / 6.0;
-}
 
-// Derivative of the same 4-point cubic interpolant (same as QE interp_dbeta)
-auto lagrangeCubicDerivative(
-    double f0, double f1, double f2, double f3,
-    double px, double dq
-) -> double {
-    double ux = 1.0 - px;
-    double vx = 2.0 - px;
-    double wx = 3.0 - px;
-    return (f0 * (-vx*wx - ux*wx - ux*vx) / 6.0 +
-            f1 * ( vx*wx - px*wx - px*vx) / 2.0 -
-            f2 * ( ux*wx - px*wx - px*ux) / 2.0 +
-            f3 * ( ux*vx - px*vx - px*ux) / 6.0) / dq;
-}
+// -----------------------------------------------------------------------------
+//  fourierBesselIntegrateR1  —  integrand + simpson, j_l(qr) provided by caller
+// -----------------------------------------------------------------------------
 
-} // anonymous namespace (internal helpers)
-
-
-// =============================================================================
-//  BetaqInterpolator — exported class
-// =============================================================================
-
-// Tabulated interpolator for beta(q) = 4*pi * integral beta(r) * r * j_l(qr) * dr.
-// Uses 4-point Lagrange cubic interpolation, matching QE's interp_beta / interp_dbeta.
-class BetaqInterpolator {
-public:
-    BetaqInterpolator(
-        std::span<const double> r,
-        std::span<const double> rab,
-        std::span<const double> beta,
-        int l,
-        double dq = 0.01,
-        double q_max = 10.0,  // q_max^2 = 100 Hartree is sufficient for most pseudopotentials; can be increased if needed
-        RadialMeshType mesh_type = RadialMeshType::General,
-        double norm_coeff = 1.0  // plane-wave normalization factor, e.g. 1/sqrt(Omega)
-    ) : dq_(dq), q_max_(q_max), l_(l), mesh_type_(mesh_type), norm_coeff_(norm_coeff) {
-        if (dq <= 0.0) throw std::invalid_argument("BetaqInterpolator: dq must be positive");
-        if (q_max < 0.0) throw std::invalid_argument("BetaqInterpolator: q_max must be non-negative");
-
-        // Build table up to q_max + 3*dq so that cubic interpolation
-        // has full 4-point support throughout [0, q_max].
-        int n = static_cast<int>(std::ceil(q_max / dq)) + 1 + 3;
-        table_.resize(n);
-        for (int i = 0; i < n; ++i) {
-            double q = i * dq;
-            table_[i] = computeBetaq(r, rab, beta, l, q, mesh_type) * norm_coeff_;
-        }
-    }
-
-    // Function value at q using centered 4-point Lagrange cubic interpolation.
-    auto operator()(double q) const -> double {
-        if (q < 0.0) throw std::domain_error("BetaqInterpolator: q must be non-negative");
-        if (q > q_max_) throw std::domain_error("BetaqInterpolator: q exceeds q_max");
-        if (q == 0.0) return table_.front();
-
-        double s = q / dq_;
-        int i0 = static_cast<int>(std::floor(s)) - 1;
-        double px = s - static_cast<double>(i0);
-
-        // Left boundary: fall back to forward stencil when q < dq
-        if (i0 < 0) {
-            i0 = 0;
-            px = s;
-        }
-
-        return lagrangeCubic(
-            table_[i0], table_[i0 + 1], table_[i0 + 2], table_[i0 + 3], px);
-    }
-
-    // Derivative d/dq of beta(q) using centered 4-point Lagrange cubic interpolation.
-    auto derivative(double q) const -> double {
-        if (q < 0.0) throw std::domain_error("BetaqInterpolator: q must be non-negative");
-        if (q > q_max_) throw std::domain_error("BetaqInterpolator: q exceeds q_max");
-        if (q == 0.0) return 0.0;
-
-        double s = q / dq_;
-        int i0 = static_cast<int>(std::floor(s)) - 1;
-        double px = s - static_cast<double>(i0);
-
-        // Left boundary: fall back to forward stencil when q < dq
-        if (i0 < 0) {
-            i0 = 0;
-            px = s;
-        }
-
-        return lagrangeCubicDerivative(
-            table_[i0], table_[i0 + 1], table_[i0 + 2], table_[i0 + 3], px, dq_);
-    }
-
-    /// Replace the radial data without reallocating the table vector.
-    /// r, rab, beta become the new source functions; l, dq, q_max and mesh_type
-    /// remain unchanged from construction.
-    auto reset_beta(
-        std::span<const double> r,
-        std::span<const double> rab,
-        std::span<const double> beta
-    ) -> void {
-        int n = static_cast<int>(table_.size());
-        for (int i = 0; i < n; ++i) {
-            double q = i * dq_;
-            table_[static_cast<std::size_t>(i)] = computeBetaq(r, rab, beta, l_, q, mesh_type_) * norm_coeff_;
-        }
-    }
-
-    auto table() const -> std::span<const double> { return table_; }
-    auto step() const -> double { return dq_; }
-    auto maxQ() const -> double { return q_max_; }
-    auto angularMomentum() const -> int { return l_; }
-    auto normCoeff() const -> double { return norm_coeff_; }
-
-private:
-    int l_;
-    double dq_;
-    double q_max_;
-    double norm_coeff_;
-    RadialMeshType mesh_type_;
-    std::vector<double> table_;
-};
-
-
-// =============================================================================
-//  Archived — retained for reference, not used by exported API
-// =============================================================================
-
-namespace archived {
-
-// Single-q Fourier-Bessel transform of a radial beta function.
-// Returns: 4*pi * integral_0^R  beta(r) * r * j_l(q*r) * dr  (without (-i)^l)
-auto fourierBesselBeta(
+auto fourierBesselIntegrateR1(
+    std::span<const double> f,
     std::span<const double> r,
+    std::span<const double> jl,
     std::span<const double> rab,
-    std::span<const double> beta,
-    int l,
-    double q,
-    RadialMeshType mesh_type = RadialMeshType::General
+    SimpsonMeshType mesh_type
 ) -> double {
-    double out = 0.0;
-    computeBetaq(r, rab, beta, l,
-                   std::span<const double>(&q, 1),
-                   std::span<double>(&out, 1), mesh_type);
-    return out;
-}
-
-// Batch version: evaluate at multiple q points.
-auto fourierBesselBeta(
-    std::span<const double> r,
-    std::span<const double> rab,
-    std::span<const double> beta,
-    int l,
-    std::span<const double> qs,
-    std::span<double> out,
-    RadialMeshType mesh_type = RadialMeshType::General
-) -> void {
-    computeBetaq(r, rab, beta, l, qs, out, mesh_type);
-}
-
-
-// Estimate the maximum interpolation error by evaluating at half-integer
-// multiples of the table step and comparing with the direct integral.
-// Returns the maximum absolute deviation.
-auto estimateInterpolationError(
-    const BetaqInterpolator& interp,
-    std::span<const double> r,
-    std::span<const double> rab,
-    std::span<const double> beta,
-    int l,
-    int n_check = 200,
-    RadialMeshType mesh_type = RadialMeshType::General
-) -> double {
-    if (n_check <= 0) return 0.0;
-
-    double max_err = 0.0;
-    double q_max = interp.maxQ();
-    double dq = interp.step();
-
-    for (int i = 0; i < n_check; ++i) {
-        double q = (i + 0.5) * dq;
-        if (q > q_max) break;
-        double exact = computeBetaq(r, rab, beta, l, q, mesh_type);
-        double approx = interp(q);
-        double err = std::abs(exact - approx);
-        if (err > max_err) max_err = err;
+    int n = static_cast<int>(f.size());
+    if (n == 0) return 0.0;
+    if (static_cast<int>(r.size()) < n || static_cast<int>(jl.size()) < n) {
+        throw std::invalid_argument(
+            "fourierBesselIntegrateR1: r and jl must be at least as large as f");
     }
-    return max_err;
+
+    std::vector<double> integrand(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        integrand[i] = f[i] * r[i] * jl[i];
+
+    return FOUR_PI * simpson(integrand, rab, mesh_type);
 }
 
-} // namespace archived
+
+// -----------------------------------------------------------------------------
+//  fourierBesselIntegrate  —  standard form, j_l(qr) provided by caller
+// -----------------------------------------------------------------------------
+
+auto fourierBesselIntegrate(
+    std::span<const double> f,
+    std::span<const double> r,
+    std::span<const double> jl,
+    std::span<const double> rab,
+    SimpsonMeshType mesh_type
+) -> double {
+    int n = static_cast<int>(f.size());
+    if (n == 0) return 0.0;
+    if (static_cast<int>(r.size()) < n || static_cast<int>(jl.size()) < n) {
+        throw std::invalid_argument(
+            "fourierBesselIntegrate: r and jl must be at least as large as f");
+    }
+
+    std::vector<double> integrand(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        integrand[i] = f[i] * r[i] * r[i] * jl[i];
+
+    return FOUR_PI * simpson(integrand, rab, mesh_type);
+}

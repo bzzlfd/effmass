@@ -143,6 +143,7 @@ auto main() -> int {
         h2.loadWG   ("OUT.WG");
         h2.loadVR   ("OUT.VR");
         // Note: no loadEIGEN
+        h2.finalize();
         auto callable2 = h2.at_k(0);
         (void)callable2;
         std::println("PASS: at_k() works without EIGEN");

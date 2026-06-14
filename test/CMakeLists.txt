@@ -54,7 +54,7 @@ target_link_libraries(test-math-fft PRIVATE math)
 add_test(NAME test-math-fft COMMAND test-math-fft WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test-math-fourier-bessel math/test_fourier_bessel.cpp)
-target_link_libraries(test-math-fourier-bessel PRIVATE math)
+target_link_libraries(test-math-fourier-bessel PRIVATE math pseudo)
 add_test(NAME test-math-fourier-bessel COMMAND test-math-fourier-bessel WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test-math-linalg math/test_linalg.cpp)
