@@ -155,3 +155,26 @@ ncpp.cppm 当中，advance 成员的设计
 
 ### 重构方案
 1. 添加 sort beta
+
+
+## 3. Ylm, Betaq
+让我们讨论一下 Hamiltonian 及其内嵌类的框架设计
+1. 我们有两个内存和计算资源大户，Ylm 和 Betaq。
+  1. 其中 Ylm 依赖于 k 的选取，而 BetaqInterpolator 不依赖于 k
+  2. 而 Hamiltonian::Callable 依赖于 k 
+2. 所以我对于应该把它们存储在何处有一些思考。
+  1. 对于 Ylm 我倾向于存在于 Callable 内部。理由如下
+    1. Ylm 依赖于 k 
+    2. 可能在使用过程中 Hamiltonian 使用 at_k 构造多个 Callable （最重要的原因）
+    3. 我的计算需求中，好像不怎么需要变换 k 点
+  2. 对于 Betaq 我倾向于存在于 Hamiltonian 中，存在对应 ncpp 对象内部。
+    1. 理由仅仅是它不依赖于 k，而且在 ncpp 内部很恰当
+
+  无论怎么说，目前 Hamiltonian::Callable::operator() 内临构造它们都很浪费，这是需要优化的。
+  我想，如果 Ylm 不在 Hamiltonian 当中的话，Callable 也应该有一个接口，可以重新设定 k 点，我们需要讨论这个命名。
+
+3. 而以上做法让我担忧的是，这样初始化两个对象都很重。
+4. 另外需要额外纳入考虑的是，可能计算不需要 nonlocal 项，这时候 Ylm，Betaq 可能都不需要计算，无需申请内存、展开计算。我们的架构设计也应该考虑入这个因素
+
+
+检查 test/ 当中与 Hamiltonian 模块有关的测试，看哪些地方可以在我们完成这些修改之后进行优化。

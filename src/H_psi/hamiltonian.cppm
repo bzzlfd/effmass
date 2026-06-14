@@ -242,6 +242,10 @@ export {
         std::optional<int>                       canonical_natom_;
         std::optional<std::vector<std::array<double, 3>>> canonical_kpt_vec_;
 
+        // -- Derived quantities (computed in finalize) --
+        int ng_max_{};   // maximum number of G-vectors across all k-points (from GKK)
+        int l_max_{};    // maximum angular momentum across all NCPP elements
+
         /// Resolve a user-provided path against base_dir_.
         /// Absolute paths are returned as-is; relative paths are prefixed with base_dir_.
         auto resolve(const std::string& path) const -> std::string;

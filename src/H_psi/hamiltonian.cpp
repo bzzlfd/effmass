@@ -218,11 +218,26 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks) -> void 
         elem.betaq_tables->setVolume(omega);
     }
 
+    // Compute l_max_ across all elements.
+    l_max_ = 0;
+    for (const auto& elem : elements_) {
+        if (elem.ncpp.meta.l_max > l_max_) l_max_ = elem.ncpp.meta.l_max;
+    }
+
+    // Compute ng_max_ from GKK if loaded.
+    ng_max_ = 0;
+    if (gkk_) {
+        const auto& per_kpt = gkk_->meta.ng_tot_per_kpt;
+        if (!per_kpt.empty()) {
+            ng_max_ = *std::ranges::max_element(per_kpt);
+        }
+    }
+
     // Run selected Part‑3 consistency checks.
     checkConsistencyExtended(checks);
 
-    std::println("  done ({} element(s), omega={:.6f})",
-                 elements_.size(), omega);
+    std::println("  done ({} element(s), omega={:.6f}, ng_max={}, l_max={})",
+                 elements_.size(), omega, ng_max_, l_max_);
 }
 
 auto Hamiltonian::ncpp(int atomic_number) const -> const NCPP& {
