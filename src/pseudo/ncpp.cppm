@@ -49,6 +49,7 @@ class NCPP {
 public:
     struct Meta {
         std::string element;
+        std::string source_file;
         double z_valence = 0.0;
         Relativistic relativistic = Relativistic::None;
         std::string functional;
@@ -171,8 +172,9 @@ NCPP::NCPP(const UPF& upf) {
     const auto& nl = upf.nonlocal();
     const auto& wf = upf.wavefunctions();
 
-    meta.element    = h.element;
-    meta.z_valence  = h.z_valence;
+    meta.element     = h.element;
+    meta.source_file = upf.sourceFile();
+    meta.z_valence   = h.z_valence;
     meta.functional = h.functional;
 
     if (h.relativistic == "no")         meta.relativistic = Relativistic::None;

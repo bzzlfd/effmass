@@ -12,9 +12,10 @@ import math;
 //                    checkConsistencyExtended()
 // ===================================================================
 export {
-    enum class ExtendedCheck : int {
-        RHOReconstruct,   // Σ occ·|WG|² → FFT → RHO'  vs  file RHO
-        ValenceCount,     // Σ(NCPP.z_valence × count)  ≈  ∫RHO d³r
+    enum class ExtendedCheck : std::uint64_t {
+        RHOReconstruct   = 1ull << 0,  // Σ occ·|WG|² → FFT → RHO'  vs  file RHO
+        ValenceCount     = 1ull << 1,  // Σ(NCPP.z_valence × count)  ≈  ∫RHO d³r
+        NCPPAtomCoverage = 1ull << 2,  // every ATOM species has a matching NCPP
     };
 }
 
@@ -65,12 +66,14 @@ export {
         auto loadATOM(const std::string& path) -> void;
         auto loadEIGEN(const std::string& path) -> void;
         auto loadOCC(const std::string& path) -> void;
-        auto loadNCPPs(const std::string& directory) -> void;
+        auto loadNCPP(const std::string& path) -> void;
 
         /// Post-load initialisation.  Constructs BetaqTables from NCPP data and
-        /// GKK cell volume.  Must be called after all loadXxx() and before
+        /// GKK cell volume, then runs the selected Part‑3 consistency checks.
+        /// Must be called after all loadXxx() and before
         /// at_k() / gradient() / hessian().
-        auto finalize() -> void;
+        auto finalize(std::initializer_list<ExtendedCheck> checks
+                      = {ExtendedCheck::NCPPAtomCoverage}) -> void;
 
         /// Convenience: load all standard files from the base directory.
         auto loadFromDirectory() -> void;

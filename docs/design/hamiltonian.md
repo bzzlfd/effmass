@@ -31,7 +31,7 @@ auto h = Hamiltonian("path/to/calc");
 h.loadGKK("OUT.GKK");   // 加载波函数 G 矢量数据
 h.loadWG("OUT.WG");     // 加载波函数系数
 h.loadATOM("atom.config");
-h.loadNCPPs("UPF");     // 加载赝势
+h.loadNCPP("Al.SG15.PBE.UPF");  // 加载单个赝势（自动检查 Z 冲突）
 // ...
 ```
 

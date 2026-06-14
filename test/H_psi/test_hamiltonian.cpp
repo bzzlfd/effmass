@@ -37,9 +37,10 @@ auto main() -> int {
     {
         Hamiltonian h("test/data_io-nonlocal");
         h.loadATOM("atom.config");
-        h.loadNCPPs(".");
+        h.loadNCPP("Al.SG15.PBE.UPF");
+        h.loadNCPP("N.SG15.PBE.UPF");
         if (!h.hasATOM()) { std::println("FAIL: ATOM not loaded"); return 1; }
-        std::println("PASS: ATOM + NCPPs loaded");
+        std::println("PASS: ATOM + NCPP loaded");
 
         // ATOM species: Al (Z=13), N (Z=7)
         auto ncpp_al = h.ncpp(13);
@@ -50,9 +51,33 @@ auto main() -> int {
     }
 
     {
+        // Duplicate element → should throw with both file paths.
+        Hamiltonian h("test/data_io-nonlocal");
+        h.loadNCPP("Al.SG15.PBE.UPF");
+        bool threw = false;
+        try {
+            h.loadNCPP("Al.SG15.PBE.UPF");
+        } catch (const std::runtime_error& e) {
+            threw = true;
+            std::string msg = e.what();
+            if (!msg.contains("duplicate NCPP") || !msg.contains("Al") || !msg.contains("Z=13")) {
+                std::println("FAIL: duplicate error message missing details:\n{}", msg);
+                return 1;
+            }
+            if (!msg.contains("file 1:") || !msg.contains("file 2:")) {
+                std::println("FAIL: duplicate error message missing file paths:\n{}", msg);
+                return 1;
+            }
+        }
+        if (!threw) { std::println("FAIL: duplicate NCPP should throw"); return 1; }
+        std::println("PASS: duplicate NCPP detected");
+    }
+
+    {
         Hamiltonian h("test/data_io-nonlocal");
         h.loadATOM ("atom.config");
-        h.loadNCPPs(".");
+        h.loadNCPP("Al.SG15.PBE.UPF");
+        h.loadNCPP("N.SG15.PBE.UPF");
         h.loadGKK  ("OUT.GKK");
         h.loadWG   ("OUT.WG");
         h.loadVR   ("OUT.VR");
@@ -113,7 +138,8 @@ auto main() -> int {
         // ncpp with missing element
         Hamiltonian h2("test/data_io-nonlocal");
         h2.loadATOM("atom.config");
-        h2.loadNCPPs(".");
+        h2.loadNCPP("Al.SG15.PBE.UPF");
+        h2.loadNCPP("N.SG15.PBE.UPF");
         threw = false;
         try { (void)h2.ncpp(999); }
         catch (const std::out_of_range&) { threw = true; }
@@ -138,7 +164,8 @@ auto main() -> int {
         // H without EIGEN
         Hamiltonian h2("test/data_io-nonlocal");
         h2.loadATOM ("atom.config");
-        h2.loadNCPPs(".");
+        h2.loadNCPP("Al.SG15.PBE.UPF");
+        h2.loadNCPP("N.SG15.PBE.UPF");
         h2.loadGKK  ("OUT.GKK");
         h2.loadWG   ("OUT.WG");
         h2.loadVR   ("OUT.VR");

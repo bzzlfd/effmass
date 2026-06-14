@@ -94,6 +94,7 @@ public:
     auto wavefunctions() const -> const UPFWavefunction& { return wfc_; }
     auto rhoAtom() const -> std::span<const double> { return rho_at_; }
     auto socData() const -> const UPFSOC* { return header_.has_so ? &soc_ : nullptr; }
+    auto sourceFile() const -> const std::string& { return filename_; }
 
 private:
     UPFHeader header_;
@@ -103,6 +104,7 @@ private:
     UPFWavefunction wfc_;
     std::vector<double> rho_at_;
     UPFSOC soc_;
+    std::string filename_;
 
     auto readSpinOrbit(const pugi::xml_node& root) -> void;
     auto readHeader(const pugi::xml_node& root) -> void;
@@ -177,7 +179,7 @@ namespace {
 
 // Implementation of UPF
 
-UPF::UPF(const std::string& filename) {
+UPF::UPF(const std::string& filename) : filename_(filename) {
     pugi::xml_document doc;
     pugi::xml_parse_result result = doc.load_file(filename.c_str());
     if (!result) {

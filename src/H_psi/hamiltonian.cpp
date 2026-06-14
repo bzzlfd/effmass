@@ -47,7 +47,6 @@ namespace {
         PART2_GKK_WG    = 1ull << 0,   // mg_nx, ng_tot_per_kpt, nnode
         PART2_GKK_EIGEN = 1ull << 1,   // nnode
         PART2_VR_RHO    = 1ull << 2,   // nstate
-        PART2_NCPP_ATOM = 1ull << 3,   // element coverage
     };
 }
 
@@ -92,7 +91,6 @@ auto Hamiltonian::loadATOM(const std::string& path) -> void {
     auto full = resolve(path);
     std::println("[Hamiltonian] loading ATOM: {}", full);
     atom_.emplace(full);
-    part2_done_ &= ~PART2_NCPP_ATOM;
     checkConsistency();
 }
 
@@ -112,26 +110,17 @@ auto Hamiltonian::loadOCC(const std::string& path) -> void {
     checkConsistency();
 }
 
-auto Hamiltonian::loadNCPPs(const std::string& directory) -> void {
-    auto full = resolve(directory);
-    std::println("[Hamiltonian] loading NCPPs from: {}", full);
-    auto upf_dir = std::filesystem::path(full);
-    if (!std::filesystem::is_directory(upf_dir)) {
-        throw std::runtime_error(
-            "Hamiltonian: directory not found: " + upf_dir.string());
-    }
+auto Hamiltonian::loadNCPP(const std::string& path) -> void {
+    auto full = resolve(path);
+    std::println("[Hamiltonian] loading NCPP: {}", full);
 
-    for (const auto& entry : std::filesystem::directory_iterator(upf_dir)) {
-        auto ext = entry.path().extension();
-        if (ext == ".UPF" || ext == ".upf") {
-            auto ncpp = NCPP(UPF(entry.path().string()));
-            diagonalizeNonlocal(ncpp);
-            elements_.push_back({std::move(ncpp), std::nullopt});
-            std::println("  loaded: {}", entry.path().filename().string());
-        }
-    }
-    std::println("  total NCPP objects: {}", elements_.size());
-    part2_done_ &= ~PART2_NCPP_ATOM;
+    auto ncpp = NCPP(UPF(full));
+    diagonalizeNonlocal(ncpp);
+    auto name = ncpp.meta.element;
+
+    elements_.push_back({std::move(ncpp), std::nullopt});
+    std::println("  loaded: {} ({} element(s) total)", name, elements_.size());
+
     checkConsistency();
 }
 
@@ -145,12 +134,14 @@ auto Hamiltonian::loadFromDirectory() -> void {
     // each checkConsistency() call gets to verify progressively more pairs.
     loadATOM("atom.config");
 
-    // Try UPF/ subdirectory first, fall back to the base directory itself.
-    auto upf_subdir = base_dir_ / "UPF";
-    if (std::filesystem::is_directory(upf_subdir)) {
-        loadNCPPs("UPF");
-    } else {
-        loadNCPPs(".");
+    // Load each UPF file from UPF/ subdirectory, falling back to base_dir_.
+    auto upf_dir = base_dir_ / "UPF";
+    if (!std::filesystem::is_directory(upf_dir))
+        upf_dir = base_dir_;
+    for (const auto& entry : std::filesystem::directory_iterator(upf_dir)) {
+        auto ext = entry.path().extension();
+        if (ext == ".UPF" || ext == ".upf")
+            loadNCPP(std::filesystem::relative(entry.path(), base_dir_).string());
     }
 
     loadGKK("OUT.GKK");
@@ -208,7 +199,7 @@ auto Hamiltonian::occ() const -> const OCC& {
 //  finalize  —  post-load initialisation
 // -------------------------------------------------------------------------
 
-auto Hamiltonian::finalize() -> void {
+auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks) -> void {
     if (!canonical_lattice_) throw std::runtime_error("finalize: no lattice loaded");
     if (elements_.empty()) return;
 
@@ -224,6 +215,10 @@ auto Hamiltonian::finalize() -> void {
             ncpp.nonlocal.beta, ncpp.nonlocal.angular_momentum);
         elem.betaq_tables->setVolume(omega);
     }
+
+    // Run selected Part‑3 consistency checks.
+    checkConsistencyExtended(checks);
+
     std::println("  done ({} element(s), omega={:.6f})",
                  elements_.size(), omega);
 }
@@ -572,6 +567,24 @@ auto Hamiltonian::checkPart1() -> void {
             log.log(LogLevel::Info, "  ✓ kpt_vec [OCC]");
         }
     }
+
+    // ------------------------------------------------------------------
+    //  NCPP internal  —  no duplicate element symbols
+    // ------------------------------------------------------------------
+    if (elements_.size() >= 2) {
+        auto& last = elements_.back().ncpp.meta;
+        for (size_t i = 0; i < elements_.size() - 1; ++i) {
+            if (elements_[i].ncpp.meta.element == last.element) {
+                int z = ATOM::atomicNumber(last.element);
+                throw std::runtime_error(
+                    std::format("Hamiltonian consistency: duplicate NCPP for"
+                                " element {} (Z={})\n  file 1: {}\n  file 2: {}",
+                                last.element, z,
+                                elements_[i].ncpp.meta.source_file,
+                                last.source_file));
+            }
+        }
+    }
 }
 
 
@@ -625,27 +638,6 @@ auto Hamiltonian::checkPart2() -> void {
         checkInt(vr_->meta.nstate, rho_->meta.nstate, "nstate [VR vs RHO]");
     }
 
-    // ------------------------------------------------------------------
-    //  NCPP ↔ ATOM  —  every ATOM species has a matching UPF
-    // ------------------------------------------------------------------
-    if (!elements_.empty() && atom_ && !(part2_done_ & PART2_NCPP_ATOM)) {
-        part2_done_ |= PART2_NCPP_ATOM;
-        for (auto&& t : atom_->eachType()) {
-            string_view expected = ATOM::elementName(t.z);
-            bool found = false;
-            for (const auto& elem : elements_) {
-                if (elem.ncpp.meta.element == expected) { found = true; break; }
-            }
-            if (found) {
-                log.log(LogLevel::Info, "  ✓ element {} [NCPP vs ATOM]", expected);
-            } else {
-                log.log(LogLevel::Info, "  ✗ element {} [NCPP vs ATOM]: no matching UPF", expected);
-                throw runtime_error(
-                    format("Hamiltonian consistency: no NCPP for element {} (Z={})",
-                           expected, t.z));
-            }
-        }
-    }
 }
 
 
@@ -672,14 +664,13 @@ auto Hamiltonian::checkConsistencyExtended(std::initializer_list<ExtendedCheck> 
 
     auto mask = 0ull;
     for (auto c : checks)
-        mask |= (1ull << static_cast<int>(c));
+        mask |= static_cast<std::uint64_t>(c);
 
-    auto const RHO = static_cast<int>(ExtendedCheck::RHOReconstruct);
-    auto const VAL = static_cast<int>(ExtendedCheck::ValenceCount);
+    using EC = ExtendedCheck;
     // ------------------------------------------------------------------
     //  1.  RHOReconstruct  —  Σ occ·|WG|² → FFT → compare vs file RHO
     // ------------------------------------------------------------------
-    if (mask & (1ull << RHO)) {
+    if (mask & static_cast<std::uint64_t>(EC::RHOReconstruct)) {
         log.log(LogLevel::Info, "  [RHOReconstruct]");
         if (!gkk_ || !wg_ || !occ_ || !rho_) {
             log.log(LogLevel::Info, "    skipped — missing data (need GKK+WG+OCC+RHO)");
@@ -703,7 +694,7 @@ auto Hamiltonian::checkConsistencyExtended(std::initializer_list<ExtendedCheck> 
     // ------------------------------------------------------------------
     //  2.  ValenceCount  —  Σ(NCPP.z_valence × count)  ≈  ∫RHO d³r
     // ------------------------------------------------------------------
-    if (mask & (1ull << VAL)) {
+    if (mask & static_cast<std::uint64_t>(EC::ValenceCount)) {
         log.log(LogLevel::Info, "  [ValenceCount]");
         if (!atom_ || !rho_ || elements_.empty()) {
             log.log(LogLevel::Info, "    skipped — missing data (need ATOM+RHO+NCPPs)");
@@ -731,6 +722,31 @@ auto Hamiltonian::checkConsistencyExtended(std::initializer_list<ExtendedCheck> 
                     "valence electron count mismatch: "
                     "NCPP sum={:.1f}, ∫RHO={:.6f}, diff={:.4f}",
                     total_valence, rho_int, diff));
+            }
+            log.log(LogLevel::Info, "    ✓");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  3.  NCPPAtomCoverage  —  every ATOM species has a matching NCPP
+    // ------------------------------------------------------------------
+    if (mask & static_cast<std::uint64_t>(EC::NCPPAtomCoverage)) {
+        log.log(LogLevel::Info, "  [NCPPAtomCoverage]");
+        if (!atom_ || elements_.empty()) {
+            log.log(LogLevel::Info, "    skipped — missing data (need ATOM+NCPPs)");
+        } else {
+            for (auto&& t : atom_->eachType()) {
+                std::string_view expected = ATOM::elementName(t.z);
+                bool found = false;
+                for (const auto& elem : elements_) {
+                    if (elem.ncpp.meta.element == expected) { found = true; break; }
+                }
+                if (found)
+                    log.log(LogLevel::Info, "    ✓ element {} covered", expected);
+                else
+                    throw std::runtime_error(std::format(
+                        "Hamiltonian checkConsistencyExtended: "
+                        "no NCPP for element {} (Z={})", expected, t.z));
             }
             log.log(LogLevel::Info, "    ✓");
         }
