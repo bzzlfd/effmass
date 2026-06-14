@@ -68,7 +68,8 @@ export {
         auto loadOCC(const std::string& path) -> void;
         auto loadNCPP(const std::string& path) -> void;
 
-        /// Post-load initialisation.  Constructs BetaqTables from NCPP data and
+        /// Post-load initialisation.  Prepares NCPP data (sortByL,
+        /// diagonalizeNonlocal), constructs BetaqTables from NCPP data and
         /// GKK cell volume, then runs the selected Part‑3 consistency checks.
         /// Must be called after all loadXxx() and before
         /// at_k() / gradient() / hessian().

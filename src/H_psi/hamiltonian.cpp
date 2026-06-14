@@ -115,7 +115,6 @@ auto Hamiltonian::loadNCPP(const std::string& path) -> void {
     std::println("[Hamiltonian] loading NCPP: {}", full);
 
     auto ncpp = NCPP(UPF(full));
-    diagonalizeNonlocal(ncpp);
     auto name = ncpp.meta.element;
 
     elements_.push_back({std::move(ncpp), std::nullopt});
@@ -207,6 +206,9 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks) -> void 
     double omega = canonical_lattice_->volume();
 
     for (auto& elem : elements_) {
+        sortByL(elem.ncpp);
+        diagonalizeNonlocal(elem.ncpp);
+
         const auto& ncpp = elem.ncpp;
         auto mesh_type = (ncpp.mesh.type == MeshType::Uniform)
                          ? SimpsonMeshType::Uniform : SimpsonMeshType::General;
