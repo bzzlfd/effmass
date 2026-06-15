@@ -74,7 +74,8 @@ export {
         /// Must be called after all loadXxx() and before
         /// at_k() / gradient() / hessian().
         auto finalize(std::initializer_list<ExtendedCheck> checks
-                      = {ExtendedCheck::NCPPAtomCoverage}) -> void;
+                      = {ExtendedCheck::NCPPAtomCoverage},
+                      bool enable_psp_nonlocal = true) -> void;
 
         /// Convenience: load all standard files from the base directory.
         auto loadFromDirectory() -> void;

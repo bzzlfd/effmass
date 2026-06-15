@@ -198,33 +198,45 @@ auto Hamiltonian::occ() const -> const OCC& {
 //  finalize  —  post-load initialisation
 // -------------------------------------------------------------------------
 
-auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks) -> void {
+auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
+                           bool enable_psp_nonlocal) -> void {
     if (!canonical_lattice_) throw std::runtime_error("finalize: no lattice loaded");
     if (elements_.empty()) return;
 
-    std::println("[Hamiltonian] finalize: constructing BetaqTables...");
-    double omega = canonical_lattice_->volume();
+    // -------------------------------------------------------------------
+    //  BetaqTables  —  NCPP initialisation  (skip if !enable_psp_nonlocal)
+    // -------------------------------------------------------------------
 
-    for (auto& elem : elements_) {
-        sortByL(elem.ncpp);
-        diagonalizeNonlocal(elem.ncpp);
+    double omega = 0.0;
+    if (enable_psp_nonlocal) {
+        std::println("[Hamiltonian] finalize: constructing BetaqTables...");
+        omega = canonical_lattice_->volume();
 
-        const auto& ncpp = elem.ncpp;
-        auto mesh_type = (ncpp.mesh.type == MeshType::Uniform)
-                         ? SimpsonMeshType::Uniform : SimpsonMeshType::General;
-        elem.betaq_tables.emplace(
-            ncpp.mesh.r, ncpp.mesh.rab, mesh_type,
-            ncpp.nonlocal.beta, ncpp.nonlocal.angular_momentum);
-        elem.betaq_tables->setVolume(omega);
+        for (auto& elem : elements_) {
+            sortByL(elem.ncpp);
+            diagonalizeNonlocal(elem.ncpp);
+
+            const auto& ncpp = elem.ncpp;
+            auto mesh_type = (ncpp.mesh.type == MeshType::Uniform)
+                             ? SimpsonMeshType::Uniform : SimpsonMeshType::General;
+            elem.betaq_tables.emplace(
+                ncpp.mesh.r, ncpp.mesh.rab, mesh_type,
+                ncpp.nonlocal.beta, ncpp.nonlocal.angular_momentum);
+            elem.betaq_tables->setVolume(omega);
+        }
     }
 
-    // Compute l_max_ across all elements.
+    // -------------------------------------------------------------------
+    //  Derived quantities
+    // -------------------------------------------------------------------
+
+    // l_max_ — maximum angular momentum across all elements.
     l_max_ = 0;
     for (const auto& elem : elements_) {
         if (elem.ncpp.meta.l_max > l_max_) l_max_ = elem.ncpp.meta.l_max;
     }
 
-    // Compute ng_max_ from GKK if loaded.
+    // ng_max_ — maximum G-vectors across k-points (from GKK).
     ng_max_ = 0;
     if (gkk_) {
         const auto& per_kpt = gkk_->meta.ng_tot_per_kpt;
@@ -233,8 +245,15 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks) -> void 
         }
     }
 
-    // Run selected Part‑3 consistency checks.
+    // -------------------------------------------------------------------
+    //  Consistency checks
+    // -------------------------------------------------------------------
+
     checkConsistencyExtended(checks);
+
+    // -------------------------------------------------------------------
+    //  Done
+    // -------------------------------------------------------------------
 
     std::println("  done ({} element(s), omega={:.6f}, ng_max={}, l_max={})",
                  elements_.size(), omega, ng_max_, l_max_);
