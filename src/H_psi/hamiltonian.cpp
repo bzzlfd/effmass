@@ -247,6 +247,14 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
     }
 
     // -------------------------------------------------------------------
+    //  FFT plan  —  construct from canonical FFT grid dimensions
+    // -------------------------------------------------------------------
+
+    if (canonical_fft_grid_) {
+        fft_.emplace(canonical_fft_grid_->n1, canonical_fft_grid_->n2, canonical_fft_grid_->n3);
+    }
+
+    // -------------------------------------------------------------------
     //  Consistency checks
     // -------------------------------------------------------------------
 

@@ -15,10 +15,12 @@ Hamiltonian::Callable::Callable(const Hamiltonian* parent, int ikpt)
     if (!parent_->atom_) throw std::runtime_error("H|ψ⟩ requires ATOM");
     if (parent_->elements_.empty()) throw std::runtime_error("H|ψ⟩ requires NCPPs (did you call finalize()?)");
 
-    // FFT grid dimensions are k-point-independent — set once from GKK meta.
-    n1_ = parent_->gkk().meta.n1;
-    n2_ = parent_->gkk().meta.n2;
-    n3_ = parent_->gkk().meta.n3;
+    // FFT grid dimensions are k-point-independent — set once from the canonical
+    // FFT grid (initialised during checkPart1 from whichever file was loaded
+    // first among GKK / WG / VR / RHO).
+    n1_ = parent_->canonical_fft_grid_->n1;
+    n2_ = parent_->canonical_fft_grid_->n2;
+    n3_ = parent_->canonical_fft_grid_->n3;
 
     // Delegate k-point-dependent setup (loadKPoint, kinetic validation,
     // Ylm construction) to set_ikpt.
@@ -118,7 +120,7 @@ void Hamiltonian::Callable::operator()(
         grid[idx] = psi[ig];
     }
 
-    FFT3D fft(n1_, n2_, n3_);
+    const FFT3D& fft = *parent_->fft_;
     fft(grid, G2R);
 
     const auto& vr = parent_->vr();

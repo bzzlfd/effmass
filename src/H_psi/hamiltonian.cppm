@@ -257,6 +257,7 @@ export {
         int ng_max_{};          // maximum number of G-vectors across all k-points (from GKK)
         int l_max_{};           // maximum angular momentum across all NCPP elements
         bool enable_psp_nonlocal_{true};  // whether nonlocal PSP was prepared in finalize()
+        std::optional<FFT3D> fft_;       // FFT plan (constructed in finalize)
 
         /// Resolve a user-provided path against base_dir_.
         /// Absolute paths are returned as-is; relative paths are prefixed with base_dir_.
