@@ -169,7 +169,7 @@ void Hamiltonian::Callable::operator()(
     // Check whether any pseudopotential has nonlocal projectors.
     // If none, the nonlocal contribution is zero.  Ylm was constructed
     // in the Callable constructor when enable_psp_nonlocal_ && global_max_l >= 0.
-    if (!ylm_) return;
+    if (!parent_->enable_psp_nonlocal_) return;
 
     const auto& atom = parent_->atom();
 
@@ -232,7 +232,7 @@ void Hamiltonian::Callable::operator()(
                     }
 
                     for (int m = -bi.l; m <= bi.l; ++m) {
-                        const auto& ylm_lm = ylm_->get(bi.l, m);
+                        auto ylm_lm = (*ylm_)(bi.l, m);
 
                         // First pass:  inner = ⟨projector|ψ⟩
                         std::complex<double> inner = 0.0;
