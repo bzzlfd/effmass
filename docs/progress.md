@@ -162,19 +162,57 @@ ncpp.cppm 当中，advance 成员的设计
 1. 我们有两个内存和计算资源大户，Ylm 和 Betaq。
   1. 其中 Ylm 依赖于 k 的选取，而 BetaqInterpolator 不依赖于 k
   2. 而 Hamiltonian::Callable 依赖于 k 
+  3. 现在已经变成 BetaqTables，存储在 Hamiltonian.elements_ 的 (ncpp,betaq_tables_) pair 中。对 Callable 来说 Hamiltonian 是const，这样设计也无需考虑把 elements_ 设成 mutable 才能计算 betaq。
 2. 所以我对于应该把它们存储在何处有一些思考。
-  1. 对于 Ylm 我倾向于存在于 Callable 内部。理由如下
+  1. 对于 Ylm 我倾向于存在于 Callable 的private对象中。理由如下
     1. Ylm 依赖于 k 
     2. 可能在使用过程中 Hamiltonian 使用 at_k 构造多个 Callable （最重要的原因）
     3. 我的计算需求中，好像不怎么需要变换 k 点
-  2. 对于 Betaq 我倾向于存在于 Hamiltonian 中，存在对应 ncpp 对象内部。
-    1. 理由仅仅是它不依赖于 k，而且在 ncpp 内部很恰当
 
   无论怎么说，目前 Hamiltonian::Callable::operator() 内临构造它们都很浪费，这是需要优化的。
   我想，如果 Ylm 不在 Hamiltonian 当中的话，Callable 也应该有一个接口，可以重新设定 k 点，我们需要讨论这个命名。
 
-3. 而以上做法让我担忧的是，这样初始化两个对象都很重。
-4. 另外需要额外纳入考虑的是，可能计算不需要 nonlocal 项，这时候 Ylm，Betaq 可能都不需要计算，无需申请内存、展开计算。我们的架构设计也应该考虑入这个因素
+3. 具体实现上
+  1. Callable 初始化 Ylm 时，应该给每个与GKK有关的向量的长度设定成 ng_max_
+  2. Callable 也应该有一个接口，可以重新设定 k 点，我们需要讨论具体设计方案。
+  3. 如果 enable_psp_nonlocal_ 是 false，Ylm不应该初始化
 
 
 检查 test/ 当中与 Hamiltonian 模块有关的测试，看哪些地方可以在我们完成这些修改之后进行优化。
+
+
+
+---
+
+## Ylm 缓存到 Hamiltonian::Callable (2026-06-15)
+
+将 `RealSphericalHarmonics` (Ylm) 从 `Callable::operator()` 中每次构造改为 Callable 构造时一次构建并缓存。
+
+### 改动
+
+- **`math.sph_harmonics`**: 新增 `reinit()` 和 `reserve()` 方法，支持 Ylm 原地重建和容量预分配
+- **`hamiltonian.cppm`**: Callable 新增 `ylm_` (optional) 私有成员和 `set_ikpt(int ikpt)` 方法；Hamiltonian 新增 `enable_psp_nonlocal_` 标志位
+- **`hamiltonian.cpp`**: `finalize()` 中存储 `enable_psp_nonlocal_` 标志位
+- **`hamiltonian_callable.cpp`**: 构造函数中 Ylm 条件构造后用 `reserve(ng_max_)` 预分配；`operator()` 中用 `if (!ylm_) return;` 代替原构造；`set_ikpt()` 调用 `ylm_->reinit()`
+
+### 设计要点
+
+- Ylm 新增 `reinit()` 避免 setikpt 时的销毁重建，`reserve()` 将内部 vectors 预分配到 `ng_max_` 容量
+- `reinit()` / `reserve()` 均尊重 CacheMode（Full 模式下才涉及 y_lm_ cache, None 下仅 trig 数组）
+- `enable_psp_nonlocal_` + CacheMode 共同决定 Callable 内是否构造 Ylm
+- `set_ikpt()` 使用 `parent_->l_max_` 代替遍历 elements 获取 global_max_l
+- 去除了 v1 遗留的 `theta_extended_`/`phi_extended_` hack
+- BetaqTables 仍缓存在 `Hamiltonian::elements_` 中
+
+---
+
+## 构造器复用 set_ikpt (2026-06-15)
+
+将 Callable 构造器中重复的 k-point 加载逻辑（data views → loadKPoint → kinetic validation）委托给 `set_ikpt()`，并将 Ylm 首次构造也移入 `set_ikpt()`。
+
+### 改动
+
+- **`hamiltonian_callable.cpp`**: 构造器只保留一次性检查（parent 指针、FFT 网格尺寸），然后调用 `set_ikpt(ikpt)`；`set_ikpt()` 中增加 Ylm 首次构造路径（`emplace` + `reserve`），与后续的 `reinit` 统一
+- 构造器不再扫描 `elements_` 找 `global_max_l`，改用 `parent_->l_max_`
+
+---

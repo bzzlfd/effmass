@@ -133,3 +133,39 @@ operator()(l, m)
 `y_lm_` 是一维 `vector<vector<double>>`，按 `l*l + (m+l)` 平铺索引。`m = 0` 在每块中间，`±m` 对称分布两侧。
 
 `assembleYlm` 将 Q_l^m（含归一化）乘以 √2 · {cos(mφ), sin(mφ)} 写入缓存。
+
+---
+
+## 6. 生命周期管理：reinit 与 reserve
+
+`reinit(theta, phi, l_max_resident)` 和 `reserve(max_ng)` 是 2026-06-15 新增的方法，用于支持 `Hamiltonian::Callable` 中 Ylm 缓存在 k 点切换时的复用。
+
+### reserve — 预分配
+
+```cpp
+auto reserve(int max_ng) -> void;
+```
+
+将内部所有 vector 的 capacity 提升到 `max_ng`。不改变 `ng_` 和当前缓存值。
+
+分模式执行：
+- **Full 模式**：trig 数组 (`cos_theta_`, `sin_theta_`, `cos_phi_`, `sin_phi_`)、`y_lm_` 各条目、`top_column_Q_` 各条目的 `prev`/`curr` 全部分配到 `max_ng` 容量
+- **None 模式**：仅 trig 数组分配（`y_lm_` 和 `top_column_Q_` 不存在）
+
+调用 `std::vector::reserve`，缩小请求无效果。
+
+### reinit — 原地重建
+
+```cpp
+auto reinit(theta, phi, l_max_resident) -> void;
+```
+
+用新的角度数据重建对象，避免销毁+重新构造的开销。
+
+**执行流程**：
+1. 更新 `theta_`/`phi_` span 和 `ng_`
+2. trig 数组 `resize` 到新 `ng_`（保留 capacity）并重算 cos/sin
+3. Full 模式：设 `l_max_resident_ = -1` 后调用 `reset(l_max_resident)` 完整重建 Legendre 缓存
+4. None 模式：只做步骤 2，不碰缓存
+
+**容量复用**：若之前调用了 `reserve(ng_max_)` 且 `ng_ <= ng_max_`，`resize` 不触发堆重分配。`reset()` 中对 `y_lm_` 和 `top_column_Q_` 的 `resize` 同理。

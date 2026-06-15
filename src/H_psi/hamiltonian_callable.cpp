@@ -15,17 +15,14 @@ Hamiltonian::Callable::Callable(const Hamiltonian* parent, int ikpt)
     if (!parent_->atom_) throw std::runtime_error("H|ψ⟩ requires ATOM");
     if (parent_->elements_.empty()) throw std::runtime_error("H|ψ⟩ requires NCPPs (did you call finalize()?)");
 
-    // Enable Integer view alongside Cartesian and Spherical — needed for
-    // FFT grid placement (Integer), Y_lm evaluation (Spherical theta/phi),
-    // and beta_q interpolation (Spherical q = |K|).
-    parent_->gkk().setDataView(KVecsView::Cartesian | KVecsView::Integer | KVecsView::Spherical);
-    const auto& kv = parent_->gkk().loadKPoint(ikpt_);
-    parent_->gkk().validateKineticConsistency();
-
-    ng_ = static_cast<int>(kv.kinetic.size());
+    // FFT grid dimensions are k-point-independent — set once from GKK meta.
     n1_ = parent_->gkk().meta.n1;
     n2_ = parent_->gkk().meta.n2;
     n3_ = parent_->gkk().meta.n3;
+
+    // Delegate k-point-dependent setup (loadKPoint, kinetic validation,
+    // Ylm construction) to set_ikpt.
+    set_ikpt(ikpt);
 }
 
 // -----------------------------------------------------------------------------
@@ -33,6 +30,38 @@ Hamiltonian::Callable::Callable(const Hamiltonian* parent, int ikpt)
 // -----------------------------------------------------------------------------
 auto Hamiltonian::Callable::dim() const -> int {
     return ng_;
+}
+
+// -----------------------------------------------------------------------------
+//  set_ikpt  —  rebind to a different k-point
+//
+//  Reloads k-point-dependent data and reconstructs Ylm from the new spherical
+//  coordinates.  The FFT grid dimensions (n1_, n2_, n3_) are unchanged since
+//  they are independent of k.  Ylm::reinit() reuses pre-allocated internal
+//  buffers (set by reserve() in the constructor), so no heap reallocation
+//  occurs when ng_ <= parent_->ng_max_.
+// -----------------------------------------------------------------------------
+auto Hamiltonian::Callable::set_ikpt(int ikpt) -> void {
+    ikpt_ = ikpt;
+
+    parent_->gkk().setDataView(KVecsView::Cartesian | KVecsView::Integer | KVecsView::Spherical);
+    const auto& kv = parent_->gkk().loadKPoint(ikpt_);
+    parent_->gkk().validateKineticConsistency();
+
+    ng_ = static_cast<int>(kv.kinetic.size());
+    // n1_, n2_, n3_ unchanged (FFT grid is k-point-independent)
+
+    // Ylm — construct on first call (from constructor via delegation),
+    // reinit on subsequent calls.  Uses parent_->l_max_ (computed in
+    // finalize()) instead of scanning elements_.
+    if (parent_->enable_psp_nonlocal_ && parent_->l_max_ >= 0) {
+        if (ylm_) {
+            ylm_->reinit(kv.theta, kv.phi, parent_->l_max_);
+        } else {
+            ylm_.emplace(kv.theta, kv.phi, parent_->l_max_);
+            ylm_->reserve(parent_->ng_max_);
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -136,14 +165,9 @@ void Hamiltonian::Callable::operator()(
     //  once per atom and re-evaluate β_i(q) per projector.
     // ---------------------------------------------------------------------------
     // Check whether any pseudopotential has nonlocal projectors.
-    // If none, the nonlocal contribution is zero.
-    int global_max_l = -1;
-    for (const auto& elem : parent_->elements_) {
-        if (elem.ncpp.meta.l_max > global_max_l) global_max_l = elem.ncpp.meta.l_max;
-    }
-    if (global_max_l < 0) return;
-
-    RealSphericalHarmonics ylm(kv.theta, kv.phi, global_max_l);
+    // If none, the nonlocal contribution is zero.  Ylm was constructed
+    // in the Callable constructor when enable_psp_nonlocal_ && global_max_l >= 0.
+    if (!ylm_) return;
 
     const auto& atom = parent_->atom();
 
@@ -206,7 +230,7 @@ void Hamiltonian::Callable::operator()(
                     }
 
                     for (int m = -bi.l; m <= bi.l; ++m) {
-                        const auto& ylm_lm = ylm.get(bi.l, m);
+                        const auto& ylm_lm = ylm_->get(bi.l, m);
 
                         // First pass:  inner = ⟨projector|ψ⟩
                         std::complex<double> inner = 0.0;

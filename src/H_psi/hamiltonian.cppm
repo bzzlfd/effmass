@@ -104,6 +104,7 @@ export {
         //  1.  Callable  —  H|ψ⟩ at fixed k
         //      H.at_k(ikpt) → Callable
         //      callable(psi, hpsi)  or  callable(n_bands, psi, hpsi)
+        //      callable.set_ikpt(ikpt)  —  rebind to a different k-point
         // -------------------------------------------------------------------
         class Callable {
         public:
@@ -118,6 +119,10 @@ export {
 
             auto dim() const -> int;
 
+            /// Rebind this Callable to a different k-point.
+            /// Reloads k-point data and reconstructs Ylm.
+            auto set_ikpt(int ikpt) -> void;
+
         private:
             friend class Hamiltonian;
             Callable(const Hamiltonian* parent, int ikpt);
@@ -126,6 +131,11 @@ export {
             int ikpt_{0};
             int ng_{0};
             int n1_{0}, n2_{0}, n3_{0};             // FFT grid dimensions
+
+            // Ylm — cached Y_lm(theta, phi) for bound k-point.
+            // Pre-allocated to parent_->ng_max_ via Ylm::reserve() so that
+            // set_ikpt() can switch k-points without heap reallocation.
+            mutable std::optional<RealSphericalHarmonics> ylm_;
         };
         auto at_k(int ikpt) const -> Callable { return Callable(this, ikpt); }
 
@@ -244,8 +254,9 @@ export {
         std::optional<std::vector<std::array<double, 3>>> canonical_kpt_vec_;
 
         // -- Derived quantities (computed in finalize) --
-        int ng_max_{};   // maximum number of G-vectors across all k-points (from GKK)
-        int l_max_{};    // maximum angular momentum across all NCPP elements
+        int ng_max_{};          // maximum number of G-vectors across all k-points (from GKK)
+        int l_max_{};           // maximum angular momentum across all NCPP elements
+        bool enable_psp_nonlocal_{true};  // whether nonlocal PSP was prepared in finalize()
 
         /// Resolve a user-provided path against base_dir_.
         /// Absolute paths are returned as-is; relative paths are prefixed with base_dir_.

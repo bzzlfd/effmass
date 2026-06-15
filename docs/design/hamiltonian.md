@@ -12,6 +12,7 @@ callable functor 访问/使用 Hamiltonian 中的数据。
 ```cpp
 auto op = h.at_k(ikpt);      // → Callable
 op(psi, hpsi);                // H|ψ⟩
+op.set_ikpt(jkpt);            // rebind to a different k-point (reconstructs Ylm)
 
 auto grad = h.gradient();
 grad.at_k_a(ikpt, KDir::X);   // ∂H/∂k_x |ψ⟩
@@ -19,6 +20,12 @@ grad.at_k_a(ikpt, KDir::X);   // ∂H/∂k_x |ψ⟩
 auto hess = h.hessian();
 hess.at_k_ab(ikpt, KDir::X, KDir::Y); // ∂²H/∂k_x∂k_y |ψ⟩
 ```
+
+#### Ylm 缓存
+
+`RealSphericalHarmonics` (Ylm) 在 Callable 构造时一次构建并缓存，而非在每次 `operator()` 中重新构造。Ylm 依赖 k 点（`theta/phi` 来自 GKK），因此 Callable 绑定到一个 k 点。`set_ikpt()` 可切换 k 点并触发 Ylm 重建。
+
+Ylm 内部向量预分配到 `ng_max_`（所有 k 点的最大 G 矢量数），使 k 点切换时不触发堆重分配。若 `enable_psp_nonlocal_ = false`（无需非局域部分），Ylm 不构造。
 
 
 ### 数据加载

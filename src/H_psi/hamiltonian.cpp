@@ -207,6 +207,7 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
     //  BetaqTables  —  NCPP initialisation  (skip if !enable_psp_nonlocal)
     // -------------------------------------------------------------------
 
+    enable_psp_nonlocal_ = enable_psp_nonlocal;
     double omega = 0.0;
     if (enable_psp_nonlocal) {
         std::println("[Hamiltonian] finalize: constructing BetaqTables...");

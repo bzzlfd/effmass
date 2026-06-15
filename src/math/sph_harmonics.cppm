@@ -115,10 +115,24 @@ public:
     explicit RealSphericalHarmonics(std::span<const double> theta, std::span<const double> phi,
                                      int l_max_resident, CacheMode mode = CacheMode::Full);
 
+    /// Pre-allocate internal buffers to at least max_ng capacity.
+    /// Only y_lm_ and top_column_Q_ are reserved in Full mode; trig arrays
+    /// are always reserved.  Safe to call after construction — the current
+    /// ng_ and cached values are unchanged.
+    auto reserve(int max_ng) -> void;
+
     /// Switch l_max_resident. Shrink truncates; expand continues Legendre
     /// recurrence from saved top_column_Q_ state (first call with empty
     /// top_column_Q_ performs a full build from scratch).
     auto reset(int l_max_new) -> void;
+
+    /// Re-initialise with new theta/phi spans.  Preserves CacheMode:
+    ///   Full — trig arrays are recomputed and Legendre cache is rebuilt
+    ///          (full reset, not incremental, since all angular data changed).
+    ///   None — only trig arrays are recomputed; y_lm_ cache is left empty.
+    /// Existing vector allocations are reused when ng_ <= capacity.
+    auto reinit(std::span<const double> theta, std::span<const double> phi,
+                int l_max_resident) -> void;
 
     /// Return Y_lm for all G-vectors from the precomputed cache.
     /// Requires CacheMode::Full and l <= l_max_resident.
@@ -214,8 +228,67 @@ RealSphericalHarmonics::RealSphericalHarmonics(
 
 
 // =============================================================================
-//  Public API
+//  Public API — reserve / reinit
 // =============================================================================
+
+auto RealSphericalHarmonics::reserve(int max_ng) -> void {
+    auto n = static_cast<std::size_t>(max_ng);
+    cos_theta_.reserve(n);
+    sin_theta_.reserve(n);
+    cos_phi_.reserve(n);
+    sin_phi_.reserve(n);
+    if (mode_ == CacheMode::Full) {
+        for (auto& v : y_lm_) v.reserve(n);
+        for (auto& tp : top_column_Q_) {
+            tp.prev.reserve(n);
+            tp.curr.reserve(n);
+        }
+    }
+}
+
+auto RealSphericalHarmonics::reinit(
+    std::span<const double> theta, std::span<const double> phi,
+    int l_max_resident) -> void
+{
+    // Guard against silent reallocation: reinit() assumes reserve() was
+    // called with ng_max_ >= theta.size() so that resize() below reuses
+    // pre-allocated capacity.  Check the trig array (always allocated in
+    // both CacheModes) as a proxy.
+    auto new_ng = theta.size();
+    if (new_ng > cos_theta_.capacity()) {
+        throw std::runtime_error(
+            std::format("RealSphericalHarmonics::reinit(): new ng_={} exceeds "
+                        "pre-allocated capacity={}. Call reserve({}) before reinit().",
+                        new_ng, cos_theta_.capacity(), new_ng));
+    }
+
+    theta_ = theta;
+    phi_ = phi;
+    ng_ = new_ng;
+
+    // Recompute trig arrays — resize to ng_, keeping existing capacity.
+    cos_theta_.resize(ng_);
+    sin_theta_.resize(ng_);
+    for (std::size_t i = 0; i < ng_; ++i) {
+        cos_theta_[i] = std::cos(theta[i]);
+        sin_theta_[i] = std::sin(theta[i]);
+    }
+    cos_phi_.resize(ng_);
+    sin_phi_.resize(ng_);
+    for (std::size_t i = 0; i < ng_; ++i) {
+        cos_phi_[i] = std::cos(phi[i]);
+        sin_phi_[i] = std::sin(phi[i]);
+    }
+
+    if (mode_ == CacheMode::Full) {
+        l_max_resident_ = -1;   // force full cache rebuild
+        reset(l_max_resident);
+    }
+}
+
+
+// =============================================================================
+//  Public API  —  reset
 
 auto RealSphericalHarmonics::reset(int l_max_new) -> void {
     if (l_max_new < 0) {
