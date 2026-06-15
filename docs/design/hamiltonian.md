@@ -27,6 +27,10 @@ hess.at_k_ab(ikpt, KDir::X, KDir::Y); // ∂²H/∂k_x∂k_y |ψ⟩
 
 Ylm 内部向量预分配到 `ng_max_`（所有 k 点的最大 G 矢量数），使 k 点切换时不触发堆重分配。若 `enable_psp_nonlocal_ = false`（无需非局域部分），Ylm 不构造。
 
+#### FFT plan 缓存
+
+`FFT3D` plan 在 `finalize()` 中由 canonical FFT 网格维度构造，存储在 Hamiltonian 的 `fft_` 成员中。`Callable::operator()` 通过 `*parent_->fft_` 引用缓存的 plan，避免每次调用时重新分配内部的 `scratch_` vector。
+
 
 ### 数据加载
 #### `.loadXxx()` — 逐步加载模式
@@ -59,7 +63,7 @@ PWmat 的计算结果存放在一个文件夹下，所以也应该可以 load Di
 按固定顺序加载标准文件，每步之后都触发一致性检查，让检查逐步覆盖更多交叉验证对：
 
 1. `atom.config` → 设定晶格、原子数等基础信息
-2. `UPF/`（或 `.`）→ 加载赝势，验证元素覆盖
+2. UPF 文件 → 逐个加载，自动检测 Z 冲突（同名元素重复）
 3. `OUT.GKK` → 设定 k 网格、FFT 网格、Ecut 等核心参数
 4. `OUT.WG` → 波函数系数，验证 nband 等
 5. `OUT.VR` → 局域势
@@ -77,6 +81,16 @@ auto& occ = h.occ();
 
 未加载时抛出 `std::runtime_error`。支持通过 `hasGKK()`、`hasWG()` 等查询是否存在。
 
+#### `finalize()` — 后处理初始化
+
+所有 `loadXxx()` 完成后，应该调用finalize()：
+这在语义上很明确；同时以下需求需要在这里计算：
+
+1. ncpp:Betaq 缓存 BetaqTables 构造
+2. 因为 loadXxx 的不确定性，有些 Hamiltonian 的成员变量不方便在 load 时初始化，在这里初始化
+3. Extended consistency checks
+
+
 
 #### checkConsistency 三部分架构
 
@@ -84,31 +98,31 @@ auto& occ = h.occ();
 
 ```
 checkConsistency()  ← 每个 loadXxx() 后自动调用
-├── Part 1  规范物理量（量级检查，O(1)）
+├── Part 1  基准物理量（量级检查，O(1)）
 ├── Part 2  文件间完整性检查（pair 风格，O(1)）
 └── checkConsistencyExtended()  ← 用户按需调用
     └── Part 3  高级计算性检查（FFT/积分，重量级）
 ```
 
-##### Part 1: 规范物理量（canonical quantities）
+##### Part 1: 基准物理量（canonical quantities）
 
 **定义**：在多个文件中出现、且应该在 Hamiltonian 层面提供统一接口的物理量。
 
-**判定原则**：如果一个变量出现在多个文件中，且 H|ψ⟩ 计算（Callable／gradient／hessian）需要从某处读取它，那么这个变量就应该进入 Part 1 作为规范值存储在 Hamiltonian 中。内部计算通过 `canonical_*` 访问，而非从 `gkk_`、`atom_` 等文件对象中临时获取。
+**判定原则**：如果一个变量出现在多个文件中，且 H|ψ⟩ 计算（Callable／gradient／hessian）需要从某处读取它，那么这个变量就应该进入 Part 1 作为基准值存储在 Hamiltonian 中。内部计算通过 `canonical_*` 访问，而非从 `gkk_`、`atom_` 等文件对象中临时获取。
 
-**机制**：首个加载文件设定规范值，后续文件必须与之匹配。
+**机制**：首个加载文件设定基准值，后续文件必须与之匹配。
 
 ```cpp
 // 错误：直接从文件对象取用（如果它出现在多个文件中）
 use(gkk_->meta.lattice);
 
-// 正确：从 Hamiltonian 规范值取用（统一来源）
+// 正确：从 Hamiltonian 基准值取用（统一来源）
 use(*canonical_lattice_);
 ```
 
 **当前 Part 1 量集（9 个）：**
 
-| 规范量 | 出现在 | 用途 |
+| 基准量 | 出现在 | 用途 |
 |--------|--------|------|
 | `lattice` | GKK, WG, VR, RHO, ATOM | 坐标变换、倒格子构造 |
 | `nkpt` | GKK, WG, EIGEN, OCC | k 点循环维度 |
@@ -210,7 +224,7 @@ h.checkConsistencyExtended({
 ## 设计要点总结
 
 - **逐步加载 + 自动检查**：尽早暴露数据不一致问题，且不强制所有文件同时加载
-- **规范量集中存储**：避免 H|ψ⟩ 计算在多个文件对象间查找所需数据
+- **基准量集中存储**：避免 H|ψ⟩ 计算在多个文件对象间查找所需数据
 - **三部分分离**：轻量级自动检查与重量级计算验证解耦
 - **可扩展**：新数据类型只需在对应 Part 的检查块中增加条目，无需新增 N 个 pair
 
