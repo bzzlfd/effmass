@@ -213,7 +213,7 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
         std::println("[Hamiltonian] finalize: constructing BetaqTables...");
         omega = canonical_lattice_->volume();
 
-        for (auto& elem : elements_) {
+        auto buildBetaqTable = [&](ElementData& elem) -> void {
             sortByL(elem.ncpp);
             diagonalizeNonlocal(elem.ncpp);
 
@@ -224,6 +224,20 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
                 ncpp.mesh.r, ncpp.mesh.rab, mesh_type,
                 ncpp.nonlocal.beta, ncpp.nonlocal.angular_momentum);
             elem.betaq_tables->setVolume(omega);
+        };
+
+        if (atom_) {
+            for (auto&& t : atom_->eachType()) {
+                std::string_view want = ATOM::elementName(t.z);
+                auto it = std::ranges::find_if(elements_, [want](const auto& e) {
+                    return e.ncpp.meta.element == want;
+                });
+                if (it != elements_.end())
+                    buildBetaqTable(*it);
+            }
+        } else {
+            for (auto& elem : elements_)
+                buildBetaqTable(elem);
         }
     }
 
