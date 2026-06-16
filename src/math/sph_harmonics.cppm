@@ -107,7 +107,7 @@ auto legendreP(int l, int m_abs, double theta) -> double {
 
 // Vectorized spherical harmonics evaluator over K-point G-vectors.
 // Precomputes all Y_lm for l <= l_max_resident on construction
-// (or after a reset() call); computes larger l on demand.
+// (or after a setLMax() call); computes larger l on demand.
 class RealSphericalHarmonics {
 public:
     enum class CacheMode { Full, None };
@@ -119,12 +119,12 @@ public:
     /// Only y_lm_ and top_column_Q_ are reserved in Full mode; trig arrays
     /// are always reserved.  Safe to call after construction — the current
     /// ng_ and cached values are unchanged.
-    auto reserve(int max_ng) -> void;
+    auto reserveNg(int max_ng) -> void;
 
     /// Switch l_max_resident. Shrink truncates; expand continues Legendre
     /// recurrence from saved top_column_Q_ state (first call with empty
     /// top_column_Q_ performs a full build from scratch).
-    auto reset(int l_max_new) -> void;
+    auto setLMax(int l_max_new) -> void;
 
     /// Re-initialise with new theta/phi spans.  Preserves CacheMode:
     ///   Full — trig arrays are recomputed and Legendre cache is rebuilt
@@ -159,7 +159,7 @@ private:
     std::vector<double> sin_phi_;
     std::vector<std::vector<double>> y_lm_;
 
-    // Top Q_l^m state for each m, saved so reset() expansion can
+    // Top Q_l^m state for each m, saved so setLMax() expansion can
     // continue the recurrence without recomputing from scratch.
     // top_column_Q_[m].curr = Q_{l_max_resident_}^{m},
     // top_column_Q_[m].prev = Q_{l_max_resident_-1}^{m}
@@ -223,34 +223,19 @@ RealSphericalHarmonics::RealSphericalHarmonics(
         sin_phi_[i] = std::sin(phi_[i]);
     }
 
-    if (mode_ == CacheMode::Full) reset(l_max_resident);
+    if (mode_ == CacheMode::Full) setLMax(l_max_resident);
 }
 
 
 // =============================================================================
-//  Public API — reserve / reinit
+//  Public API — reserveNg / reinit
 // =============================================================================
-
-auto RealSphericalHarmonics::reserve(int max_ng) -> void {
-    auto n = static_cast<std::size_t>(max_ng);
-    cos_theta_.reserve(n);
-    sin_theta_.reserve(n);
-    cos_phi_.reserve(n);
-    sin_phi_.reserve(n);
-    if (mode_ == CacheMode::Full) {
-        for (auto& v : y_lm_) v.reserve(n);
-        for (auto& tp : top_column_Q_) {
-            tp.prev.reserve(n);
-            tp.curr.reserve(n);
-        }
-    }
-}
 
 auto RealSphericalHarmonics::reinit(
     std::span<const double> theta, std::span<const double> phi,
     int l_max_resident) -> void
 {
-    // Guard against silent reallocation: reinit() assumes reserve() was
+    // Guard against silent reallocation: reinit() assumes reserveNg() was
     // called with ng_max_ >= theta.size() so that resize() below reuses
     // pre-allocated capacity.  Check the trig array (always allocated in
     // both CacheModes) as a proxy.
@@ -258,7 +243,7 @@ auto RealSphericalHarmonics::reinit(
     if (new_ng > cos_theta_.capacity()) {
         throw std::runtime_error(
             std::format("RealSphericalHarmonics::reinit(): new ng_={} exceeds "
-                        "pre-allocated capacity={}. Call reserve({}) before reinit().",
+                        "pre-allocated capacity={}. Call reserveNg({}) before reinit().",
                         new_ng, cos_theta_.capacity(), new_ng));
     }
 
@@ -282,18 +267,34 @@ auto RealSphericalHarmonics::reinit(
 
     if (mode_ == CacheMode::Full) {
         l_max_resident_ = -1;   // force full cache rebuild
-        reset(l_max_resident);
+        setLMax(l_max_resident);
+    }
+}
+
+auto RealSphericalHarmonics::reserveNg(int max_ng) -> void {
+    auto n = static_cast<std::size_t>(max_ng);
+    cos_theta_.reserve(n);
+    sin_theta_.reserve(n);
+    cos_phi_.reserve(n);
+    sin_phi_.reserve(n);
+    if (mode_ == CacheMode::Full) {
+        for (auto& v : y_lm_) v.reserve(n);
+        for (auto& tp : top_column_Q_) {
+            tp.prev.reserve(n);
+            tp.curr.reserve(n);
+        }
     }
 }
 
 
 // =============================================================================
-//  Public API  —  reset
+//  Public API  —  setLMax
+// =============================================================================
 
-auto RealSphericalHarmonics::reset(int l_max_new) -> void {
+auto RealSphericalHarmonics::setLMax(int l_max_new) -> void {
     if (l_max_new < 0) {
         throw std::invalid_argument(
-            "RealSphericalHarmonics::reset: l_max_resident must be non-negative");
+            "RealSphericalHarmonics::setLMax: l_max_resident must be non-negative");
     }
     if (mode_ == CacheMode::None) return;
     if (l_max_new == l_max_resident_) return;
@@ -328,17 +329,23 @@ auto RealSphericalHarmonics::reset(int l_max_new) -> void {
     // -- Expand --
     int old_nm = l_max_resident_ + 1;
     int new_nm = l_max_new + 1;
+    auto ng_capacity = cos_theta_.capacity();   // reserveNg target, new vectors inherit pre-allocated capacity
 
     // Extend top_column_Q_ for new m values
     top_column_Q_.resize(static_cast<std::size_t>(new_nm));
     for (int m = old_nm; m <= l_max_new; ++m) {
+        top_column_Q_[static_cast<std::size_t>(m)].prev.reserve(ng_capacity);
         top_column_Q_[static_cast<std::size_t>(m)].prev.resize(ng_);
+        top_column_Q_[static_cast<std::size_t>(m)].curr.reserve(ng_capacity);
         top_column_Q_[static_cast<std::size_t>(m)].curr.resize(ng_);
     }
 
-    // Extend y_lm_ cache
+    // Extend y_lm_ cache — new default-constructed entries need reserve too
     y_lm_.resize(static_cast<std::size_t>(new_nm) * static_cast<std::size_t>(new_nm));
-    for (auto& v : y_lm_) v.resize(ng_);
+    for (auto& v : y_lm_) {
+        v.reserve(ng_capacity);
+        v.resize(ng_);
+    }
 
     std::vector<double> cm(ng_, 1.0), sm(ng_, 0.0);
 
@@ -404,7 +411,7 @@ auto RealSphericalHarmonics::get(int l, int m) -> const std::vector<double>& {
     }
     if (l > l_max_resident_) {
         throw std::runtime_error(
-            std::format("RealSphericalHarmonics::get(): l={} > l_max_resident_={}, call reset({}) first, or use compute()", l, l_max_resident_, l));
+            std::format("RealSphericalHarmonics::get(): l={} > l_max_resident_={}, call setLMax({}) first, or use compute()", l, l_max_resident_, l));
     }
 
     int block = l * l + (m + l);
@@ -419,7 +426,7 @@ auto RealSphericalHarmonics::operator()(int l, int m) -> std::vector<double> {
     if (mode_ == CacheMode::Full) {
         if (l > l_max_resident_) {
             throw std::runtime_error(
-                std::format("RealSphericalHarmonics::operator(): l={} > l_max_resident_={}, call reset({}) first, or use compute()", l, l_max_resident_, l));
+                std::format("RealSphericalHarmonics::operator(): l={} > l_max_resident_={}, call setLMax({}) first, or use compute()", l, l_max_resident_, l));
         }
         return get(l, m);
     } else {

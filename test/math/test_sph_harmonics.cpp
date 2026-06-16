@@ -195,7 +195,7 @@ auto test_reset_shrink_expand() -> void {
         ref_beyond[static_cast<std::size_t>(m + l_max + 1)] = sh.compute(l_max + 1, m);
 
     // Shrink and verify remaining cache intact
-    sh.reset(2);
+    sh.setLMax(2);
     check(near(sh.get(2, 1)[0], ref_low[0], eps),
           "get(2,1) unchanged after shrink");
     try {
@@ -206,7 +206,7 @@ auto test_reset_shrink_expand() -> void {
     }
 
     // Expand back and verify get() and compute() match pre-shrink
-    sh.reset(l_max);
+    sh.setLMax(l_max);
     for (int m = -l_max; m <= l_max; ++m) {
         const auto& y = sh.get(l_max, m);
         check(near(y[0], ref_high[static_cast<std::size_t>(m + l_max)][0], eps),

@@ -61,7 +61,7 @@ auto Hamiltonian::Callable::set_ikpt(int ikpt) -> void {
             ylm_->reinit(kv.theta, kv.phi, parent_->l_max_);
         } else {
             ylm_.emplace(kv.theta, kv.phi, parent_->l_max_);
-            ylm_->reserve(parent_->ng_max_);
+            ylm_->reserveNg(parent_->ng_max_);
         }
     }
 }
