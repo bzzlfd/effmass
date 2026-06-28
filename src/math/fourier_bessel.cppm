@@ -25,10 +25,26 @@ export {
         SimpsonMeshType mesh_type) -> void;
 
     // --- Low-level: integrand + simpson, j_l(qr) provided by caller ------------
-    //  Fourier-Bessel integral with single radial power: 4π ∫ f(r)·r·j_l(qr)·dr.
-    //  For callers whose f(r) already includes one factor of r (e.g. UPF beta
-    //  projectors are stored as r·β(r)).  Callers needing the standard r² form
-    //  should absorb the extra r into f before calling.
+    //  Each pair has a General form and an R1 form.
+    //
+    //    General                R1
+    //    ──────────────────────────────────────────────────
+    //    Integrate       r²·jl  IntegrateR1        r¹·jl
+    //    IntegrateDeriv  r³·jl' IntegrateDerivR1   r²·jl'
+    //    IntegrateSecondDeriv r⁴·jl'' IntegrateSecondDerivR1 r³·jl''
+    //
+    //  The R1 variant has one less explicit r factor — for callers whose f(r)
+    //  already includes one factor of r (the UPF beta convention: β_UPF = r·β_phys).
+
+    //  General — standard form:  4π ∫ f(r)·r²·j_l(qr)·dr.
+    auto fourierBesselIntegrate(
+        std::span<const double> f,
+        std::span<const double> r,
+        std::span<const double> jl,
+        std::span<const double> rab,
+        SimpsonMeshType mesh_type) -> double;
+
+    //  R1 — standard form:  4π ∫ f(r)·r·j_l(qr)·dr.
     auto fourierBesselIntegrateR1(
         std::span<const double> f,
         std::span<const double> r,
@@ -36,11 +52,35 @@ export {
         std::span<const double> rab,
         SimpsonMeshType mesh_type) -> double;
 
-    //  Standard form:  4π ∫ f(r)·r²·j_l(qr)·dr.
-    auto fourierBesselIntegrate(
+    //  General — first-derivative form:  4π ∫ f(r)·r³·j_l'(qr)·dr.
+    auto fourierBesselIntegrateDeriv(
         std::span<const double> f,
         std::span<const double> r,
-        std::span<const double> jl,
+        std::span<const double> jl_deriv,
+        std::span<const double> rab,
+        SimpsonMeshType mesh_type) -> double;
+
+    //  R1 — first-derivative form:  4π ∫ f(r)·r²·j_l'(qr)·dr.
+    auto fourierBesselIntegrateDerivR1(
+        std::span<const double> f,
+        std::span<const double> r,
+        std::span<const double> jl_deriv,
+        std::span<const double> rab,
+        SimpsonMeshType mesh_type) -> double;
+
+    //  General — second-derivative form:  4π ∫ f(r)·r⁴·j_l''(qr)·dr.
+    auto fourierBesselIntegrateSecondDeriv(
+        std::span<const double> f,
+        std::span<const double> r,
+        std::span<const double> jl_second_deriv,
+        std::span<const double> rab,
+        SimpsonMeshType mesh_type) -> double;
+
+    //  R1 — second-derivative form:  4π ∫ f(r)·r³·j_l''(qr)·dr.
+    auto fourierBesselIntegrateSecondDerivR1(
+        std::span<const double> f,
+        std::span<const double> r,
+        std::span<const double> jl_second_deriv,
         std::span<const double> rab,
         SimpsonMeshType mesh_type) -> double;
 }
@@ -134,7 +174,33 @@ auto fourierBesselTransform(
 
 
 // -----------------------------------------------------------------------------
-//  fourierBesselIntegrateR1  —  integrand + simpson, j_l(qr) provided by caller
+//  fourierBesselIntegrate  —  General standard form, r²·j_l(qr)
+// -----------------------------------------------------------------------------
+
+auto fourierBesselIntegrate(
+    std::span<const double> f,
+    std::span<const double> r,
+    std::span<const double> jl,
+    std::span<const double> rab,
+    SimpsonMeshType mesh_type
+) -> double {
+    int n = static_cast<int>(f.size());
+    if (n == 0) return 0.0;
+    if (static_cast<int>(r.size()) < n || static_cast<int>(jl.size()) < n) {
+        throw std::invalid_argument(
+            "fourierBesselIntegrate: r and jl must be at least as large as f");
+    }
+
+    std::vector<double> integrand(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        integrand[i] = f[i] * r[i] * r[i] * jl[i];
+
+    return FOUR_PI * simpson(integrand, rab, mesh_type);
+}
+
+
+// -----------------------------------------------------------------------------
+//  fourierBesselIntegrateR1  —  R1 standard form, r·j_l(qr)
 // -----------------------------------------------------------------------------
 
 auto fourierBesselIntegrateR1(
@@ -160,26 +226,104 @@ auto fourierBesselIntegrateR1(
 
 
 // -----------------------------------------------------------------------------
-//  fourierBesselIntegrate  —  standard form, j_l(qr) provided by caller
+//  fourierBesselIntegrateDeriv  —  General first-derivative, r³·j_l'(qr)
 // -----------------------------------------------------------------------------
 
-auto fourierBesselIntegrate(
+auto fourierBesselIntegrateDeriv(
     std::span<const double> f,
     std::span<const double> r,
-    std::span<const double> jl,
+    std::span<const double> jl_deriv,
     std::span<const double> rab,
     SimpsonMeshType mesh_type
 ) -> double {
     int n = static_cast<int>(f.size());
     if (n == 0) return 0.0;
-    if (static_cast<int>(r.size()) < n || static_cast<int>(jl.size()) < n) {
+    if (static_cast<int>(r.size()) < n || static_cast<int>(jl_deriv.size()) < n) {
         throw std::invalid_argument(
-            "fourierBesselIntegrate: r and jl must be at least as large as f");
+            "fourierBesselIntegrateDeriv: r and jl_deriv must be at least as large as f");
     }
 
     std::vector<double> integrand(static_cast<std::size_t>(n));
     for (int i = 0; i < n; ++i)
-        integrand[i] = f[i] * r[i] * r[i] * jl[i];
+        integrand[i] = f[i] * r[i] * r[i] * r[i] * jl_deriv[i];
+
+    return FOUR_PI * simpson(integrand, rab, mesh_type);
+}
+
+
+// -----------------------------------------------------------------------------
+//  fourierBesselIntegrateDerivR1  —  R1 first-derivative, r²·j_l'(qr)
+// -----------------------------------------------------------------------------
+
+auto fourierBesselIntegrateDerivR1(
+    std::span<const double> f,
+    std::span<const double> r,
+    std::span<const double> jl_deriv,
+    std::span<const double> rab,
+    SimpsonMeshType mesh_type
+) -> double {
+    int n = static_cast<int>(f.size());
+    if (n == 0) return 0.0;
+    if (static_cast<int>(r.size()) < n || static_cast<int>(jl_deriv.size()) < n) {
+        throw std::invalid_argument(
+            "fourierBesselIntegrateDerivR1: r and jl_deriv must be at least as large as f");
+    }
+
+    std::vector<double> integrand(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        integrand[i] = f[i] * r[i] * r[i] * jl_deriv[i];
+
+    return FOUR_PI * simpson(integrand, rab, mesh_type);
+}
+
+
+// -----------------------------------------------------------------------------
+//  fourierBesselIntegrateSecondDeriv  —  General second-derivative, r⁴·j_l''(qr)
+// -----------------------------------------------------------------------------
+
+auto fourierBesselIntegrateSecondDeriv(
+    std::span<const double> f,
+    std::span<const double> r,
+    std::span<const double> jl_second_deriv,
+    std::span<const double> rab,
+    SimpsonMeshType mesh_type
+) -> double {
+    int n = static_cast<int>(f.size());
+    if (n == 0) return 0.0;
+    if (static_cast<int>(r.size()) < n || static_cast<int>(jl_second_deriv.size()) < n) {
+        throw std::invalid_argument(
+            "fourierBesselIntegrateSecondDeriv: r and jl_second_deriv must be at least as large as f");
+    }
+
+    std::vector<double> integrand(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        integrand[i] = f[i] * r[i] * r[i] * r[i] * r[i] * jl_second_deriv[i];
+
+    return FOUR_PI * simpson(integrand, rab, mesh_type);
+}
+
+
+// -----------------------------------------------------------------------------
+//  fourierBesselIntegrateSecondDerivR1  —  R1 second-derivative, r³·j_l''(qr)
+// -----------------------------------------------------------------------------
+
+auto fourierBesselIntegrateSecondDerivR1(
+    std::span<const double> f,
+    std::span<const double> r,
+    std::span<const double> jl_second_deriv,
+    std::span<const double> rab,
+    SimpsonMeshType mesh_type
+) -> double {
+    int n = static_cast<int>(f.size());
+    if (n == 0) return 0.0;
+    if (static_cast<int>(r.size()) < n || static_cast<int>(jl_second_deriv.size()) < n) {
+        throw std::invalid_argument(
+            "fourierBesselIntegrateSecondDerivR1: r and jl_second_deriv must be at least as large as f");
+    }
+
+    std::vector<double> integrand(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        integrand[i] = f[i] * r[i] * r[i] * r[i] * jl_second_deriv[i];
 
     return FOUR_PI * simpson(integrand, rab, mesh_type);
 }
