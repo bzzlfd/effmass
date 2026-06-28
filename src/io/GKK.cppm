@@ -438,6 +438,12 @@ auto GKK::computeSpherical(std::size_t ng) -> void {
         const double q  = std::sqrt(kx * kx + ky * ky + kz * kz);
         q_[ig]     = q;
         theta_[ig] = (q > 0.0) ? std::acos(kz / q) : 0.0;
+        // atan2(y, x)
+        // cppreference for atan2 behavior: 
+        //     atan2(0, 0) = 0
+        //     atan2(0,-0) = 3.14159
+        //     atan2(7, 0) = 1.5708
+        //     atan2(7,-0) = 1.5708
         phi_[ig]   = std::atan2(ky, kx);
     }
 }

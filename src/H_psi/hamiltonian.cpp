@@ -226,6 +226,9 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
             elem.betaq_tables->setVolume(omega);
         };
 
+        // Build BetaqTable only for elements that actually appear in the
+        // crystal (atom.config).  When no ATOM file is loaded, conservatively
+        // build for every loaded NCPP instead.
         if (atom_) {
             for (auto&& t : atom_->eachType()) {
                 std::string_view want = ATOM::elementName(t.z);
