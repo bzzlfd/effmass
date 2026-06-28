@@ -175,6 +175,8 @@ public:
         l_ = 0;
         for (std::size_t i = 0; i < n_; ++i)
             x_[i] = q * r_cache_[i];
+        jl_prime_valid_ = false;
+        jl_double_prime_valid_ = false;
         initSeeds();
         return *this;
     }
@@ -186,6 +188,8 @@ public:
         }
         if (n == 0) return *this;
 
+        jl_prime_valid_ = false;
+        jl_double_prime_valid_ = false;
         for (int step = 0; step < n; ++step) {
             for (std::size_t i = 0; i < n_; ++i) {
                 if (std::abs(x_[i]) < BESSEL_EPS) {
@@ -211,6 +215,58 @@ public:
         return j_curr_;
     }
 
+    // Returns j_l'(x) = (l/x)·j_l(x) - j_{l+1}(x) for all x in the grid.
+    // For |x| < BESSEL_EPS: j_0'(0)=0, j_1'(0)=1/3, j_l'(0)=0 (l≥2).
+    //
+    // The result is lazily cached — no allocation occurs unless this method
+    // is called.  The cache is invalidated by reset() and advance().
+    auto derivValue() const -> std::span<const double> {
+        if (!jl_prime_) {
+            jl_prime_.emplace(n_);
+        }
+        if (!jl_prime_valid_) {
+            auto& p = *jl_prime_;
+            for (std::size_t i = 0; i < n_; ++i) {
+                if (std::abs(x_[i]) < BESSEL_EPS) {
+                    p[i] = (l_ == 1) ? (1.0 / 3.0) : 0.0;
+                } else {
+                    p[i] = static_cast<double>(l_) / x_[i] * j_curr_[i]
+                           - j_next_[i];
+                }
+            }
+            jl_prime_valid_ = true;
+        }
+        return *jl_prime_;
+    }
+
+    // Returns j_l''(x) = [l(l-1)/x² - 1]·j_l(x) + (2/x)·j_{l+1}(x).
+    // For |x| < BESSEL_EPS: j_0''(0)=-1/3, j_1''(0)=0, j_2''(0)=2/15,
+    // j_l''(0)=0 (l≥3).
+    //
+    // Lazily cached — same pattern as derivValue().
+    auto secondDerivValue() const -> std::span<const double> {
+        if (!jl_double_prime_) {
+            jl_double_prime_.emplace(n_);
+        }
+        if (!jl_double_prime_valid_) {
+            auto& p = *jl_double_prime_;
+            for (std::size_t i = 0; i < n_; ++i) {
+                if (std::abs(x_[i]) < BESSEL_EPS) {
+                    if (l_ == 0)       p[i] = -1.0 / 3.0;
+                    else if (l_ == 2)  p[i] = 2.0 / 15.0;
+                    else               p[i] = 0.0;
+                } else {
+                    double inv_x = 1.0 / x_[i];
+                    p[i] = (static_cast<double>(l_ * (l_ - 1)) * inv_x * inv_x - 1.0)
+                           * j_curr_[i]
+                           + 2.0 * inv_x * j_next_[i];
+                }
+            }
+            jl_double_prime_valid_ = true;
+        }
+        return *jl_double_prime_;
+    }
+
     auto currentL() const -> int { return l_; }
 
     auto operator++() -> double {
@@ -231,6 +287,10 @@ private:
     std::vector<double> x_;
     std::vector<double> j_curr_;
     std::vector<double> j_next_;
+    mutable std::optional<std::vector<double>> jl_prime_;
+    mutable bool jl_prime_valid_{false};
+    mutable std::optional<std::vector<double>> jl_double_prime_;
+    mutable bool jl_double_prime_valid_{false};
 
     auto initSeeds() -> void {
         for (std::size_t i = 0; i < n_; ++i) {
