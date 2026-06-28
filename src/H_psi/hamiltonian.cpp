@@ -199,34 +199,69 @@ auto Hamiltonian::occ() const -> const OCC& {
 // -------------------------------------------------------------------------
 
 auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
-                           bool enable_psp_nonlocal) -> void {
+                           std::uint64_t psp_features) -> void {
     if (!canonical_lattice_) throw std::runtime_error("finalize: no lattice loaded");
     if (elements_.empty()) return;
 
     // -------------------------------------------------------------------
-    //  BetaqTables  —  NCPP initialisation  (skip if !enable_psp_nonlocal)
+    //  PSP features  —  validate and store
     // -------------------------------------------------------------------
 
-    enable_psp_nonlocal_ = enable_psp_nonlocal;
+    constexpr auto NONLOCAL = static_cast<std::uint64_t>(PSPFeature::Nonlocal);
+    constexpr auto DBETAQ   = static_cast<std::uint64_t>(PSPFeature::DBetaq);
+    constexpr auto D2BETAQ  = static_cast<std::uint64_t>(PSPFeature::D2Betaq);
+
+    if ((psp_features & D2BETAQ) && !(psp_features & DBETAQ)) {
+        throw std::invalid_argument(
+            "finalize: PSPFeature::D2Betaq requires PSPFeature::DBetaq");
+    }
+    if ((psp_features & DBETAQ) && !(psp_features & NONLOCAL)) {
+        throw std::invalid_argument(
+            "finalize: PSPFeature::DBetaq requires PSPFeature::Nonlocal");
+    }
+    psp_features_ = psp_features;
+
+    // -------------------------------------------------------------------
+    //  BetaqTables / DBetaqTables / D2BetaqTables  —  NCPP initialisation
+    // -------------------------------------------------------------------
+
     double omega = 0.0;
-    if (enable_psp_nonlocal) {
+    if (psp_features & NONLOCAL) {
         std::println("[Hamiltonian] finalize: constructing BetaqTables...");
         omega = canonical_lattice_->volume();
 
-        auto buildBetaqTable = [&](ElementData& elem) -> void {
+        auto buildTables = [&](ElementData& elem) -> void {
             sortByL(elem.ncpp);
             diagonalizeNonlocal(elem.ncpp);
 
             const auto& ncpp = elem.ncpp;
             auto mesh_type = (ncpp.mesh.type == MeshType::Uniform)
                              ? SimpsonMeshType::Uniform : SimpsonMeshType::General;
+
+            // BetaqTables — always built when Nonlocal is set
             elem.betaq_tables.emplace(
                 ncpp.mesh.r, ncpp.mesh.rab, mesh_type,
                 ncpp.nonlocal.beta, ncpp.nonlocal.angular_momentum);
             elem.betaq_tables->setVolume(omega);
+
+            // DBetaqTables — built only when DBetaq flag is set
+            if (psp_features & DBETAQ) {
+                elem.dbetaq_tables.emplace(
+                    ncpp.mesh.r, ncpp.mesh.rab, mesh_type,
+                    ncpp.nonlocal.beta, ncpp.nonlocal.angular_momentum);
+                elem.dbetaq_tables->setVolume(omega);
+            }
+
+            // D2BetaqTables — built only when D2Betaq flag is set
+            if (psp_features & D2BETAQ) {
+                elem.d2betaq_tables.emplace(
+                    ncpp.mesh.r, ncpp.mesh.rab, mesh_type,
+                    ncpp.nonlocal.beta, ncpp.nonlocal.angular_momentum);
+                elem.d2betaq_tables->setVolume(omega);
+            }
         };
 
-        // Build BetaqTable only for elements that actually appear in the
+        // Build tables only for elements that actually appear in the
         // crystal (atom.config).  When no ATOM file is loaded, conservatively
         // build for every loaded NCPP instead.
         if (atom_) {
@@ -236,11 +271,17 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
                     return e.ncpp.meta.element == want;
                 });
                 if (it != elements_.end())
-                    buildBetaqTable(*it);
+                    buildTables(*it);
             }
         } else {
             for (auto& elem : elements_)
-                buildBetaqTable(elem);
+                buildTables(elem);
+        }
+        if (psp_features & DBETAQ) {
+            std::println("[Hamiltonian] finalize: DBetaqTables constructed");
+        }
+        if (psp_features & D2BETAQ) {
+            std::println("[Hamiltonian] finalize: D2BetaqTables constructed");
         }
     }
 
@@ -309,6 +350,42 @@ auto Hamiltonian::betaqTables(int atomic_number) const -> const BetaqTables& {
     }
     throw std::out_of_range(
         "Hamiltonian: no BetaqTables for element " + std::string(want) +
+        " (Z=" + std::to_string(atomic_number) + ')');
+}
+
+auto Hamiltonian::dbetaqTables(int atomic_number) const -> const DBetaqTables& {
+    std::string_view want = ATOM::elementName(atomic_number);
+    for (const auto& elem : elements_) {
+        if (elem.ncpp.meta.element == want) {
+            if (!elem.dbetaq_tables) {
+                throw std::runtime_error(
+                    "Hamiltonian: DBetaqTables not initialised for element "
+                    + std::string(want)
+                    + " (did you enable PSPFeature::DBetaq in finalize()?)");
+            }
+            return *elem.dbetaq_tables;
+        }
+    }
+    throw std::out_of_range(
+        "Hamiltonian: no DBetaqTables for element " + std::string(want) +
+        " (Z=" + std::to_string(atomic_number) + ')');
+}
+
+auto Hamiltonian::d2betaqTables(int atomic_number) const -> const D2BetaqTables& {
+    std::string_view want = ATOM::elementName(atomic_number);
+    for (const auto& elem : elements_) {
+        if (elem.ncpp.meta.element == want) {
+            if (!elem.d2betaq_tables) {
+                throw std::runtime_error(
+                    "Hamiltonian: D2BetaqTables not initialised for element "
+                    + std::string(want)
+                    + " (did you enable PSPFeature::D2Betaq in finalize()?)");
+            }
+            return *elem.d2betaq_tables;
+        }
+    }
+    throw std::out_of_range(
+        "Hamiltonian: no D2BetaqTables for element " + std::string(want) +
         " (Z=" + std::to_string(atomic_number) + ')');
 }
 

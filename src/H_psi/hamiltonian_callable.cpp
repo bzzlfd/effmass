@@ -56,7 +56,8 @@ auto Hamiltonian::Callable::set_ikpt(int ikpt) -> void {
     // Ylm — construct on first call (from constructor via delegation),
     // reinit on subsequent calls.  Uses parent_->l_max_ (computed in
     // finalize()) instead of scanning elements_.
-    if (parent_->enable_psp_nonlocal_ && parent_->l_max_ >= 0) {
+    if ((parent_->psp_features_ & static_cast<std::uint64_t>(PSPFeature::Nonlocal))
+        && parent_->l_max_ >= 0) {
         if (ylm_) {
             ylm_->reinit(kv.theta, kv.phi, parent_->l_max_);
         } else {
@@ -168,8 +169,8 @@ void Hamiltonian::Callable::operator()(
     // ---------------------------------------------------------------------------
     // Check whether any pseudopotential has nonlocal projectors.
     // If none, the nonlocal contribution is zero.  Ylm was constructed
-    // in the Callable constructor when enable_psp_nonlocal_ && global_max_l >= 0.
-    if (!parent_->enable_psp_nonlocal_) return;
+    // in the Callable constructor when PSPFeature::Nonlocal is set.
+    if (!(parent_->psp_features_ & static_cast<std::uint64_t>(PSPFeature::Nonlocal))) return;
 
     const auto& atom = parent_->atom();
 

@@ -20,6 +20,26 @@ export {
 }
 
 // ===================================================================
+//  PSPFeature  —  controls how many q-derivative orders of the atomic
+//  pseudopotential projector  β_l(q)  are pre-cached when Hamiltonian
+//  stores each element's NCPP data.
+//
+//    Nonlocal  →  β(q)          required by H|ψ⟩ (Callable)
+//    DBetaq    →  ∂β/∂q         required by gradient and Hessian
+//    D2Betaq   →  ∂²β/∂q²       required by Hessian
+//
+//  D2Betaq implies DBetaq, DBetaq implies Nonlocal; validated at
+//  runtime in finalize().
+// ===================================================================
+export {
+    enum class PSPFeature : std::uint64_t {
+        Nonlocal = 1ull << 0,  // build BetaqTables    —  β(q)           required by H|ψ⟩
+        DBetaq   = 1ull << 1,  // build DBetaqTables   —  ∂β/∂q           required by gradient
+        D2Betaq  = 1ull << 2,  // build D2BetaqTables  —  ∂²β/∂q²         required by Hessian
+    };
+}
+
+// ===================================================================
 //  KDir — Cartesian direction specifier for gradient/hessian
 // ===================================================================
 export {
@@ -69,13 +89,15 @@ export {
         auto loadNCPP(const std::string& path) -> void;
 
         /// Post-load initialisation.  Prepares NCPP data (sortByL,
-        /// diagonalizeNonlocal), constructs BetaqTables from NCPP data and
-        /// GKK cell volume, then runs the selected Part‑3 consistency checks.
-        /// Must be called after all loadXxx() and before
+        /// diagonalizeNonlocal), constructs BetaqTables (if PSPFeature::Nonlocal
+        /// is set) and DBetaqTables (if PSPFeature::DBetaq is set) from NCPP
+        /// data and GKK cell volume, then runs the selected Part‑3 consistency
+        /// checks.  Must be called after all loadXxx() and before
         /// at_k() / gradient() / hessian().
         auto finalize(std::initializer_list<ExtendedCheck> checks
                       = {ExtendedCheck::NCPPAtomCoverage},
-                      bool enable_psp_nonlocal = true) -> void;
+                      std::uint64_t psp_features
+                      = static_cast<std::uint64_t>(PSPFeature::Nonlocal)) -> void;
 
         /// Convenience: load all standard files from the base directory.
         auto loadFromDirectory() -> void;
@@ -99,6 +121,8 @@ export {
         auto occ()    const -> const OCC&;
         auto ncpp(int atomic_number) const -> const NCPP&;
         auto betaqTables(int atomic_number) const -> const BetaqTables&;
+        auto dbetaqTables(int atomic_number) const -> const DBetaqTables&;
+        auto d2betaqTables(int atomic_number) const -> const D2BetaqTables&;
 
         // -------------------------------------------------------------------
         //  1.  Callable  —  H|ψ⟩ at fixed k
@@ -228,7 +252,7 @@ export {
         std::optional<ATOM>  atom_;
         std::optional<EIGEN> eigen_;
         std::optional<OCC>   occ_;
-        struct ElementData { NCPP ncpp; std::optional<BetaqTables> betaq_tables; };
+        struct ElementData { NCPP ncpp; std::optional<BetaqTables> betaq_tables; std::optional<DBetaqTables> dbetaq_tables; std::optional<D2BetaqTables> d2betaq_tables; };
         std::vector<ElementData> elements_;
 
         /// Bitmask to run each Part 2 file-pair integrity check exactly once.
@@ -256,7 +280,7 @@ export {
         // -- Derived quantities (computed in finalize) --
         int ng_max_{};          // maximum number of G-vectors across all k-points (from GKK)
         int l_max_{};           // maximum angular momentum across all NCPP elements
-        bool enable_psp_nonlocal_{true};  // whether nonlocal PSP was prepared in finalize()
+        std::uint64_t psp_features_{static_cast<std::uint64_t>(PSPFeature::Nonlocal)};
         std::optional<FFT3D> fft_;       // FFT plan (constructed in finalize)
 
         /// Resolve a user-provided path against base_dir_.
