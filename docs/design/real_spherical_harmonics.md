@@ -172,9 +172,11 @@ $$Q_l^m = N_l^m \cdot P_l^m(\cos\theta)$$
 
 #### `seedPmm(m, curr)` — 种子值 $Q_m^m$
 
+包含 Condon-Shortley 相位因子 $(-1)^m$：
+
 $$Q_0^0 = \frac{1}{2\sqrt{\pi}}$$
 
-$$Q_m^m = Q_0^0 \cdot \prod_{k=1}^{m} \sqrt{\frac{2k+1}{2k}} \cdot \sin^m(\theta)$$
+$$Q_m^m = (-1)^m \cdot Q_0^0 \cdot \prod_{k=1}^{m} \sqrt{\frac{2k+1}{2k}} \cdot \sin^m(\theta)$$
 
 #### `stepPmm1(m, prev, curr)` — $Q_{m+1}^m$ 第一步
 
@@ -205,7 +207,7 @@ $$
 
 `y_lm_` 是一维 `vector<vector<double>>`，按 `l*l + (m+l)` 平铺索引。`m = 0` 在每块中间，`±m` 对称分布两侧。
 
-`assembleYlm` 将 `Q_l^m`（已含归一化）乘以 $\sqrt{2} \cdot \{\cos(m\phi), \sin(m\phi)\}$ 写入缓存。
+`assembleYlm` 将 `Q_l^m`（已含归一化系数和 Condon-Shortley 因子）乘以 $\sqrt{2} \cdot \{\cos(m\phi), \sin(m\phi)\}$ 写入缓存。
 
 #### `top_column_Q_` — 增量递推的顶端缓存
 

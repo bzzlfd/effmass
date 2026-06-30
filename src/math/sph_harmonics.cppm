@@ -476,7 +476,8 @@ auto RealSphericalHarmonics::compute(int l, int m) -> std::vector<double> {
 // =============================================================================
 
 // Seed Q_m^m into curr:  Q_0^0 = 1/(2√π), then
-//   Q_m^m = Q_0^0 * prod_{k=1}^{m} sqrt((2k+1)/(2k)) * sin^m(θ)
+//   Q_m^m = Q_0^0 * (-1)^m * prod_{k=1}^{m} sqrt((2k+1)/(2k)) * sin^m(θ)
+// The (-1)^m is the Condon-Shortley phase factor.
 // All intermediate values are O(1) (no overflow at high l).
 auto RealSphericalHarmonics::seedPmm(int m, std::vector<double>& curr) -> void {
     double Q0 = 0.5 / std::sqrt(std::numbers::pi);
@@ -484,6 +485,8 @@ auto RealSphericalHarmonics::seedPmm(int m, std::vector<double>& curr) -> void {
         for (std::size_t i = 0; i < ng_; ++i) curr[i] = Q0;
     } else {
         double coeff = Q0;
+        // Condon-Shortley phase: (-1)^m
+        if (m % 2 != 0) coeff = -coeff;
         for (int k = 1; k <= m; ++k) {
             coeff *= std::sqrt(static_cast<double>(2 * k + 1) / static_cast<double>(2 * k));
         }
@@ -549,7 +552,8 @@ auto RealSphericalHarmonics::retreatColumn(int m, int l,
 }
 
 // Assemble Y_{l,m} from Q_l^m(q), write into y_lm_ cache.
-// Q already includes the normalization N_l^m, so no extra normFactor.
+// Q already includes the normalization N_l^m and Condon-Shortley factor (-1)^m,
+// so no extra normFactor or phase is needed.
 //   Y_{l0}     = Q_l^0
 //   Y_{l,±m}  = sqrt(2) * Q_l^m * {cos(mφ), sin(mφ)}
 auto RealSphericalHarmonics::assembleYlm(int l, int m, const std::vector<double>& Q,
@@ -584,12 +588,15 @@ auto realSphericalHarmonic(int l, int m, double theta, double phi) -> double {
     double Plm = legendreP(l, m_abs, theta);
     double norm = normFactor(l, m_abs);
 
+    // Condon-Shortley phase (-1)^{|m|}
+    double cs = (m_abs % 2 == 0) ? 1.0 : -1.0;
+
     if (m == 0) {
         return norm * Plm;
     } else if (m > 0) {
-        return std::sqrt(2.0) * norm * Plm * std::cos(m * phi);
+        return cs * std::sqrt(2.0) * norm * Plm * std::cos(m * phi);
     } else {
-        return std::sqrt(2.0) * norm * Plm * std::sin(m_abs * phi);
+        return cs * std::sqrt(2.0) * norm * Plm * std::sin(m_abs * phi);
     }
 }
 
@@ -663,6 +670,9 @@ auto realSphericalHarmonics(double theta, double phi, int l_max, std::span<doubl
             p[idx] = (cos_t * (2.0 * l - 1.0) * p[idx - 1] - (l + m - 1.0) * p[idx - 2]) / (l - m);
         }
 
+        // Condon-Shortley phase (-1)^m
+        double cs = (m % 2 == 0) ? 1.0 : -1.0;
+
         // Assemble real spherical harmonics for this m
         for (int l = m; l <= l_max; ++l) {
             int idx = l - m;
@@ -672,7 +682,7 @@ auto realSphericalHarmonics(double theta, double phi, int l_max, std::span<doubl
             if (m == 0) {
                 out[base] = norm * p[idx];
             } else {
-                double val = std::sqrt(2.0) * norm * p[idx];
+                double val = cs * std::sqrt(2.0) * norm * p[idx];
                 out[base - m] = val * sin_mphi[m];
                 out[base + m] = val * cos_mphi[m];
             }
