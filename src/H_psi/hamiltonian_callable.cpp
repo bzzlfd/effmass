@@ -233,7 +233,7 @@ void Hamiltonian::Callable::operator()(
                     }
 
                     for (int m = -bi.l; m <= bi.l; ++m) {
-                        auto ylm_lm = (*ylm_)(bi.l, m);
+                        const auto& ylm_lm = ylm_->get(bi.l, m);
 
                         // First pass:  inner = ⟨projector|ψ⟩
                         std::complex<double> inner = 0.0;
