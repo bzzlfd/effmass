@@ -186,17 +186,27 @@ void Hamiltonian::Callable::operator()(
         int l_max = ncp.meta.l_max;
         if (l_max < 0) continue;
 
-        // Collect all projector blocks for this atom type so we don't
-        // recompute them for every atom of the same element.
-        struct BlockInfo { int l; int nb; ProjectorBlock block; };
-        std::vector<BlockInfo> blocks;
+        const auto& betaq_tables = parent_->betaqTables(type.z);
+
+        // Precompute β(q) per (l, ib) — τ-independent, cached once for all atoms.
+        struct BetaCache { int l; int ib; double lambda; std::vector<double> beta_q; };
+        std::vector<BetaCache> beta_cache;
         for (int l = 0; l <= l_max; ++l) {
-            auto block = ncp.projectorBlock(l);
-            if (block.B.rows > 0) {
-                blocks.push_back({l, block.B.rows, std::move(block)});
+            auto pb = ncp.projectorBlock(l);
+            if (pb.B.rows <= 0) continue;
+
+            for (int ib = 0; ib < pb.B.rows; ++ib) {
+                double lambda = pb.B[ib, ib];
+                if (std::abs(lambda) < 1e-15) continue;
+
+                std::vector<double> beta_q(static_cast<std::size_t>(ng_));
+                for (int ig = 0; ig < ng_; ++ig)
+                    beta_q[ig] = betaq_tables.interpolate(l, ib, kv.q[ig]);
+
+                beta_cache.push_back({l, ib, lambda, std::move(beta_q)});
             }
         }
-        if (blocks.empty()) continue;
+        if (beta_cache.empty()) continue;
 
         // Loop over atoms of this type
         for (auto&& ad : atom.eachTypeAtom(type.ityp)) {
@@ -219,56 +229,43 @@ void Hamiltonian::Callable::operator()(
                      ncp.meta.element, type.ityp, tau.x, tau.y, tau.z);
 #endif
 
-            const auto& betaq_tables = parent_->betaqTables(type.z);
+            for (const auto& bc : beta_cache) {
+                for (int m = -bc.l; m <= bc.l; ++m) {
+                    const auto& ylm_lm = ylm_->get(bc.l, m);
 
-            for (const auto& bi : blocks) {
-                for (int ib = 0; ib < bi.nb; ++ib) {
-                    double lambda = bi.block.B[ib, ib];
-                    if (std::abs(lambda) < 1e-15) continue;
-
-                    // Precompute β(q) for all G-vectors via table interpolation
-                    std::vector<double> beta_q(static_cast<std::size_t>(ng_));
+                    // First pass:  inner = ⟨projector|ψ⟩
+                    std::complex<double> inner = 0.0;
                     for (int ig = 0; ig < ng_; ++ig) {
-                        beta_q[ig] = betaq_tables.interpolate(bi.l, ib, kv.q[ig]);
+                        auto p = std::complex<double>(
+                            bc.beta_q[ig] * ylm_lm[ig], 0.0) * sf_vals[ig];
+                        inner += std::conj(p) * psi[ig];
                     }
 
-                    for (int m = -bi.l; m <= bi.l; ++m) {
-                        const auto& ylm_lm = ylm_->get(bi.l, m);
-
-                        // First pass:  inner = ⟨projector|ψ⟩
-                        std::complex<double> inner = 0.0;
-                        for (int ig = 0; ig < ng_; ++ig) {
-                            auto p = std::complex<double>(
-                                beta_q[ig] * ylm_lm[ig], 0.0) * sf_vals[ig];
-                            inner += std::conj(p) * psi[ig];
-                        }
-
 #if HPSI_DEBUG >= 1
-                        dbg_e_nl += lambda * std::norm(inner);
+                    dbg_e_nl += bc.lambda * std::norm(inner);
 #endif
 
 #if HPSI_DEBUG >= 2
-                        double proj_norm2 = 0.0;
-                        for (int ig = 0; ig < ng_; ++ig) {
-                            auto p = std::complex<double>(
-                                beta_q[ig] * ylm_lm[ig], 0.0) * sf_vals[ig];
-                            proj_norm2 += std::norm(p);
-                        }
-                        dbg_nl_this_atom += lambda * std::norm(inner);
-                        double dbg_ip_scaled = std::norm(inner) * vol;
-                        double dbg_threshold = 1e-8 / dbg_natom;
-                        if (dbg_ip_scaled > dbg_threshold)
-                            std::println("[HPSI_DEBUG:2]     l={} m={:+d} ib={}  lambda={:.10f}  |<p|psi>|^2={:.12e}  <p|p>={:.12e}",
-                                         bi.l, m, ib, lambda,
-                                         dbg_ip_scaled, proj_norm2);
+                    double proj_norm2 = 0.0;
+                    for (int ig = 0; ig < ng_; ++ig) {
+                        auto p = std::complex<double>(
+                            bc.beta_q[ig] * ylm_lm[ig], 0.0) * sf_vals[ig];
+                        proj_norm2 += std::norm(p);
+                    }
+                    dbg_nl_this_atom += bc.lambda * std::norm(inner);
+                    double dbg_ip_scaled = std::norm(inner) * vol;
+                    double dbg_threshold = 1e-8 / dbg_natom;
+                    if (dbg_ip_scaled > dbg_threshold)
+                        std::println("[HPSI_DEBUG:2]     l={} m={:+d} ib={}  lambda={:.10f}  |<p|psi>|^2={:.12e}  <p|p>={:.12e}",
+                                     bc.l, m, bc.ib, bc.lambda,
+                                     dbg_ip_scaled, proj_norm2);
 #endif
 
-                        // Second pass:  hpsi += λ · inner · |projector⟩
-                        for (int ig = 0; ig < ng_; ++ig) {
-                            auto p = std::complex<double>(
-                                beta_q[ig] * ylm_lm[ig], 0.0) * sf_vals[ig];
-                            hpsi[ig] += lambda * inner * p;
-                        }
+                    // Second pass:  hpsi += λ · inner · |projector⟩
+                    for (int ig = 0; ig < ng_; ++ig) {
+                        auto p = std::complex<double>(
+                            bc.beta_q[ig] * ylm_lm[ig], 0.0) * sf_vals[ig];
+                        hpsi[ig] += bc.lambda * inner * p;
                     }
                 }
             }
