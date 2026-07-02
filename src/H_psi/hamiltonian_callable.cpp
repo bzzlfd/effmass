@@ -53,16 +53,17 @@ auto Hamiltonian::Callable::set_ikpt(int ikpt) -> void {
     ng_ = static_cast<int>(kv.kinetic.size());
     // n1_, n2_, n3_ unchanged (FFT grid is k-point-independent)
 
-    // Ylm — construct on first call (from constructor via delegation),
-    // reinit on subsequent calls.  Uses parent_->l_max_ (computed in
-    // finalize()) instead of scanning elements_.
+    // Ylm — construct Engine on first call, reinit on subsequent calls.
+    // Data (ylm_data_) is a direct member, no lazy init needed.
     if ((parent_->psp_features_ & static_cast<std::uint64_t>(PSPFeature::Nonlocal))
         && parent_->l_max_ >= 0) {
-        if (ylm_) {
-            ylm_->reinit(kv.theta, kv.phi, parent_->l_max_);
+        if (engine_) {
+            engine_->reinit(kv.theta, kv.phi);
+            engine_->setLMax(parent_->l_max_);
         } else {
-            ylm_.emplace(kv.theta, kv.phi, parent_->l_max_);
-            ylm_->reserveNg(parent_->ng_max_);
+            engine_.emplace(kv.theta, kv.phi, parent_->l_max_);
+            engine_->reserveNg(parent_->ng_max_);
+            ylm_data_.reserveNg(parent_->ng_max_);
         }
     }
 }
@@ -231,7 +232,7 @@ void Hamiltonian::Callable::operator()(
 
             for (const auto& bc : beta_cache) {
                 for (int m = -bc.l; m <= bc.l; ++m) {
-                    const auto& ylm_lm = ylm_->get(bc.l, m);
+                    const auto& ylm_lm = ylm_data_.get(*engine_, bc.l, m);
 
                     // First pass:  inner = ⟨projector|ψ⟩
                     std::complex<double> inner = 0.0;

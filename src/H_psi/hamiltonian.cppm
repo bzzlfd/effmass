@@ -157,9 +157,10 @@ export {
             int n1_{0}, n2_{0}, n3_{0};             // FFT grid dimensions
 
             // Ylm — cached Y_lm(theta, phi) for bound k-point.
-            // Pre-allocated to parent_->ng_max_ via Ylm::reserveNg() so that
+            // Pre-allocated to parent_->ng_max_ via Engine::reserveNg() so that
             // set_ikpt() can switch k-points without heap reallocation.
-            mutable std::optional<RealSphericalHarmonics> ylm_;
+            mutable std::optional<RealSphericalHarmonicsEngine> engine_;
+            mutable RealSphericalHarmonicsData ylm_data_;
         };
         auto at_k(int ikpt) const -> Callable { return Callable(this, ikpt); }
 

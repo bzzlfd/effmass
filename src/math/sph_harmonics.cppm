@@ -5,7 +5,8 @@ export module math.sph_harmonics;
 import std;
 
 export {
-    class RealSphericalHarmonics;
+    class RealSphericalHarmonicsEngine;
+    class RealSphericalHarmonicsData;
 }
 
 
@@ -106,41 +107,58 @@ auto legendreP(int l, int m_abs, double theta) -> double {
 
 
 // Vectorized spherical harmonics evaluator over K-point G-vectors.
-// Precomputes all Y_lm for l <= l_max_resident on construction
-// (or after a setLMax() call); computes larger l on demand.
-class RealSphericalHarmonics {
+// Q_l^m (normalised Legendre) is the canonical permanent form;
+// Y_lm is a derived quantity assembled from Q + cos/sin tables.
+// Engine owns trig, Q, cos/sin tables, and Legendre recurrence.
+// Cache (separate Data class) owns the lazy-assembled y_lm_ cache.
+class RealSphericalHarmonicsEngine {
 public:
     enum class CacheMode { Full, None };
 
-    explicit RealSphericalHarmonics(std::span<const double> theta, std::span<const double> phi,
+    explicit RealSphericalHarmonicsEngine(std::span<const double> theta, std::span<const double> phi,
                                      int l_max_resident, CacheMode mode = CacheMode::Full);
 
     /// Pre-allocate internal buffers to at least max_ng capacity.
-    /// Only y_lm_ and top_column_Q_ are reserved in Full mode; trig arrays
-    /// are always reserved.  Safe to call after construction — the current
-    /// ng_ and cached values are unchanged.
+    /// Q_lm_, cos_mphi_ and sin_mphi_ are reserved in Full mode;
+    /// trig arrays are always reserved.
     auto reserveNg(int max_ng) -> void;
 
-    /// Switch l_max_resident. Shrink truncates; expand continues Legendre
-    /// recurrence from saved top_column_Q_ state (first call with empty
-    /// top_column_Q_ performs a full build from scratch).
+    /// Switch l_max_resident.  Preserves Q_lm_ and trig tables for
+    /// zero-cost re-expansion.  Expand continues the Legendre
+    /// recurrence from the existing Q_lm_ state and fills Q_lm_,
+    /// cos_mphi_ and sin_mphi_ for the new (l,m) range.
     auto setLMax(int l_max_new) -> void;
 
-    /// Re-initialise with new theta/phi spans.  Preserves CacheMode:
-    ///   Full — trig arrays are recomputed and Legendre cache is rebuilt
-    ///          (full reset, not incremental, since all angular data changed).
-    ///   None — only trig arrays are recomputed; y_lm_ cache is left empty.
+    /// Re-initialise with new theta/phi spans.  Preserves CacheMode.
+    /// Trig arrays are recomputed from scratch; Q_lm_ and cos/sin tables
+    /// are NOT rebuilt here — call setLMax() separately if needed.
     /// Existing vector allocations are reused when ng_ <= capacity.
-    auto reinit(std::span<const double> theta, std::span<const double> phi,
-                int l_max_resident) -> void;
+    auto reinit(std::span<const double> theta, std::span<const double> phi) -> void;
 
-    /// Return Y_lm for all G-vectors from the precomputed cache.
+    /// Return Y_lm for all G-vectors, assembled from the permanent
+    /// Q_l^m + cos(mφ)/sin(mφ) tables.  Returns by value (no cache).
     /// Requires CacheMode::Full and l <= l_max_resident.
-    auto get(int l, int m) -> const std::vector<double>&;
+    auto get(int l, int m) const -> std::vector<double>;
 
     /// Compute Y_lm on the fly. Works in any mode, for any (l,m).
     /// Returns by value (no persistent cache).
-    auto compute(int l, int m) -> std::vector<double>;
+    auto compute(int l, int m) const -> std::vector<double>;
+
+    /// Convenience dispatcher.  In Full mode: delegates to get()
+    /// (copy) when l ≤ l_max_resident_, otherwise compute().
+    /// In None mode: always compute().
+    auto operator()(int l, int m) const -> std::vector<double> {
+        if (mode_ == CacheMode::None) return compute(l, m);
+        if (l > l_max_resident_) return compute(l, m);
+        return get(l, m);
+    }
+
+    // -- accessors for Data --
+    auto revision() const -> std::size_t { return revision_; }
+    auto lMaxResident() const -> int { return l_max_resident_; }
+    auto ng() const -> std::size_t { return ng_; }
+    auto ngCapacity() const -> std::size_t { return cos_theta_.capacity(); }
+    auto mode() const -> CacheMode { return mode_; }
 
 private:
     std::span<const double> theta_;
@@ -148,44 +166,36 @@ private:
     std::size_t ng_;
     int l_max_resident_ = -1;
     CacheMode mode_ = CacheMode::Full;
+    std::size_t revision_ = 1;
     std::vector<double> cos_theta_;
     std::vector<double> sin_theta_;
     std::vector<double> cos_phi_;
     std::vector<double> sin_phi_;
-    std::vector<std::vector<double>> y_lm_;
+    // === Q_l^m permanent storage ===
+    // Q_lm_ is the canonical Legendre storage (includes normalization
+    // and Condon-Shortley phase).
+    //   Q_lm_ indexing: flat = l*(l+1)/2 + m_abs  (compact lower-triangular).
+    std::vector<std::vector<double>> Q_lm_;
 
-    // Top Q_l^m state for each m, saved so setLMax() expansion can
-    // continue the recurrence without recomputing from scratch.
-    // top_column_Q_[m].curr = Q_{l_max_resident_}^{m},
-    // top_column_Q_[m].prev = Q_{l_max_resident_-1}^{m}
-    //   (or = curr if l_max_resident_ == m).
-    struct TopColumnQ {
-        std::vector<double> prev;
-        std::vector<double> curr;
-    };
-    std::vector<TopColumnQ> top_column_Q_;
+    // cos_mphi_[m] = cos(m·φ), sin_mphi_[m] = sin(m·φ), m in [0, l_max_resident_].
+    // Precomputed during setLMax() for the full m range.
+    std::vector<std::vector<double>> cos_mphi_;
+    std::vector<std::vector<double>> sin_mphi_;
 
     //
     // -- Legendre recurrence helpers --
     //
 
     // Seed Q_m^m into curr (normalized).
-    auto seedPmm(int m, std::vector<double>& curr) -> void;
+    auto seedPmm(int m, std::vector<double>& curr) const -> void;
 
     // One step: Q_{m+1}^m from Q_m^m.
-    auto stepPmm1(int m, std::vector<double>& prev, std::vector<double>& curr) -> void;
+    auto stepPmm1(int m, std::vector<double>& prev, std::vector<double>& curr) const -> void;
 
     // One step of forward three-term recurrence for Q_l^m (normalized).
     auto advanceColumn(int m, int l,
-                       std::vector<double>& prev, std::vector<double>& curr) -> void;
+                       std::vector<double>& prev, std::vector<double>& curr) const -> void;
 
-    // One step of inverse three-term recurrence for Q_l^m.
-    auto retreatColumn(int m, int l,
-                       std::vector<double>& prev, std::vector<double>& curr) -> void;
-
-    // Assemble Y_{l,m} from Q_l^m, write into y_lm_ cache.
-    auto assembleYlm(int l, int m, const std::vector<double>& Q,
-                     const std::vector<double>& cm, const std::vector<double>& sm) -> void;
 };
 
 
@@ -193,14 +203,14 @@ private:
 //  Construction
 // =============================================================================
 
-RealSphericalHarmonics::RealSphericalHarmonics(
+RealSphericalHarmonicsEngine::RealSphericalHarmonicsEngine(
     std::span<const double> theta, std::span<const double> phi,
     int l_max_resident, CacheMode mode)
     : theta_(theta), phi_(phi), ng_(theta_.size()), mode_(mode)
 {
     if (theta_.empty()) {
         throw std::invalid_argument(
-            "RealSphericalHarmonics: theta and phi must be non-empty");
+            "RealSphericalHarmonicsEngine: theta and phi must be non-empty");
     }
 
     // Precompute cos(theta), sin(theta), cos(phi), sin(phi)
@@ -226,18 +236,14 @@ RealSphericalHarmonics::RealSphericalHarmonics(
 //  Public API — reserveNg / reinit
 // =============================================================================
 
-auto RealSphericalHarmonics::reinit(
-    std::span<const double> theta, std::span<const double> phi,
-    int l_max_resident) -> void
+auto RealSphericalHarmonicsEngine::reinit(
+    std::span<const double> theta, std::span<const double> phi) -> void
 {
-    // Guard against silent reallocation: reinit() assumes reserveNg() was
-    // called with ng_max_ >= theta.size() so that resize() below reuses
-    // pre-allocated capacity.  Check the trig array (always allocated in
-    // both CacheModes) as a proxy.
+    // Guard against silent reallocation.
     auto new_ng = theta.size();
     if (new_ng > cos_theta_.capacity()) {
         throw std::runtime_error(
-            std::format("RealSphericalHarmonics::reinit(): new ng_={} exceeds "
+            std::format("RealSphericalHarmonicsEngine::reinit(): new ng_={} exceeds "
                         "pre-allocated capacity={}. Call reserveNg({}) before reinit().",
                         new_ng, cos_theta_.capacity(), new_ng));
     }
@@ -260,24 +266,22 @@ auto RealSphericalHarmonics::reinit(
         sin_phi_[i] = std::sin(phi[i]);
     }
 
-    if (mode_ == CacheMode::Full) {
-        l_max_resident_ = -1;   // force full cache rebuild
-        setLMax(l_max_resident);
-    }
+    // Invalidate Q and cos/sin tables — they are no longer consistent
+    // with the new trig data.
+    l_max_resident_ = -1;
+    ++revision_;
 }
 
-auto RealSphericalHarmonics::reserveNg(int max_ng) -> void {
+auto RealSphericalHarmonicsEngine::reserveNg(int max_ng) -> void {
     auto n = static_cast<std::size_t>(max_ng);
     cos_theta_.reserve(n);
     sin_theta_.reserve(n);
     cos_phi_.reserve(n);
     sin_phi_.reserve(n);
     if (mode_ == CacheMode::Full) {
-        for (auto& v : y_lm_) v.reserve(n);
-        for (auto& tp : top_column_Q_) {
-            tp.prev.reserve(n);
-            tp.curr.reserve(n);
-        }
+        for (auto& v : Q_lm_) v.reserve(n);
+        for (auto& v : cos_mphi_) v.reserve(n);
+        for (auto& v : sin_mphi_) v.reserve(n);
     }
 }
 
@@ -286,101 +290,102 @@ auto RealSphericalHarmonics::reserveNg(int max_ng) -> void {
 //  Public API  —  setLMax
 // =============================================================================
 
-auto RealSphericalHarmonics::setLMax(int l_max_new) -> void {
+auto RealSphericalHarmonicsEngine::setLMax(int l_max_new) -> void {
     if (l_max_new < 0) {
         throw std::invalid_argument(
-            "RealSphericalHarmonics::setLMax: l_max_resident must be non-negative");
+            "RealSphericalHarmonicsEngine::setLMax: l_max_resident must be non-negative");
     }
     if (mode_ == CacheMode::None) return;
     if (l_max_new == l_max_resident_) return;
 
-    // -- Shrink: truncate buffers and back-iterate top_column_Q_ --
+    // -- Shrink: keep Q_lm_, cos_mphi_ and sin_mphi_ for zero-cost re-expansion. --
     if (l_max_new < l_max_resident_) {
-        int old_l_max = l_max_resident_;
-        std::size_t new_nm = static_cast<std::size_t>(l_max_new + 1);
-        y_lm_.resize(new_nm * new_nm);
-        top_column_Q_.resize(new_nm);
         l_max_resident_ = l_max_new;
-
-        // Backward Q recurrence: recover top_column_Q_ state for new l_max.
-        // Forward 3-term:  Q_l^m = (cosθ·c1·Q_{l-1}^m - c2·Q_{l-2}^m) / (l-m)
-        // Inverse:          Q_{l-2}^m = (cosθ·c1·Q_{l-1}^m - (l-m)·Q_l^m) / c2
-        // Valid for l >= m+2 (c2 != 0).
-        for (int m = 0; m <= l_max_new; ++m) {
-            auto& tp = top_column_Q_[static_cast<std::size_t>(m)];
-
-            if (l_max_new == m) {
-                // Seed level: use direct formula to avoid cosθ division.
-                seedPmm(m, tp.curr);
-                tp.prev = tp.curr;
-            } else {
-                for (int l = old_l_max; l > l_max_new; --l)
-                    retreatColumn(m, l, tp.prev, tp.curr);
-            }
-        }
+        ++revision_;
         return;
     }
 
     // -- Expand --
     int old_nm = l_max_resident_ + 1;
     int new_nm = l_max_new + 1;
-    auto ng_capacity = cos_theta_.capacity();   // reserveNg target, new vectors inherit pre-allocated capacity
+    auto ng_capacity = cos_theta_.capacity();
 
-    // Extend top_column_Q_ for new m values
-    top_column_Q_.resize(static_cast<std::size_t>(new_nm));
-    for (int m = old_nm; m <= l_max_new; ++m) {
-        top_column_Q_[static_cast<std::size_t>(m)].prev.reserve(ng_capacity);
-        top_column_Q_[static_cast<std::size_t>(m)].prev.resize(ng_);
-        top_column_Q_[static_cast<std::size_t>(m)].curr.reserve(ng_capacity);
-        top_column_Q_[static_cast<std::size_t>(m)].curr.resize(ng_);
+    // Extend Q_lm_ for new l,m pairs; existing entries keep their capacity.
+    {
+        std::size_t new_total = static_cast<std::size_t>(new_nm) * static_cast<std::size_t>(new_nm + 1) / 2;
+        auto old_q = Q_lm_.size();
+        Q_lm_.resize(new_total);
+        for (std::size_t i = old_q; i < new_total; ++i) {
+            Q_lm_[i].reserve(ng_capacity);
+            Q_lm_[i].resize(ng_);
+        }
     }
 
-    // Extend y_lm_ cache — new default-constructed entries need reserve too
-    y_lm_.resize(static_cast<std::size_t>(new_nm) * static_cast<std::size_t>(new_nm));
-    for (auto& v : y_lm_) {
-        v.reserve(ng_capacity);
-        v.resize(ng_);
+    // Extend cos_mphi_ / sin_mphi_ tables for new m values.
+    {
+        auto old_cm = cos_mphi_.size();
+        cos_mphi_.resize(static_cast<std::size_t>(new_nm));
+        sin_mphi_.resize(static_cast<std::size_t>(new_nm));
+        for (std::size_t m = old_cm; m < static_cast<std::size_t>(new_nm); ++m) {
+            cos_mphi_[m].reserve(ng_capacity);
+            cos_mphi_[m].resize(ng_);
+            sin_mphi_[m].reserve(ng_capacity);
+            sin_mphi_[m].resize(ng_);
+        }
     }
+
+    // Helper: compact triangular index for Q_lm_ (m_abs in [0, l]).
+    //   Q_lm_[l*(l+1)/2 + m_abs] stores Q_l^{m_abs}.
+    auto qIdx = [](int l, int m_abs) -> std::size_t {
+        return static_cast<std::size_t>(l * (l + 1) / 2 + m_abs);
+    };
 
     std::vector<double> cm(ng_, 1.0), sm(ng_, 0.0);
 
     for (int m = 0; m <= l_max_new; ++m) {
-        auto& tp = top_column_Q_[static_cast<std::size_t>(m)];
-
         if (m > l_max_resident_) {
-            // -- New m: full seed from scratch --
-            seedPmm(m, tp.curr);
-            assembleYlm(m, m, tp.curr, cm, sm);
+            // -- New m column: seed from scratch into local variables,
+            //    save each value to Q_lm_ as we go. --
+            std::vector<double> prev(ng_), curr(ng_);
+            seedPmm(m, curr);
+            Q_lm_[qIdx(m, m)] = curr;   // save Q_m^m (copy)
 
-            if (m == l_max_new) {
-                tp.prev = tp.curr;
-            } else {
-                stepPmm1(m, tp.prev, tp.curr);
-                assembleYlm(m + 1, m, tp.curr, cm, sm);
+            if (m < l_max_new) {
+                stepPmm1(m, prev, curr);   // prev = Q_m^m, curr = Q_{m+1}^m
+                Q_lm_[qIdx(m + 1, m)] = curr;
                 for (int l = m + 2; l <= l_max_new; ++l) {
-                    advanceColumn(m, l, tp.prev, tp.curr);
-                    assembleYlm(l, m, tp.curr, cm, sm);
+                    advanceColumn(m, l, prev, curr);
+                    Q_lm_[qIdx(l, m)] = curr;  // save Q_l^m (copy)
                 }
             }
 
         } else if (l_max_resident_ == m) {
             // -- Existing m at P_m^m only (old l_max == m) --
             if (m < l_max_new) {
-                stepPmm1(m, tp.prev, tp.curr);
-                assembleYlm(m + 1, m, tp.curr, cm, sm);
+                std::vector<double> prev(ng_);
+                std::vector<double> curr = Q_lm_[qIdx(m, m)];  // copy from storage
+                stepPmm1(m, prev, curr);
+                Q_lm_[qIdx(m + 1, m)] = curr;
                 for (int l = m + 2; l <= l_max_new; ++l) {
-                    advanceColumn(m, l, tp.prev, tp.curr);
-                    assembleYlm(l, m, tp.curr, cm, sm);
+                    advanceColumn(m, l, prev, curr);
+                    Q_lm_[qIdx(l, m)] = curr;  // save Q_l^m (copy)
                 }
             }
 
         } else {
-            // -- Existing m with valid (P_{old-1}^m, P_{old}^m) --
-            for (int l = l_max_resident_ + 1; l <= l_max_new; ++l) {
-                advanceColumn(m, l, tp.prev, tp.curr);
-                assembleYlm(l, m, tp.curr, cm, sm);
+            // -- Existing m with full Q_{old-1}^m and Q_{old}^m in Q_lm_ storage --
+            int old_l = l_max_resident_;
+            std::vector<double> prev = Q_lm_[qIdx(old_l - 1, m)];  // copy from storage
+            std::vector<double> curr = Q_lm_[qIdx(old_l, m)];      // copy from storage
+            for (int l = old_l + 1; l <= l_max_new; ++l) {
+                advanceColumn(m, l, prev, curr);
+                Q_lm_[qIdx(l, m)] = curr;  // save Q_l^m (copy)
             }
         }
+
+        // Save cos(mφ)/sin(mφ) for this m.
+        cos_mphi_[static_cast<std::size_t>(m)] = cm;
+        sin_mphi_[static_cast<std::size_t>(m)] = sm;
 
         // Advance cos(m*phi), sin(m*phi) to m+1
         if (m < l_max_new) {
@@ -393,30 +398,48 @@ auto RealSphericalHarmonics::setLMax(int l_max_new) -> void {
     }
 
     l_max_resident_ = l_max_new;
+    ++revision_;
 }
 
-auto RealSphericalHarmonics::get(int l, int m) -> const std::vector<double>& {
+auto RealSphericalHarmonicsEngine::get(int l, int m) const -> std::vector<double> {
     if (l < 0 || std::abs(m) > l) {
         throw std::invalid_argument(
-            std::format("RealSphericalHarmonics::get(): invalid quantum numbers (l={}, m={})", l, m));
+            std::format("RealSphericalHarmonicsEngine::get(): invalid quantum numbers (l={}, m={})", l, m));
     }
     if (mode_ == CacheMode::None) {
         throw std::runtime_error(
-            "RealSphericalHarmonics::get(): not available in CacheMode::None, use compute()");
+            "RealSphericalHarmonicsEngine::get(): not available in CacheMode::None, use compute()");
     }
     if (l > l_max_resident_) {
         throw std::runtime_error(
-            std::format("RealSphericalHarmonics::get(): l={} > l_max_resident_={}, call setLMax({}) first, or use compute()", l, l_max_resident_, l));
+            std::format("RealSphericalHarmonicsEngine::get(): l={} > l_max_resident_={}, call setLMax({}) first, or use compute()", l, l_max_resident_, l));
     }
 
-    int block = l * l + (m + l);
-    return y_lm_[static_cast<std::size_t>(block)];
+    int m_abs = std::abs(m);
+    std::size_t q_idx = static_cast<std::size_t>(l * (l + 1) / 2 + m_abs);
+    const auto& Q = Q_lm_[q_idx];
+
+    if (m == 0) {
+        return Q;  // Y_{l,0} = Q_l^0, no cos/sin factor
+    }
+
+    double sf = std::sqrt(2.0);
+    const auto& cm = cos_mphi_[static_cast<std::size_t>(m_abs)];
+    const auto& sm = sin_mphi_[static_cast<std::size_t>(m_abs)];
+
+    std::vector<double> result(ng_);
+    bool positive = (m > 0);
+    for (std::size_t i = 0; i < ng_; ++i) {
+        double val = sf * Q[i];
+        result[i] = positive ? (val * cm[i]) : (val * sm[i]);
+    }
+    return result;
 }
 
-auto RealSphericalHarmonics::compute(int l, int m) -> std::vector<double> {
+auto RealSphericalHarmonicsEngine::compute(int l, int m) const -> std::vector<double> {
     if (l < 0 || std::abs(m) > l) {
         throw std::invalid_argument(
-            std::format("RealSphericalHarmonics::compute: invalid quantum numbers (l={}, m={})", l, m));
+            std::format("RealSphericalHarmonicsEngine::compute: invalid quantum numbers (l={}, m={})", l, m));
     }
 
     int m_abs = std::abs(m);
@@ -458,7 +481,7 @@ auto RealSphericalHarmonics::compute(int l, int m) -> std::vector<double> {
 //   Q_m^m = Q_0^0 * (-1)^m * prod_{k=1}^{m} sqrt((2k+1)/(2k)) * sin^m(θ)
 // The (-1)^m is the Condon-Shortley phase factor.
 // All intermediate values are O(1) (no overflow at high l).
-auto RealSphericalHarmonics::seedPmm(int m, std::vector<double>& curr) -> void {
+auto RealSphericalHarmonicsEngine::seedPmm(int m, std::vector<double>& curr) const -> void {
     double Q0 = 0.5 / std::sqrt(std::numbers::pi);
     if (m == 0) {
         for (std::size_t i = 0; i < ng_; ++i) curr[i] = Q0;
@@ -477,8 +500,8 @@ auto RealSphericalHarmonics::seedPmm(int m, std::vector<double>& curr) -> void {
 // One step: Q_{m+1}^m = sqrt(2m+3) * cosθ * Q_m^m
 // (the (2m+1) factor cancels when norm is folded into the recurrence)
 // On entry: curr = Q_m^m; on exit: prev = Q_m^m, curr = Q_{m+1}^m
-auto RealSphericalHarmonics::stepPmm1(int m, std::vector<double>& prev,
-                                       std::vector<double>& curr) -> void {
+auto RealSphericalHarmonicsEngine::stepPmm1(int m, std::vector<double>& prev,
+                                       std::vector<double>& curr) const -> void {
     double factor = std::sqrt(2.0 * m + 3.0);
     for (std::size_t i = 0; i < ng_; ++i) {
         prev[i] = curr[i];
@@ -493,9 +516,9 @@ auto RealSphericalHarmonics::stepPmm1(int m, std::vector<double>& prev,
 //   r1 = sqrt((2l-1)(2l+1)(l-m)/(l+m))
 //   r2 = (l+m-1) * sqrt((2l+1)(l-m)(l-m-1)/((2l-3)(l+m)(l+m-1)))
 //   Q_l^m = (cosθ * r1 * Q_{l-1}^m - r2 * Q_{l-2}^m) / (l-m)
-auto RealSphericalHarmonics::advanceColumn(int m, int l,
+auto RealSphericalHarmonicsEngine::advanceColumn(int m, int l,
                                             std::vector<double>& prev,
-                                            std::vector<double>& curr) -> void {
+                                            std::vector<double>& curr) const -> void {
     double r1 = std::sqrt(static_cast<double>((2 * l - 1) * (2 * l + 1) * (l - m))
                          / static_cast<double>(l + m));
     double r2 = (l + m - 1.0)
@@ -509,48 +532,98 @@ auto RealSphericalHarmonics::advanceColumn(int m, int l,
     }
 }
 
-// One step of inverse three-term recurrence for Q_l^m.
-// On entry: prev = Q_{l-1}^m, curr = Q_l^m
-// On exit:  prev = Q_{l-2}^m, curr = Q_{l-1}^m
-//
-//   Q_{l-2}^m = (cosθ * c1 * Q_{l-1}^m - (l-m) * Q_l^m) / c2
-// where c1, c2 are the same coefficients as in advanceColumn.
-auto RealSphericalHarmonics::retreatColumn(int m, int l,
-                                            std::vector<double>& prev,
-                                            std::vector<double>& curr) -> void {
-    double c1 = std::sqrt(static_cast<double>((2*l-1)*(2*l+1)*(l-m))
-                         / static_cast<double>(l+m));
-    double c2 = (l + m - 1.0)
-              * std::sqrt(static_cast<double>((2*l+1)*(l-m)*(l-m-1))
-                         / static_cast<double>((2*l-3)*(l+m)*(l+m-1)));
-    for (std::size_t i = 0; i < ng_; ++i) {
-        double q_lm2 = (cos_theta_[i] * c1 * prev[i] - (l - m) * curr[i]) / c2;
-        curr[i] = prev[i];
-        prev[i] = q_lm2;
-    }
-}
 
-// Assemble Y_{l,m} from Q_l^m(q), write into y_lm_ cache.
-// Q already includes the normalization N_l^m and Condon-Shortley factor (-1)^m,
-// so no extra normFactor or phase is needed.
-//   Y_{l0}     = Q_l^0
-//   Y_{l,±m}  = sqrt(2) * Q_l^m * {cos(mφ), sin(mφ)}
-auto RealSphericalHarmonics::assembleYlm(int l, int m, const std::vector<double>& Q,
-                                           const std::vector<double>& cm,
-                                           const std::vector<double>& sm) -> void {
-    int block = l * l + l;
-    if (m == 0) {
-        for (std::size_t i = 0; i < ng_; ++i)
-            y_lm_[static_cast<std::size_t>(block)][i] = Q[i];
-    } else {
-        double sf = std::sqrt(2.0);
-        for (std::size_t i = 0; i < ng_; ++i) {
-            double val = sf * Q[i];
-            y_lm_[static_cast<std::size_t>(block - m)][i] = val * sm[i];
-            y_lm_[static_cast<std::size_t>(block + m)][i] = val * cm[i];
-        }
+
+// =============================================================================
+//  RealSphericalHarmonicsData  —  lazy y_lm cache over an Engine
+// =============================================================================
+
+/// Lazy cache of assembled Y_lm values for a given RealSphericalHarmonicsEngine.
+/// Does not own the Engine — pass a const Engine& to get() or operator().
+/// The revision-based syncToEngine() detects Engine changes
+/// (reinit / setLMax) and resizes + invalidates the cache automatically.
+class RealSphericalHarmonicsData {
+public:
+    RealSphericalHarmonicsData() = default;
+
+    /// Pre-allocate capacity for y_lm_ entries.  Safe to call before
+    /// any get() — the hint is stored and applied during syncToEngine.
+    auto reserveNg(std::size_t max_ng) -> void {
+        reserved_ng_ = max_ng;
+        for (auto& v : y_lm_) v.reserve(max_ng);
     }
-}
+
+    /// Return Y_lm for all G-vectors from the lazy-assembled cache.
+    /// On first call for each (l,m), delegates to Engine::get() (when
+    /// available: Full mode + l ≤ lMaxResident) or Engine::compute()
+    /// otherwise, and moves the result into the internal cache.  Subsequent
+    /// calls return the cached reference at O(1) cost.
+    /// Works in all CacheModes and for any valid (l,m) pair.
+    auto get(const RealSphericalHarmonicsEngine& e, int l, int m) -> const std::vector<double>& {
+        syncToEngine(e);
+
+        if (l < 0 || std::abs(m) > l) {
+            throw std::invalid_argument(
+                std::format("RealSphericalHarmonicsData::get(): invalid quantum numbers (l={}, m={})", l, m));
+        }
+
+        std::size_t ylm_idx = static_cast<std::size_t>(l * l + (m + l));
+
+        // Grow the outer cache array if this (l,m) ylm_idx is beyond the
+        // range tracked by syncToEngine (e.g. l > lMaxResident).
+        if (ylm_idx >= y_lm_.size()) {
+            auto new_size = ylm_idx + 1;
+            auto old_size = y_lm_.size();
+            y_lm_.resize(new_size);
+            y_lm_valid_.resize(new_size, false);
+            for (auto i = old_size; i < new_size; ++i) {
+                y_lm_[i].reserve(std::max(reserved_ng_, e.ngCapacity()));
+                y_lm_[i].resize(e.ng());
+            }
+        }
+
+        // Lazy assembly: delegate to Engine and move result into cache
+        if (!y_lm_valid_[ylm_idx]) {
+            if (e.mode() == RealSphericalHarmonicsEngine::CacheMode::Full && l <= e.lMaxResident()) {
+                y_lm_[ylm_idx] = e.get(l, m);
+            } else {
+                y_lm_[ylm_idx] = e.compute(l, m);
+            }
+            y_lm_valid_[ylm_idx] = true;
+        }
+
+        return y_lm_[ylm_idx];
+    }
+
+private:
+    mutable std::vector<std::vector<double>> y_lm_;
+    mutable std::vector<bool> y_lm_valid_;
+    mutable std::size_t engine_revision_ = 0;
+    mutable std::size_t ng_cached_ = 0;
+    std::size_t reserved_ng_ = 0;
+
+    /// Invalidate the cache and resize existing entry vectors when the
+    /// Engine has changed (reinit/setLMax).  O(1) hot-path when nothing
+    /// changed.  The outer cache array is grown on-demand in get().
+    void syncToEngine(const RealSphericalHarmonicsEngine& e) const {
+        if (engine_revision_ == e.revision()) return;
+
+        // Invalidate all existing cached values.
+        std::fill(y_lm_valid_.begin(), y_lm_valid_.end(), false);
+
+        // Resize existing entry vectors if ng changed (e.g. after reinit).
+        if (ng_cached_ != e.ng()) {
+            auto ng = e.ng();
+            for (auto& v : y_lm_) {
+                v.reserve(std::max(reserved_ng_, e.ngCapacity()));
+                v.resize(ng);
+            }
+            ng_cached_ = e.ng();
+        }
+
+        engine_revision_ = e.revision();
+    }
+};
 
 
 // =============================================================================
