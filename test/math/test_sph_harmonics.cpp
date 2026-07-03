@@ -427,6 +427,131 @@ auto test_reset_shrink_expand() -> void {
           "grad_phi(l_max,-1) matches pre-shrink after expand");
 }
 
+auto test_data_grad_phi() -> void {
+    std::println("\n=== RealSphericalHarmonicsData with GradPhi ===");
+
+    double eps = 1e-14;
+
+    // ---------- Y_lm default construction still works ----------
+    {
+        double theta = 0.5, phi = 0.3;
+        RealSphericalHarmonicsEngine eng{std::span<const double>(&theta, 1),
+                                         std::span<const double>(&phi, 1), 3};
+        RealSphericalHarmonicsData ylm_data;
+        const auto& y00 = ylm_data.get(eng, 0, 0);
+        check(near(y00[0], 1.0 / (2.0 * std::sqrt(std::numbers::pi)), eps),
+              "[grad_phi test] default Ylm construction still works");
+    }
+
+    // ---------- Construction with Quantity::GradPhi ----------
+    {
+        double theta = 0.7, phi = 0.3;
+        RealSphericalHarmonicsEngine eng{std::span<const double>(&theta, 1),
+                                         std::span<const double>(&phi, 1), 4};
+        RealSphericalHarmonicsData data{RealSphericalHarmonicsData::Quantity::GradPhi};
+
+        // m > 0: matches eng.get_grad_phi()
+        auto gp21 = eng.get_grad_phi(2, 1);
+        const auto& d_gp21 = data.get(eng, 2, 1);
+        check(near(d_gp21[0], gp21[0], eps),
+              "GradPhi Data get(2,1) matches Engine");
+
+        // m < 0: matches eng.get_grad_phi()
+        auto gp2m1 = eng.get_grad_phi(2, -1);
+        const auto& d_gp2m1 = data.get(eng, 2, -1);
+        check(near(d_gp2m1[0], gp2m1[0], eps),
+              "GradPhi Data get(2,-1) matches Engine");
+    }
+
+    // ---------- Cache hit: same address on second call ----------
+    {
+        double theta = 0.7, phi = 0.3;
+        RealSphericalHarmonicsEngine eng{std::span<const double>(&theta, 1),
+                                         std::span<const double>(&phi, 1), 4};
+        RealSphericalHarmonicsData data{RealSphericalHarmonicsData::Quantity::GradPhi};
+
+        const auto& first  = data.get(eng, 3, 2);
+        const auto& second = data.get(eng, 3, 2);
+        check(&first == &second, "GradPhi Data cache hit: same address on second call");
+    }
+
+    // ---------- m = 0 returns zero for any l ----------
+    {
+        double theta = 0.7, phi = 0.3;
+        RealSphericalHarmonicsEngine eng{std::span<const double>(&theta, 1),
+                                         std::span<const double>(&phi, 1), 4};
+        RealSphericalHarmonicsData data{RealSphericalHarmonicsData::Quantity::GradPhi};
+
+        for (int l = 0; l <= 4; ++l) {
+            const auto& gp = data.get(eng, l, 0);
+            check(near(gp[0], 0.0, eps),
+                  std::format("GradPhi Data get({},0) = 0", l));
+        }
+    }
+
+    // ---------- Multiple G-vectors ----------
+    {
+        double theta_arr[] = {0.5, 0.7};
+        double phi_arr[]   = {0.3, 0.6};
+        RealSphericalHarmonicsEngine eng{theta_arr, phi_arr, 4};
+        RealSphericalHarmonicsData data{RealSphericalHarmonicsData::Quantity::GradPhi};
+
+        const auto& gp = data.get(eng, 2, 1);
+        check(gp.size() == 2, "GradPhi Data multi G-vector: size");
+
+        auto direct = eng.get_grad_phi(2, 1);
+        check(near(gp[0], direct[0], eps), "GradPhi Data multi G-vector: point 0");
+        check(near(gp[1], direct[1], eps), "GradPhi Data multi G-vector: point 1");
+    }
+
+    // ---------- Cache invalidated by reinit ----------
+    {
+        double theta_a[] = {0.5};
+        double phi_a[]   = {0.3};
+        double theta_b[] = {1.2};
+        double phi_b[]   = {0.9};
+        RealSphericalHarmonicsEngine eng{theta_a, phi_a, 4};
+        RealSphericalHarmonicsData data{RealSphericalHarmonicsData::Quantity::GradPhi};
+
+        data.get(eng, 2, 1);   // populate cache
+
+        // reinit → setLMax → new grad_phi values
+        eng.reinit(theta_b, phi_b);
+        eng.setLMax(4);
+
+        auto ref = eng.get_grad_phi(2, 1);
+        const auto& cached = data.get(eng, 2, 1);
+        check(near(cached[0], ref[0], eps),
+              "GradPhi Data cache correct after reinit");
+    }
+
+    // ---------- Cache invalidated by setLMax ----------
+    {
+        double theta_arr[] = {0.5, 0.7};
+        double phi_arr[]   = {0.3, 0.6};
+        RealSphericalHarmonicsEngine eng{theta_arr, phi_arr, 4};
+        RealSphericalHarmonicsData data{RealSphericalHarmonicsData::Quantity::GradPhi};
+
+        data.get(eng, 3, 2);   // populate at l_max=4
+
+        eng.setLMax(5);         // expand
+        // entries for l=3, m=2 should remain valid after expand
+        const auto& after = data.get(eng, 3, 2);
+        auto ref = eng.get_grad_phi(3, 2);
+        check(near(after[0], ref[0], eps),
+              "GradPhi Data get(3,2) correct after engine setLMax(5)");
+
+        eng.setLMax(2);         // shrink
+        // After revision change Data invalidates all entries, then refills
+        // via filler_ → eng.get_grad_phi().  (1,1) is within l_max=2, so
+        // it produces a valid value rather than throwing.
+        const auto& gp11 = data.get(eng, 1, 1);
+        auto ref11 = eng.get_grad_phi(1, 1);
+        check(near(gp11[0], ref11[0], eps),
+              "GradPhi Data get(1,1) correct after engine shrink to l_max=2");
+    }
+}
+
 auto main() -> int {
     try {
         std::println("=== Spherical Harmonics Tests ===");
@@ -438,6 +563,7 @@ auto main() -> int {
         test_grad_phi_cache_lifecycle();
         test_get_beyond_lmax();
         test_reset_shrink_expand();
+        test_data_grad_phi();
         std::println("\nAll Spherical Harmonics tests passed!");
         return 0;
     } catch (const std::exception& e) {

@@ -732,30 +732,42 @@ auto RealSphericalHarmonicsEngine::compute(int l, int m) const -> std::vector<do
 
 
 // =============================================================================
-//  RealSphericalHarmonicsData  —  lazy y_lm cache over an Engine
+//  RealSphericalHarmonicsData  —  lazy cache over an Engine
+//
+//  Construct with a Quantity to choose which Engine data to cache.
+//  All quantities share the same unified get() interface; the filling
+//  logic is selected at construction time via a zero-overhead function
+//  pointer (decayed from a captureless lambda).
 // =============================================================================
 
-/// Lazy cache of assembled Y_lm values for a given RealSphericalHarmonicsEngine.
-/// Does not own the Engine — pass a const Engine& to get() or operator().
-/// The revision-based syncToEngine() detects Engine changes
-/// (reinit / setLMax) and resizes + invalidates the cache automatically.
+/// Lazy cache of Engine-derived values (Y_lm, grad_phi, …).
+///
+/// Usage:
+///   RealSphericalHarmonicsData ylm_data;                              // Ylm (default)
+///   RealSphericalHarmonicsData gphi_data{Quantity::GradPhi};         // grad_phi
+///
+///   const auto& y = ylm_data.get(engine, 2, 1);                      // same get() API
+///   const auto& g = gphi_data.get(engine, 2, 1);
 class RealSphericalHarmonicsData {
 public:
-    RealSphericalHarmonicsData() = default;
+    /// Which quantity to cache.  Extend with new entries as needed.
+    enum class Quantity { Ylm, GradPhi };
 
-    /// Pre-allocate capacity for y_lm_ entries.  Safe to call before
+    explicit RealSphericalHarmonicsData(Quantity q = Quantity::Ylm)
+        : filler_(makeFiller(q)) {}
+
+    /// Pre-allocate capacity for cache entries.  Safe to call before
     /// any get() — the hint is stored and applied during syncToEngine.
     auto reserveNg(std::size_t max_ng) -> void {
         reserved_ng_ = max_ng;
-        for (auto& v : y_lm_) v.reserve(max_ng);
+        for (auto& v : cache_) v.reserve(max_ng);
     }
 
-    /// Return Y_lm for all G-vectors from the lazy-assembled cache.
-    /// On first call for each (l,m), delegates to Engine::get() (when
-    /// available: Full mode + l ≤ lMaxResident) or Engine::compute()
-    /// otherwise, and moves the result into the internal cache.  Subsequent
+    /// Return the requested quantity for all G-vectors from the
+    /// lazy-assembled cache.  On first call for each (l,m), delegates to
+    /// the appropriate Engine method (determined by construction-time
+    /// Quantity) and moves the result into the internal cache.  Subsequent
     /// calls return the cached reference at O(1) cost.
-    /// Works in all CacheModes and for any valid (l,m) pair.
     auto get(const RealSphericalHarmonicsEngine& e, int l, int m) -> const std::vector<double>& {
         syncToEngine(e);
 
@@ -764,37 +776,39 @@ public:
                 std::format("RealSphericalHarmonicsData::get(): invalid quantum numbers (l={}, m={})", l, m));
         }
 
-        std::size_t ylm_idx = static_cast<std::size_t>(l * l + (m + l));
+        std::size_t idx = static_cast<std::size_t>(l * l + (m + l));
 
-        // Grow the outer cache array if this (l,m) ylm_idx is beyond the
+        // Grow the outer cache array if this (l,m) idx is beyond the
         // range tracked by syncToEngine (e.g. l > lMaxResident).
-        if (ylm_idx >= y_lm_.size()) {
-            auto new_size = ylm_idx + 1;
-            auto old_size = y_lm_.size();
-            y_lm_.resize(new_size);
-            y_lm_valid_.resize(new_size, false);
+        if (idx >= cache_.size()) {
+            auto new_size = idx + 1;
+            auto old_size = cache_.size();
+            cache_.resize(new_size);
+            valid_.resize(new_size, false);
             for (auto i = old_size; i < new_size; ++i) {
-                y_lm_[i].reserve(std::max(reserved_ng_, e.ngCapacity()));
-                y_lm_[i].resize(e.ng());
+                cache_[i].reserve(std::max(reserved_ng_, e.ngCapacity()));
+                cache_[i].resize(e.ng());
             }
         }
 
-        // Lazy assembly: delegate to Engine and move result into cache
-        if (!y_lm_valid_[ylm_idx]) {
-            if (e.mode() == RealSphericalHarmonicsEngine::CacheMode::Full && l <= e.lMaxResident()) {
-                y_lm_[ylm_idx] = e.get(l, m);
-            } else {
-                y_lm_[ylm_idx] = e.compute(l, m);
-            }
-            y_lm_valid_[ylm_idx] = true;
+        // Lazy assembly: delegate to Engine via the stored filler and
+        // move the result into the cache.
+        if (!valid_[idx]) {
+            cache_[idx] = filler_(e, l, m);
+            valid_[idx] = true;
         }
 
-        return y_lm_[ylm_idx];
+        return cache_[idx];
     }
 
 private:
-    mutable std::vector<std::vector<double>> y_lm_;
-    mutable std::vector<bool> y_lm_valid_;
+    /// Function-pointer type for the filler lambda.
+    /// Captureless lambdas decay to a raw pointer — zero overhead.
+    using Filler = auto(*)(const RealSphericalHarmonicsEngine&, int, int) -> std::vector<double>;
+    Filler filler_;
+
+    mutable std::vector<std::vector<double>> cache_;
+    mutable std::vector<bool> valid_;
     mutable std::size_t engine_revision_ = 0;
     mutable std::size_t ng_cached_ = 0;
     std::size_t reserved_ng_ = 0;
@@ -806,12 +820,12 @@ private:
         if (engine_revision_ == e.revision()) return;
 
         // Invalidate all existing cached values.
-        std::fill(y_lm_valid_.begin(), y_lm_valid_.end(), false);
+        std::fill(valid_.begin(), valid_.end(), false);
 
         // Resize existing entry vectors if ng changed (e.g. after reinit).
         if (ng_cached_ != e.ng()) {
             auto ng = e.ng();
-            for (auto& v : y_lm_) {
+            for (auto& v : cache_) {
                 v.reserve(std::max(reserved_ng_, e.ngCapacity()));
                 v.resize(ng);
             }
@@ -819,6 +833,28 @@ private:
         }
 
         engine_revision_ = e.revision();
+    }
+
+    /// Build the filler lambda for the chosen quantity.
+    /// All filling logic lives here — extend when adding new Quantity values.
+    static auto makeFiller(Quantity q) -> Filler {
+        switch (q) {
+        case Quantity::Ylm:
+            return [](const RealSphericalHarmonicsEngine& e, int l, int m) -> std::vector<double> {
+                if (e.mode() == RealSphericalHarmonicsEngine::CacheMode::Full
+                    && l <= e.lMaxResident())
+                {
+                    return e.get(l, m);
+                }
+                return e.compute(l, m);
+            };
+        case Quantity::GradPhi:
+            return [](const RealSphericalHarmonicsEngine& e, int l, int m) -> std::vector<double> {
+                // get_grad_phi validates mode and l-range itself,
+                // throwing std::runtime_error on failure.
+                return e.get_grad_phi(l, m);
+            };
+        }
     }
 };
 
