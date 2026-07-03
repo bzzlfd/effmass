@@ -106,6 +106,70 @@ auto legendreP(int l, int m_abs, double theta) -> double {
 }
 
 
+// =============================================================================
+//  QRecurrence — normalized Legendre (Q_l^m) column-wise recurrence
+//
+//  Three-step protocol shared by Q_l^m and its derivatives:
+//    seed    →  U_m^m          (top of the column)
+//    step1   →  U_{m+1}^m      (first step away from the diagonal)
+//    advance →  U_l^m  (l≥m+2) (upward recurrence within a column)
+//
+//  The struct owns no storage; it reads trig data through spans and
+//  mutates externally-owned buffers (Q_lm_ or local temporaries).
+// =============================================================================
+struct QRecurrence {
+    std::span<const double> cos_theta;
+    std::span<const double> sin_theta;
+
+    /// Seed Q_m^m = (-1)^m / (2√π) · ∏_{k=1}^m √((2k+1)/(2k)) · sin^m(θ)
+    auto seed(int m, std::vector<double>& curr) const -> void {
+        auto ng = cos_theta.size();
+        double Q0 = 0.5 / std::sqrt(std::numbers::pi);
+        if (m == 0) {
+            for (std::size_t i = 0; i < ng; ++i) curr[i] = Q0;
+        } else {
+            double coeff = Q0;
+            if (m % 2 != 0) coeff = -coeff;  // Condon-Shortley (-1)^m
+            for (int k = 1; k <= m; ++k)
+                coeff *= std::sqrt(static_cast<double>(2 * k + 1) / (2 * k));
+            for (std::size_t i = 0; i < ng; ++i)
+                curr[i] = coeff * std::pow(sin_theta[i], m);
+        }
+    }
+
+    /// One step: Q_{m+1}^m = √(2m+3) · cosθ · Q_m^m
+    auto step1(int m, std::vector<double>& prev,
+               std::vector<double>& curr) const -> void {
+        auto ng = cos_theta.size();
+        double factor = std::sqrt(2.0 * m + 3.0);
+        for (std::size_t i = 0; i < ng; ++i) {
+            prev[i] = curr[i];
+            curr[i] = factor * cos_theta[i] * curr[i];
+        }
+    }
+
+    /// Forward three-term recurrence for Q_l^m (normalized).
+    /// On entry: prev = Q_{l-2}^m, curr = Q_{l-1}^m
+    /// On exit:  prev = Q_{l-1}^m, curr = Q_l^m
+    auto advance(int m, int l, std::vector<double>& prev,
+                 std::vector<double>& curr) const -> void {
+        auto ng = cos_theta.size();
+        double r1 = (2.0 * l - 1.0)
+                  * std::sqrt(((2.0 * l + 1.0) * (l - m))
+                             / ((2.0 * l - 1.0) * (l + m)));
+        double r2 = (l + m - 1.0)
+                  * std::sqrt(((2.0 * l + 1.0) * (l - m) * (l - m - 1))
+                             / ((2.0 * l - 3.0) * (l + m) * (l + m - 1)));
+        double denom = 1.0 / (l - m);
+        for (std::size_t i = 0; i < ng; ++i) {
+            double next = (cos_theta[i] * r1 * curr[i] - r2 * prev[i]) * denom;
+            prev[i] = curr[i];
+            curr[i] = next;
+        }
+    }
+};
+
+
 // Vectorized spherical harmonics evaluator over K-point G-vectors.
 // Q_l^m (normalised Legendre) is the canonical permanent form;
 // Y_lm is a derived quantity assembled from Q + cos/sin tables.
@@ -171,6 +235,9 @@ private:
     std::vector<double> sin_theta_;
     std::vector<double> cos_phi_;
     std::vector<double> sin_phi_;
+    // === Q recurrence engine ===
+    QRecurrence q_recur_{};
+
     // === Q_l^m permanent storage ===
     // Q_lm_ is the canonical Legendre storage (includes normalization
     // and Condon-Shortley phase).
@@ -181,20 +248,6 @@ private:
     // Precomputed during setLMax() for the full m range.
     std::vector<std::vector<double>> cos_mphi_;
     std::vector<std::vector<double>> sin_mphi_;
-
-    //
-    // -- Legendre recurrence helpers --
-    //
-
-    // Seed Q_m^m into curr (normalized).
-    auto seedPmm(int m, std::vector<double>& curr) const -> void;
-
-    // One step: Q_{m+1}^m from Q_m^m.
-    auto stepPmm1(int m, std::vector<double>& prev, std::vector<double>& curr) const -> void;
-
-    // One step of forward three-term recurrence for Q_l^m (normalized).
-    auto advanceColumn(int m, int l,
-                       std::vector<double>& prev, std::vector<double>& curr) const -> void;
 
 };
 
@@ -227,6 +280,10 @@ RealSphericalHarmonicsEngine::RealSphericalHarmonicsEngine(
         cos_phi_[i] = std::cos(phi_[i]);
         sin_phi_[i] = std::sin(phi_[i]);
     }
+
+    // Bind recurrence engine to trig arrays.
+    q_recur_ = QRecurrence{std::span<const double>(cos_theta_.data(), cos_theta_.size()),
+                           std::span<const double>(sin_theta_.data(), sin_theta_.size())};
 
     if (mode_ == CacheMode::Full) setLMax(l_max_resident);
 }
@@ -265,6 +322,10 @@ auto RealSphericalHarmonicsEngine::reinit(
         cos_phi_[i] = std::cos(phi[i]);
         sin_phi_[i] = std::sin(phi[i]);
     }
+
+    // Rebind recurrence engine to trig arrays (data ptr may have moved).
+    q_recur_ = QRecurrence{std::span<const double>(cos_theta_.data(), cos_theta_.size()),
+                           std::span<const double>(sin_theta_.data(), sin_theta_.size())};
 
     // Invalidate Q and cos/sin tables — they are no longer consistent
     // with the new trig data.
@@ -347,14 +408,14 @@ auto RealSphericalHarmonicsEngine::setLMax(int l_max_new) -> void {
             // -- New m column: seed from scratch into local variables,
             //    save each value to Q_lm_ as we go. --
             std::vector<double> prev(ng_), curr(ng_);
-            seedPmm(m, curr);
+            q_recur_.seed(m, curr);
             Q_lm_[qIdx(m, m)] = curr;   // save Q_m^m (copy)
 
             if (m < l_max_new) {
-                stepPmm1(m, prev, curr);   // prev = Q_m^m, curr = Q_{m+1}^m
+                q_recur_.step1(m, prev, curr);   // prev = Q_m^m, curr = Q_{m+1}^m
                 Q_lm_[qIdx(m + 1, m)] = curr;
                 for (int l = m + 2; l <= l_max_new; ++l) {
-                    advanceColumn(m, l, prev, curr);
+                    q_recur_.advance(m, l, prev, curr);
                     Q_lm_[qIdx(l, m)] = curr;  // save Q_l^m (copy)
                 }
             }
@@ -364,10 +425,10 @@ auto RealSphericalHarmonicsEngine::setLMax(int l_max_new) -> void {
             if (m < l_max_new) {
                 std::vector<double> prev(ng_);
                 std::vector<double> curr = Q_lm_[qIdx(m, m)];  // copy from storage
-                stepPmm1(m, prev, curr);
+                q_recur_.step1(m, prev, curr);
                 Q_lm_[qIdx(m + 1, m)] = curr;
                 for (int l = m + 2; l <= l_max_new; ++l) {
-                    advanceColumn(m, l, prev, curr);
+                    q_recur_.advance(m, l, prev, curr);
                     Q_lm_[qIdx(l, m)] = curr;  // save Q_l^m (copy)
                 }
             }
@@ -378,7 +439,7 @@ auto RealSphericalHarmonicsEngine::setLMax(int l_max_new) -> void {
             std::vector<double> prev = Q_lm_[qIdx(old_l - 1, m)];  // copy from storage
             std::vector<double> curr = Q_lm_[qIdx(old_l, m)];      // copy from storage
             for (int l = old_l + 1; l <= l_max_new; ++l) {
-                advanceColumn(m, l, prev, curr);
+                q_recur_.advance(m, l, prev, curr);
                 Q_lm_[qIdx(l, m)] = curr;  // save Q_l^m (copy)
             }
         }
@@ -446,13 +507,13 @@ auto RealSphericalHarmonicsEngine::compute(int l, int m) const -> std::vector<do
 
     // Q_l^m = N_l^m * P_l^m already includes normalization
     std::vector<double> q_curr(ng_);
-    seedPmm(m_abs, q_curr);
+    q_recur_.seed(m_abs, q_curr);
 
     if (l > m_abs) {
         std::vector<double> q_prev(ng_);
-        stepPmm1(m_abs, q_prev, q_curr);
+        q_recur_.step1(m_abs, q_prev, q_curr);
         for (int n = m_abs + 2; n <= l; ++n)
-            advanceColumn(m_abs, n, q_prev, q_curr);
+            q_recur_.advance(m_abs, n, q_prev, q_curr);
     }
 
     std::vector<double> result(ng_);
@@ -470,66 +531,6 @@ auto RealSphericalHarmonicsEngine::compute(int l, int m) const -> std::vector<do
     }
 
     return result;
-}
-
-
-// =============================================================================
-//  Private helpers — Legendre recurrence
-// =============================================================================
-
-// Seed Q_m^m into curr:  Q_0^0 = 1/(2√π), then
-//   Q_m^m = Q_0^0 * (-1)^m * prod_{k=1}^{m} sqrt((2k+1)/(2k)) * sin^m(θ)
-// The (-1)^m is the Condon-Shortley phase factor.
-// All intermediate values are O(1) (no overflow at high l).
-auto RealSphericalHarmonicsEngine::seedPmm(int m, std::vector<double>& curr) const -> void {
-    double Q0 = 0.5 / std::sqrt(std::numbers::pi);
-    if (m == 0) {
-        for (std::size_t i = 0; i < ng_; ++i) curr[i] = Q0;
-    } else {
-        double coeff = Q0;
-        // Condon-Shortley phase: (-1)^m
-        if (m % 2 != 0) coeff = -coeff;
-        for (int k = 1; k <= m; ++k) {
-            coeff *= std::sqrt(static_cast<double>(2 * k + 1) / static_cast<double>(2 * k));
-        }
-        for (std::size_t i = 0; i < ng_; ++i)
-            curr[i] = coeff * std::pow(sin_theta_[i], m);
-    }
-}
-
-// One step: Q_{m+1}^m = sqrt(2m+3) * cosθ * Q_m^m
-// (the (2m+1) factor cancels when norm is folded into the recurrence)
-// On entry: curr = Q_m^m; on exit: prev = Q_m^m, curr = Q_{m+1}^m
-auto RealSphericalHarmonicsEngine::stepPmm1(int m, std::vector<double>& prev,
-                                       std::vector<double>& curr) const -> void {
-    double factor = std::sqrt(2.0 * m + 3.0);
-    for (std::size_t i = 0; i < ng_; ++i) {
-        prev[i] = curr[i];
-        curr[i] = factor * cos_theta_[i] * curr[i];
-    }
-}
-
-// One step of forward three-term recurrence for Q_l^m (normalized).
-// On entry: prev = Q_{l-2}^m, curr = Q_{l-1}^m
-// On exit:  prev = Q_{l-1}^m, curr = Q_l^m
-//
-//   r1 = sqrt((2l-1)(2l+1)(l-m)/(l+m))
-//   r2 = (l+m-1) * sqrt((2l+1)(l-m)(l-m-1)/((2l-3)(l+m)(l+m-1)))
-//   Q_l^m = (cosθ * r1 * Q_{l-1}^m - r2 * Q_{l-2}^m) / (l-m)
-auto RealSphericalHarmonicsEngine::advanceColumn(int m, int l,
-                                            std::vector<double>& prev,
-                                            std::vector<double>& curr) const -> void {
-    double r1 = std::sqrt(static_cast<double>((2 * l - 1) * (2 * l + 1) * (l - m))
-                         / static_cast<double>(l + m));
-    double r2 = (l + m - 1.0)
-              * std::sqrt(static_cast<double>((2 * l + 1) * (l - m) * (l - m - 1))
-                         / static_cast<double>((2 * l - 3) * (l + m) * (l + m - 1)));
-    double denom = 1.0 / static_cast<double>(l - m);
-    for (std::size_t i = 0; i < ng_; ++i) {
-        double next = (cos_theta_[i] * r1 * curr[i] - r2 * prev[i]) * denom;
-        prev[i] = curr[i];
-        curr[i] = next;
-    }
 }
 
 
