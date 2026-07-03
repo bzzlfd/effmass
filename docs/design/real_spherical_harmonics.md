@@ -153,6 +153,68 @@ auto reinit(theta, phi, l_max_resident) -> void;
 
 三层初始化对应三个不同的可变层级：trig 数组不可变、θ/φ 数据不可变但引用可失效、缓存可伸缩。
 
+---
+
+## Q_lm_grad_phi_ 缓存设计
+
+`Q_lm_grad_phi_` 是 `get_grad_phi()` 的惰性缓存，存储 `R_l^m = Q_l^m / sinθ`，用于计算 `(1/sinθ)·∂Y_lm/∂φ`。
+
+### 存储格式
+
+```cpp
+mutable std::optional<std::vector<std::vector<double>>> Q_lm_grad_phi_;
+```
+
+- **`optional` 作为有效性标志**：`std::nullopt` 表示未初始化或已失效；engaged 状态表示缓存数据就绪。
+- **索引方案**：与 `Q_lm_` 相同，`l*(l+1)/2 + m_abs`。
+- **m=0 条目**：空 `vector`（默认构造，无堆分配），`fillGradPhiCache()` 跳过不填充。
+- 没有单独的 `valid_` 布尔标志——`optional` 的 engaged/disengaged 状态就是有效性指示器。
+
+### 生命周期
+
+| 函数 | Q_lm_grad_phi_ 操作 | 原因 |
+|------|---------------------|------|
+| `reinit()` | `.reset()` |  θ/φ 数据改变，缓存内容全部失效 |
+| `reserveNg()` | 如果缓存已填充，对 inner vectors 做 `reserve()`；否则 no-op | 只影响 capacity，不影响数据 |
+| `setLMax()` 扩展 | **no-op**（惰性） | 下次 `get_grad_phi()` 发现 `optional` size 与 Q_lm_ 不匹配 → 自动填充 |
+| `setLMax()` 收缩 | **outer vector resize 至新大小**（inner vectors 数据保留） | 与 Q_lm_ 设计一致——低 l/m 的 R_l^m 数据保留，避免惰性重建误判 size 不匹配而触发全量重建 |
+
+`get_grad_phi()` 首次调用或检测到 size 不匹配时，调用 `fillGradPhiCache()`：
+
+```
+fillGradPhiCache()
+  ├── Q_lm_grad_phi_.emplace(total_size)   ← 分配 outer vector
+  ├── m_abs=0 的 inner vector 保持空（无堆分配）
+  ├── for l = 1..l_max_resident_:
+  │     for m_abs = 1..l:
+  │       reserve(ng_capacity) + resize(ng_)  ← 只为 m≥1 预分配
+  └── for m = 1..l_max_resident_:
+        └── GradPhiRecurrence::seed → step1 → advance 填充整列
+```
+
+### GradPhiRecurrence 结构体
+
+与 `QRecurrence` 接口相同，`step1`/`advance` 代码相同，仅有 `seed` 不同：
+
+| | QRecurrence::seed | GradPhiRecurrence::seed |
+|---|---|---|
+| m=0 | `1/(2√π)` | `0`（结果始终为 0） |
+| m=1 | `-1/(2√π) · √(3/2) · sinθ` | `-1/(2√π) · √(3/2)`（常数，θ=0 处有限） |
+| m>=2 | `(-1)^m/(2√π) · ∏_{k=1}^{m} √((2k+1)/(2k)) · sin^m(θ)` | `(-1)^m/(2√π) · ∏_{k=1}^{m} √((2k+1)/(2k)) · sin^(m-1)(θ)`（θ=0 → 0） |
+
+### 与纯 ∂Y/∂φ 的比较
+
+| | ∂Y/∂φ (`get_dphi`，已移除) | (1/sinθ)·∂Y/∂φ (`get_grad_phi`) |
+|---|---|---|
+| 需要的数据 | Q_l^m | R_l^m = Q_l^m / sinθ |
+| 缓存 | 无（可直接用 Q_lm_） | 有（Q_lm_grad_phi_，惰性分配） |
+| 递推 | 无 | GradPhiRecurrence（seed 少一个 sinθ） |
+| θ=0，m=0 | 0 | 0 |
+| θ=0，|m|=1 | 0 | **有限非零** |
+| θ=0，|m|>=2 | 0 | 0 |
+
+---
+
 
 
 
