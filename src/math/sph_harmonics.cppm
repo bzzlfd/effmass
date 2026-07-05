@@ -240,6 +240,98 @@ struct GradPhiRecurrence {
 };
 
 
+// =============================================================================
+//  GradThetaRecurrence — dQ_l^m/dθ via QRecurrence differentiation
+//
+//  Used by RealSphericalHarmonicsEngine::get_grad_theta to compute
+//  ∂Y_lm/∂θ.  dQ_l^m/dθ is obtained by differentiating the QRecurrence
+//  seed / step1 / advance formulas column-wise with respect to θ:
+//
+//    seed:  Q_m^m   = C_m · sin^m(θ)
+//           → dQ_m^m/dθ = m · C_m · sin^{m-1}(θ) · cosθ
+//              (m=0 → 0,  m=1 → C_1·cosθ finite at θ=0)
+//
+//    step1: Q_{m+1}^m = √(2m+3) · cosθ · Q_m^m
+//           → dQ_{m+1}^m/dθ = √(2m+3)·(-sinθ·Q_m^m + cosθ·dQ_m^m/dθ)
+//
+//    advance:  same r1/r2/denom as QRecurrence::advance,
+//              with Q_{l-1}^m read from the resident Q_lm_ cache:
+//           → dQ_l^m/dθ = (cosθ·r1·dQ_{l-1}^m/dθ - sinθ·r1·Q_{l-1}^m
+//                          - r2·dQ_{l-2}^m/dθ) / (l-m)
+//
+//  Requires only Q_lm_ (the permanent resident Legendre cache).
+//  No dependence on the lazy Q_lm_grad_phi_ cache.
+// =============================================================================
+struct GradThetaRecurrence {
+    std::span<const double> cos_theta;
+    std::span<const double> sin_theta;
+    const std::vector<std::vector<double>>& Q_lm_;
+
+    auto seed(int m, std::vector<double>& curr) const -> void {
+        auto ng = cos_theta.size();
+        if (m == 0) {
+            for (std::size_t i = 0; i < ng; ++i) curr[i] = 0.0;
+        } else {
+            double Q0 = 0.5 / std::sqrt(std::numbers::pi);
+            double coeff = Q0;
+            if (m % 2 != 0) coeff = -coeff;  // Condon-Shortley (-1)^m
+            for (int k = 1; k <= m; ++k)
+                coeff *= std::sqrt(static_cast<double>(2 * k + 1) / (2 * k));
+            // dQ_m^m/dθ = m · C_m · sin^{m-1}(θ) · cosθ
+            if (m == 1) {
+                // sin^0 = 1: finite at θ=0
+                for (std::size_t i = 0; i < ng; ++i) curr[i] = coeff * cos_theta[i];
+            } else {
+                // sin^{m-1}(θ) · cosθ → 0 at θ=0 for m ≥ 2
+                double factor = static_cast<double>(m) * coeff;
+                for (std::size_t i = 0; i < ng; ++i)
+                    curr[i] = factor * std::pow(sin_theta[i], m - 1) * cos_theta[i];
+            }
+        }
+    }
+
+    auto step1(int m, std::vector<double>& prev,
+               std::vector<double>& curr) const -> void {
+        auto ng = cos_theta.size();
+        auto qIdx = [](int l, int m_abs) -> std::size_t {
+            return static_cast<std::size_t>(l * (l + 1) / 2 + m_abs);
+        };
+        double factor = std::sqrt(2.0 * m + 3.0);
+        const auto& Q_mm = Q_lm_[qIdx(m, m)];
+        for (std::size_t i = 0; i < ng; ++i) {
+            prev[i] = curr[i];
+            // dQ_{m+1}^m/dθ = √(2m+3) · (-sinθ · Q_m^m + cosθ · dQ_m^m/dθ)
+            curr[i] = factor * (-sin_theta[i] * Q_mm[i] + cos_theta[i] * curr[i]);
+        }
+    }
+
+    auto advance(int m, int l, std::vector<double>& prev,
+                 std::vector<double>& curr) const -> void {
+        auto ng = cos_theta.size();
+        auto qIdx = [](int l, int m_abs) -> std::size_t {
+            return static_cast<std::size_t>(l * (l + 1) / 2 + m_abs);
+        };
+        double r1 = (2.0 * l - 1.0)
+                  * std::sqrt(((2.0 * l + 1.0) * (l - m))
+                             / ((2.0 * l - 1.0) * (l + m)));
+        double r2 = (l + m - 1.0)
+                  * std::sqrt(((2.0 * l + 1.0) * (l - m) * (l - m - 1))
+                             / ((2.0 * l - 3.0) * (l + m) * (l + m - 1)));
+        double denom = 1.0 / (l - m);
+        const auto& Q_l1m = Q_lm_[qIdx(l - 1, m)];
+        for (std::size_t i = 0; i < ng; ++i) {
+            // dQ_l^m/dθ = (cosθ·r1·dQ_{l-1}^m/dθ - sinθ·r1·Q_{l-1}^m
+            //              - r2·dQ_{l-2}^m/dθ) / (l-m)
+            double next = (cos_theta[i] * r1 * curr[i]
+                           - sin_theta[i] * r1 * Q_l1m[i]
+                           - r2 * prev[i]) * denom;
+            prev[i] = curr[i];
+            curr[i] = next;
+        }
+    }
+};
+
+
 // Vectorized spherical harmonics evaluator over K-point G-vectors.
 // Q_l^m (normalised Legendre) is the canonical permanent form;
 // Y_lm is a derived quantity assembled from Q + cos/sin tables.
@@ -283,6 +375,16 @@ public:
     ///   m>0  →  -m · √2 · R_l^m · sin(mφ)
     ///   m<0  →  |m| · √2 · R_l^{|m|} · cos(|m|φ)
     auto get_grad_phi(int l, int m) const -> std::vector<double>;
+
+    /// Return ∂Y_lm/∂θ for all G-vectors.
+    /// Lazy-fills the Q_lm_grad_theta_ cache on first call.
+    /// Requires CacheMode::Full and l <= l_max_resident.
+    ///
+    /// Formula (dQ_l^m/dθ via analytic differentiation):
+    ///   m=0  →  dQ_l^0/dθ = sqrt(l(l+1)) · Q_l^1
+    ///   m>0  →  √2 · dQ_l^m/dθ · cos(mφ)
+    ///   m<0  →  √2 · dQ_l^{|m|}/dθ · sin(|m|φ)
+    auto get_grad_theta(int l, int m) const -> std::vector<double>;
 
     /// Compute Y_lm on the fly. Works in any mode, for any (l,m).
     /// Returns by value (no persistent cache).
@@ -338,6 +440,15 @@ private:
 
     // Fill Q_lm_grad_phi_ from scratch using GradPhiRecurrence.
     void fillGradPhiCache() const;
+
+    // === Q_lm_grad_theta_ cache for ∂Y/∂θ ===
+    // Lazy-filled by get_grad_theta() on first call.
+    // Same triangular index as Q_lm_ (l*(l+1)/2 + m_abs).
+    // All entries (m_abs ≥ 0) are filled — dQ_l^0/dθ is non-zero for l ≥ 1.
+    mutable std::optional<std::vector<std::vector<double>>> Q_lm_grad_theta_;
+
+    // Fill Q_lm_grad_theta_ from scratch using GradThetaRecurrence.
+    void fillGradThetaCache() const;
 
 };
 
@@ -421,6 +532,7 @@ auto RealSphericalHarmonicsEngine::reinit(
     // consistent with the new trig data.
     l_max_resident_ = -1;
     Q_lm_grad_phi_.reset();
+    Q_lm_grad_theta_.reset();
     ++revision_;
 }
 
@@ -436,6 +548,9 @@ auto RealSphericalHarmonicsEngine::reserveNg(int max_ng) -> void {
         for (auto& v : sin_mphi_) v.reserve(n);
         if (Q_lm_grad_phi_) {
             for (auto& v : *Q_lm_grad_phi_) v.reserve(n);
+        }
+        if (Q_lm_grad_theta_) {
+            for (auto& v : *Q_lm_grad_theta_) v.reserve(n);
         }
     }
 }
@@ -461,6 +576,10 @@ auto RealSphericalHarmonicsEngine::setLMax(int l_max_new) -> void {
             // Same triangular total as Q_lm_: (L+1)(L+2)/2.
             std::size_t new_total = static_cast<std::size_t>(l_max_new + 1) * (l_max_new + 2) / 2;
             Q_lm_grad_phi_->resize(new_total);
+        }
+        if (Q_lm_grad_theta_) {
+            std::size_t new_total = static_cast<std::size_t>(l_max_new + 1) * (l_max_new + 2) / 2;
+            Q_lm_grad_theta_->resize(new_total);
         }
         l_max_resident_ = l_max_new;
         ++revision_;
@@ -693,6 +812,97 @@ void RealSphericalHarmonicsEngine::fillGradPhiCache() const {
     }
 }
 
+auto RealSphericalHarmonicsEngine::get_grad_theta(int l, int m) const -> std::vector<double> {
+    if (l < 0 || std::abs(m) > l) {
+        throw std::invalid_argument(
+            std::format("RealSphericalHarmonicsEngine::get_grad_theta(): invalid quantum numbers (l={}, m={})", l, m));
+    }
+    if (mode_ == CacheMode::None) {
+        throw std::runtime_error(
+            "RealSphericalHarmonicsEngine::get_grad_theta(): not available in CacheMode::None, use compute()");
+    }
+    if (l > l_max_resident_) {
+        throw std::runtime_error(
+            std::format("RealSphericalHarmonicsEngine::get_grad_theta(): l={} > l_max_resident_={}, call setLMax({}) first, or use compute()", l, l_max_resident_, l));
+    }
+
+    // Lazy-fill entire cache on first call (or after invalidation).
+    // Same triangular size as Q_lm_.
+    std::size_t expected_total = static_cast<std::size_t>((l_max_resident_ + 1) * (l_max_resident_ + 2) / 2);
+    if (!Q_lm_grad_theta_ || Q_lm_grad_theta_->size() != expected_total) {
+        fillGradThetaCache();
+    }
+
+    int m_abs = std::abs(m);
+    std::size_t idx = static_cast<std::size_t>(l * (l + 1) / 2 + m_abs);
+    const auto& dQ = (*Q_lm_grad_theta_)[idx];   // dQ_l^{m_abs}/dθ
+
+    double sf = std::sqrt(2.0);
+    const auto& cm = cos_mphi_[static_cast<std::size_t>(m_abs)];
+    const auto& sm = sin_mphi_[static_cast<std::size_t>(m_abs)];
+
+    std::vector<double> result(ng_);
+    if (m == 0) {
+        // ∂Y_l0/∂θ = dQ_l^0/dθ
+        result = dQ;
+    } else if (m > 0) {
+        // ∂Y_lm/∂θ = √2 · dQ_l^m/dθ · cos(mφ)
+        for (std::size_t i = 0; i < ng_; ++i) {
+            result[i] = sf * dQ[i] * cm[i];
+        }
+    } else {
+        // ∂Y_lm/∂θ = √2 · dQ_l^{|m|}/dθ · sin(|m|φ)
+        for (std::size_t i = 0; i < ng_; ++i) {
+            result[i] = sf * dQ[i] * sm[i];
+        }
+    }
+    return result;
+}
+
+void RealSphericalHarmonicsEngine::fillGradThetaCache() const {
+    // Only depends on Q_lm_ (resident cache) — no dependency on grad_phi.
+    GradThetaRecurrence grad_recur{
+        std::span<const double>(cos_theta_.data(), cos_theta_.size()),
+        std::span<const double>(sin_theta_.data(), sin_theta_.size()),
+        Q_lm_};
+
+    // Same triangular total as Q_lm_: (L+1)(L+2)/2.
+    std::size_t total = static_cast<std::size_t>((l_max_resident_ + 1) * (l_max_resident_ + 2) / 2);
+    auto& cache = Q_lm_grad_theta_.emplace(total);
+    auto ng = ng_;
+    auto ng_cap = cos_theta_.capacity();
+
+    // Same compact triangular index as Q_lm_.
+    auto qIdx = [](int l, int m_abs) -> std::size_t {
+        return static_cast<std::size_t>(l * (l + 1) / 2 + m_abs);
+    };
+
+    // Pre-allocate ALL inner vectors (m_abs ≥ 0) — dQ_l^0/dθ is non-zero for l ≥ 1.
+    for (int l = 0; l <= l_max_resident_; ++l) {
+        for (int m_abs = 0; m_abs <= l; ++m_abs) {
+            auto& v = cache[qIdx(l, m_abs)];
+            v.reserve(ng_cap);
+            v.resize(ng);
+        }
+    }
+
+    // Column-wise recurrence: same pattern as fillGradPhiCache.
+    for (int m = 0; m <= l_max_resident_; ++m) {
+        std::vector<double> prev(ng), curr(ng);
+        grad_recur.seed(m, curr);
+        cache[qIdx(m, m)] = curr;               // save dQ_m^m/dθ (copy)
+
+        if (m < l_max_resident_) {
+            grad_recur.step1(m, prev, curr);
+            cache[qIdx(m + 1, m)] = curr;       // save dQ_{m+1}^m/dθ (copy)
+            for (int l = m + 2; l <= l_max_resident_; ++l) {
+                grad_recur.advance(m, l, prev, curr);
+                cache[qIdx(l, m)] = curr;       // save dQ_l^m/dθ (copy)
+            }
+        }
+    }
+}
+
 auto RealSphericalHarmonicsEngine::compute(int l, int m) const -> std::vector<double> {
     if (l < 0 || std::abs(m) > l) {
         throw std::invalid_argument(
@@ -751,7 +961,7 @@ auto RealSphericalHarmonicsEngine::compute(int l, int m) const -> std::vector<do
 class RealSphericalHarmonicsData {
 public:
     /// Which quantity to cache.  Extend with new entries as needed.
-    enum class Quantity { Ylm, GradPhi };
+    enum class Quantity { Ylm, GradPhi, GradTheta };
 
     explicit RealSphericalHarmonicsData(Quantity q = Quantity::Ylm)
         : filler_(makeFiller(q)) {}
@@ -853,6 +1063,10 @@ private:
                 // get_grad_phi validates mode and l-range itself,
                 // throwing std::runtime_error on failure.
                 return e.get_grad_phi(l, m);
+            };
+        case Quantity::GradTheta:
+            return [](const RealSphericalHarmonicsEngine& e, int l, int m) -> std::vector<double> {
+                return e.get_grad_theta(l, m);
             };
         }
     }
