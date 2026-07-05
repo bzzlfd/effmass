@@ -483,8 +483,7 @@ RealSphericalHarmonicsEngine::RealSphericalHarmonicsEngine(
     }
 
     // Bind recurrence engine to trig arrays.
-    q_recur_ = QRecurrence{std::span<const double>(cos_theta_.data(), cos_theta_.size()),
-                           std::span<const double>(sin_theta_.data(), sin_theta_.size())};
+    q_recur_ = QRecurrence{cos_theta_, sin_theta_};
 
     if (mode_ == CacheMode::Full) setLMax(l_max_resident);
 }
@@ -525,8 +524,7 @@ auto RealSphericalHarmonicsEngine::reinit(
     }
 
     // Rebind recurrence engine to trig arrays (data ptr may have moved).
-    q_recur_ = QRecurrence{std::span<const double>(cos_theta_.data(), cos_theta_.size()),
-                           std::span<const double>(sin_theta_.data(), sin_theta_.size())};
+    q_recur_ = QRecurrence{cos_theta_, sin_theta_};
 
     // Invalidate Q, cos/sin, and grad_phi caches — they are no longer
     // consistent with the new trig data.
@@ -770,9 +768,7 @@ auto RealSphericalHarmonicsEngine::get_grad_phi(int l, int m) const -> std::vect
 }
 
 void RealSphericalHarmonicsEngine::fillGradPhiCache() const {
-    GradPhiRecurrence grad_recur{
-        std::span<const double>(cos_theta_.data(), cos_theta_.size()),
-        std::span<const double>(sin_theta_.data(), sin_theta_.size())};
+    GradPhiRecurrence grad_recur{cos_theta_, sin_theta_};
 
     // Same triangular total as Q_lm_: (L+1)(L+2)/2.
     std::size_t total = static_cast<std::size_t>((l_max_resident_ + 1) * (l_max_resident_ + 2) / 2);
@@ -861,10 +857,7 @@ auto RealSphericalHarmonicsEngine::get_grad_theta(int l, int m) const -> std::ve
 
 void RealSphericalHarmonicsEngine::fillGradThetaCache() const {
     // Only depends on Q_lm_ (resident cache) — no dependency on grad_phi.
-    GradThetaRecurrence grad_recur{
-        std::span<const double>(cos_theta_.data(), cos_theta_.size()),
-        std::span<const double>(sin_theta_.data(), sin_theta_.size()),
-        Q_lm_};
+    GradThetaRecurrence grad_recur{cos_theta_, sin_theta_, Q_lm_};
 
     // Same triangular total as Q_lm_: (L+1)(L+2)/2.
     std::size_t total = static_cast<std::size_t>((l_max_resident_ + 1) * (l_max_resident_ + 2) / 2);
