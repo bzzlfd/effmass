@@ -79,7 +79,17 @@ void Hamiltonian::Callable::operator()(
     std::span<const std::complex<double>> psi,
     std::span<std::complex<double>> hpsi) const
 {
-    const auto& kv = parent_->gkk().loadKPoint(ikpt_);
+    // Guard: ensure GKK's internal k-point data hasn't been externally
+    // mutated since construction (the Ylm engine was built from theta/phi
+    // at that time and would be inconsistent otherwise).
+    if (parent_->gkk().current_ikpt() != ikpt_)
+        throw std::runtime_error(
+            "Callable: GKK k-point changed externally — expected "
+            + std::to_string(ikpt_) + ", got "
+            + std::to_string(parent_->gkk().current_ikpt()));
+
+    // Guard passed — currentData() returns the (verified) k-point data.
+    const auto& kv = parent_->gkk().currentData();
 
     // --- kinetic-energy contribution ------------------------------------------
     //  T|ψ⟩[ig]  +=  kinetic[ig] * ψ[ig]
