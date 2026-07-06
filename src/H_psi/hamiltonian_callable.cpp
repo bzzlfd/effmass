@@ -13,7 +13,6 @@ Hamiltonian::Callable::Callable(const Hamiltonian* parent, int ikpt)
     if (!parent_->gkk_)  throw std::runtime_error("H|ψ⟩ requires GKK");
     if (!parent_->vr_)   throw std::runtime_error("H|ψ⟩ requires VR");
     if (!parent_->atom_) throw std::runtime_error("H|ψ⟩ requires ATOM");
-    if (parent_->elements_.empty()) throw std::runtime_error("H|ψ⟩ requires NCPPs (did you call finalize()?)");
 
     // FFT grid dimensions are k-point-independent — set once from the canonical
     // FFT grid (initialised during checkPart1 from whichever file was loaded
@@ -21,6 +20,23 @@ Hamiltonian::Callable::Callable(const Hamiltonian* parent, int ikpt)
     n1_ = parent_->canonical_fft_grid_->n1;
     n2_ = parent_->canonical_fft_grid_->n2;
     n3_ = parent_->canonical_fft_grid_->n3;
+
+    // Validate NCPP and BetaqTables for all element types.
+    // Catches missing/broken element data at construction time, so operator()
+    // can use bare access without try/catch noise.
+    if (parent_->psp_features_ & static_cast<std::uint64_t>(PSPFeature::Nonlocal)) {
+        for (auto&& type : parent_->atom().eachType()) {
+            try {
+                const auto& ncp = parent_->ncpp(type.z);
+                if (ncp.meta.l_max >= 0)
+                    parent_->betaqTables(type.z);
+            } catch (const std::exception&) {
+                std::throw_with_nested(std::runtime_error(
+                    std::format("H|ψ⟩ (ikpt={}, element={})",
+                        ikpt_, ATOM::elementName(type.z))));
+            }
+        }
+    }
 
     // Delegate k-point-dependent setup (loadKPoint, kinetic validation,
     // Ylm construction) to set_ikpt.

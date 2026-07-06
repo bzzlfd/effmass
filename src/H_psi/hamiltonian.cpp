@@ -192,6 +192,72 @@ auto Hamiltonian::occ() const -> const OCC& {
     return *occ_;
 }
 
+// -------------------------------------------------------------------------
+//  NCPP  /  β-table  accessors
+// -------------------------------------------------------------------------
+
+auto Hamiltonian::ncpp(int atomic_number) const -> const NCPP& {
+    std::string_view want = ATOM::elementName(atomic_number);
+    for (const auto& elem : elements_) {
+        if (elem.ncpp.meta.element == want) return elem.ncpp;
+    }
+    throw std::out_of_range(
+        "Hamiltonian: no NCPP for element " + std::string(want) +
+        " (Z=" + std::to_string(atomic_number) + ')');
+}
+
+auto Hamiltonian::betaqTables(int atomic_number) const -> const BetaqTables& {
+    std::string_view want = ATOM::elementName(atomic_number);
+    for (const auto& elem : elements_) {
+        if (elem.ncpp.meta.element == want) {
+            if (!elem.betaq_tables) {
+                throw std::runtime_error(
+                    "Hamiltonian: BetaqTables not initialised for element "
+                    + std::string(want) + " (did you call finalize()?)");
+            }
+            return *elem.betaq_tables;
+        }
+    }
+    throw std::out_of_range(
+        "Hamiltonian: no BetaqTables for element " + std::string(want) +
+        " (Z=" + std::to_string(atomic_number) + ')');
+}
+
+auto Hamiltonian::dbetaqTables(int atomic_number) const -> const DBetaqTables& {
+    std::string_view want = ATOM::elementName(atomic_number);
+    for (const auto& elem : elements_) {
+        if (elem.ncpp.meta.element == want) {
+            if (!elem.dbetaq_tables) {
+                throw std::runtime_error(
+                    "Hamiltonian: DBetaqTables not initialised for element "
+                    + std::string(want)
+                    + " (did you enable PSPFeature::DBetaq in finalize()?)");
+            }
+            return *elem.dbetaq_tables;
+        }
+    }
+    throw std::out_of_range(
+        "Hamiltonian: no DBetaqTables for element " + std::string(want) +
+        " (Z=" + std::to_string(atomic_number) + ')');
+}
+
+auto Hamiltonian::d2betaqTables(int atomic_number) const -> const D2BetaqTables& {
+    std::string_view want = ATOM::elementName(atomic_number);
+    for (const auto& elem : elements_) {
+        if (elem.ncpp.meta.element == want) {
+            if (!elem.d2betaq_tables) {
+                throw std::runtime_error(
+                    "Hamiltonian: D2BetaqTables not initialised for element "
+                    + std::string(want)
+                    + " (did you enable PSPFeature::D2Betaq in finalize()?)");
+            }
+            return *elem.d2betaq_tables;
+        }
+    }
+    throw std::out_of_range(
+        "Hamiltonian: no D2BetaqTables for element " + std::string(want) +
+        " (Z=" + std::to_string(atomic_number) + ')');
+}
 
 
 // -------------------------------------------------------------------------
@@ -201,7 +267,6 @@ auto Hamiltonian::occ() const -> const OCC& {
 auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
                            std::uint64_t psp_features) -> void {
     if (!canonical_lattice_) throw std::runtime_error("finalize: no lattice loaded");
-    if (elements_.empty()) return;
 
     // -------------------------------------------------------------------
     //  PSP features  —  validate and store
@@ -324,69 +389,6 @@ auto Hamiltonian::finalize(std::initializer_list<ExtendedCheck> checks,
 
     std::println("  done ({} element(s), omega={:.6f}, ng_max={}, l_max={})",
                  elements_.size(), omega, ng_max_, l_max_);
-}
-
-auto Hamiltonian::ncpp(int atomic_number) const -> const NCPP& {
-    std::string_view want = ATOM::elementName(atomic_number);
-    for (const auto& elem : elements_) {
-        if (elem.ncpp.meta.element == want) return elem.ncpp;
-    }
-    throw std::out_of_range(
-        "Hamiltonian: no NCPP for element " + std::string(want) +
-        " (Z=" + std::to_string(atomic_number) + ')');
-}
-
-auto Hamiltonian::betaqTables(int atomic_number) const -> const BetaqTables& {
-    std::string_view want = ATOM::elementName(atomic_number);
-    for (const auto& elem : elements_) {
-        if (elem.ncpp.meta.element == want) {
-            if (!elem.betaq_tables) {
-                throw std::runtime_error(
-                    "Hamiltonian: BetaqTables not initialised for element "
-                    + std::string(want) + " (did you call finalize()?)");
-            }
-            return *elem.betaq_tables;
-        }
-    }
-    throw std::out_of_range(
-        "Hamiltonian: no BetaqTables for element " + std::string(want) +
-        " (Z=" + std::to_string(atomic_number) + ')');
-}
-
-auto Hamiltonian::dbetaqTables(int atomic_number) const -> const DBetaqTables& {
-    std::string_view want = ATOM::elementName(atomic_number);
-    for (const auto& elem : elements_) {
-        if (elem.ncpp.meta.element == want) {
-            if (!elem.dbetaq_tables) {
-                throw std::runtime_error(
-                    "Hamiltonian: DBetaqTables not initialised for element "
-                    + std::string(want)
-                    + " (did you enable PSPFeature::DBetaq in finalize()?)");
-            }
-            return *elem.dbetaq_tables;
-        }
-    }
-    throw std::out_of_range(
-        "Hamiltonian: no DBetaqTables for element " + std::string(want) +
-        " (Z=" + std::to_string(atomic_number) + ')');
-}
-
-auto Hamiltonian::d2betaqTables(int atomic_number) const -> const D2BetaqTables& {
-    std::string_view want = ATOM::elementName(atomic_number);
-    for (const auto& elem : elements_) {
-        if (elem.ncpp.meta.element == want) {
-            if (!elem.d2betaq_tables) {
-                throw std::runtime_error(
-                    "Hamiltonian: D2BetaqTables not initialised for element "
-                    + std::string(want)
-                    + " (did you enable PSPFeature::D2Betaq in finalize()?)");
-            }
-            return *elem.d2betaq_tables;
-        }
-    }
-    throw std::out_of_range(
-        "Hamiltonian: no D2BetaqTables for element " + std::string(want) +
-        " (Z=" + std::to_string(atomic_number) + ')');
 }
 
 
