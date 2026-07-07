@@ -31,12 +31,12 @@ PWmat 文件存储 `Kx/Ky/Kz = -(G+k)`，此前各消费者通过 `const double 
 
 get 时对 Qlm 的缓存计算已经完成。
 
-## RealSphericalHarmonicsEngine::get_grad_theta
+## RealSphericalHarmonicsEngine::get_ang_grad_theta
 
 计算 `∂Y_lm/∂θ`。
 
-新缓存变量 `Q_lm_grad_theta_`（`std::optional<std::vector<std::vector<double>>>`），惰性填充。
-使用 `GradThetaRecurrence` 结构体，通过**对 QRecurrence 公式逐项求导**做逐列递推（seed → step1 → advance），
+新缓存变量 `Q_lm_ang_grad_theta_`（`std::optional<std::vector<std::vector<double>>>`），惰性填充。
+使用 `AngGradThetaRecurrence` 结构体，通过**对 QRecurrence 公式逐项求导**做逐列递推（seed → step1 → advance），
 依赖常驻缓存 `Q_lm_`。
 
 ### 递推公式（对 QRecurrence 求导）
@@ -51,7 +51,7 @@ get 时对 Qlm 的缓存计算已经完成。
 
 其中 r1, r2 系数与 `QRecurrence::advance` 完全相同。
 
-`get_grad_theta` 返回 `∂Y_lm/∂θ`：
+`get_ang_grad_theta` 返回 `∂Y_lm/∂θ`：
 
 | m | ∂Y_lm/∂θ |
 |---|----------|
@@ -60,16 +60,16 @@ get 时对 Qlm 的缓存计算已经完成。
 | <0 | **√2 · dQ_l^{\|m\|}/dθ · sin(\|m\|φ)** |
 
 
-## RealSphericalHarmonicsEngine::get_grad_phi
+## RealSphericalHarmonicsEngine::get_ang_grad_phi
 
 已实现（2026-07-03）。计算 `(1/sinθ)·∂Y_lm/∂φ`。
 
-需要新缓存变量 `Q_lm_grad_phi_`（`std::optional<std::vector<std::vector<double>>>`），惰性填充。
-使用 `GradPhiRecurrence` 结构体做递推（`QRecurrence` 代码复用，seed 不同）。
+需要新缓存变量 `Q_lm_ang_grad_phi_`（`std::optional<std::vector<std::vector<double>>>`），惰性填充。
+使用 `AngGradPhiRecurrence` 结构体做递推（`QRecurrence` 代码复用，seed 不同）。
 
 ### 计算公式
 
-记 `R_l^m = Q_l^m / sinθ`，`get_grad_phi` 返回 `(1/sinθ)·∂Y_lm/∂φ`：
+记 `R_l^m = Q_l^m / sinθ`，`get_ang_grad_phi` 返回 `(1/sinθ)·∂Y_lm/∂φ`：
 
 | m | Y_lm (real) | (1/sinθ)·∂Y_lm/∂φ |
 |---|-------------|---------------------|
@@ -77,22 +77,22 @@ get 时对 Qlm 的缓存计算已经完成。
 | >0 | √2 · Q_l^m · cos(mφ) | **-m · √2 · R_l^m · sin(mφ)** = -m/sinθ · Y_{l,-m} |
 | <0 | √2 · Q_l^{\|m\|} · sin(\|m\|φ) | **\|m\| · √2 · R_l^{\|m\|} · cos(\|m\|φ)** = \|m\|/sinθ · Y_{l,\|m\|} |
 
-相比于旧的 `get_dphi`（返回纯 ∂Y/∂φ），区别在于 θ=0 处：|m|=1 时 `get_grad_phi` 有限非零，而纯 ∂Y/∂φ 为 0。
+相比于旧的 `get_dphi`（返回纯 ∂Y/∂φ），区别在于 θ=0 处：|m|=1 时 `get_ang_grad_phi` 有限非零，而纯 ∂Y/∂φ 为 0。
 
 ### 缓存策略
 
-- 使用 `std::optional` 存储完整的 `Q_lm_grad_phi_`：无数据 = std::nullopt，有数据 = engaged。
+- 使用 `std::optional` 存储完整的 `Q_lm_ang_grad_phi_`：无数据 = std::nullopt，有数据 = engaged。
 - `reinit()` → `.reset()` 清空；`reserveNg()` → 条件式 reserve；`setLMax()` → 惰性 no-op。
 - 详见 `docs/design/real_spherical_harmonics.md`。
 
 
 ## 讨论
 
-- m=0 时 `get_grad_theta` 返回**非零值**（l≥1），而 `get_grad_phi` 恒 0。
+- m=0 时 `get_ang_grad_theta` 返回**非零值**（l≥1），而 `get_ang_grad_phi` 恒 0。
 - θ=0/π 边界：
-    - `get_grad_theta` ：l=1,m=0 → 0；l=1,m=±1 → 有限非零（`-sqrt(3/(4π))·cosφ` 或 `-sqrt(3/(4π))·sinφ`）；|m|≥2 → 0。
+    - `get_ang_grad_theta` ：l=1,m=0 → 0；l=1,m=±1 → 有限非零（`-sqrt(3/(4π))·cosφ` 或 `-sqrt(3/(4π))·sinφ`）；|m|≥2 → 0。
     - l=1,m=±1 → 有限非零（`sqrt(3/(4π))·sinφ` 或 `-sqrt(3/(4π))·cosφ`）；|m|≥2 → 0。
-    - 等等，l=1,m=±1 时岂不是 grad_theta/phi 的奇点，沿着不同经线趋向于 0/π 有不同的结果？
+    - 等等，l=1,m=±1 时岂不是 ang_grad_theta/phi 的奇点，沿着不同经线趋向于 0/π 有不同的结果？
         1. 毛球定理。有奇点就对了。
         2. 它们组合出的笛卡尔坐标系下的梯度向量是确定的。
 
@@ -136,10 +136,10 @@ $ 的相关计算已经在过去被实现：
 2.1. $\nabla_q$：我们实现了 DBetaqTable。
 相关文件为 sph_bessel.cppm, fourier_bessel.cppm, ncpp_advance.cppm, hamiltonian.cppm
 
-2.2. $\nabla_\theta$: 我们在 RealSphericalHarmonicsEngine 中实现了 get_grad_theta, 在RealSphericalHarmonicsData 中提供了对该数据的缓存。其中没有 $1/q$ 项，我们把它放到 $beta(q)/q$ 中，当 q 很小时，应该取 $\beta'(0)$ 极限。
+2.2. $\nabla_\theta$: 我们在 RealSphericalHarmonicsEngine 中实现了 get_ang_grad_theta, 在RealSphericalHarmonicsData 中提供了对该数据的缓存。其中没有 $1/q$ 项，我们把它放到 $beta(q)/q$ 中，当 q 很小时，应该取 $\beta'(0)$ 极限。
 相关文件为 sph_harmonics.cppm。
 
-2.3. $\nabla_\phi$: 我们在 RealSphericalHarmonicsEngine 中实现了 get_grad_phi, 在RealSphericalHarmonicsData 中提供了对该数据的缓存。其中包含 $1/sin\theta$ ；但没有 $1/q$ 项，我们把它放到 $\beta(q)/q$ 中
+2.3. $\nabla_\phi$: 我们在 RealSphericalHarmonicsEngine 中实现了 get_ang_grad_phi, 在RealSphericalHarmonicsData 中提供了对该数据的缓存。其中包含 $1/sin\theta$ ；但没有 $1/q$ 项，我们把它放到 $\beta(q)/q$ 中
 相关文件为 sph_harmonics.cppm。
 
 3. 再转换到直角坐标

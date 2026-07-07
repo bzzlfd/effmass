@@ -91,8 +91,8 @@ auto Hamiltonian::Gradient::Callable::set_ikpt(int ikpt) -> void {
             engine_.emplace(kv.theta, kv.phi, parent_->l_max_);
             engine_->reserveNg(parent_->ng_max_);
             ylm_data_.reserveNg(parent_->ng_max_);
-            ylm_grad_theta_data_.reserveNg(parent_->ng_max_);
-            ylm_grad_phi_data_.reserveNg(parent_->ng_max_);
+            ylm_ang_grad_theta_data_.reserveNg(parent_->ng_max_);
+            ylm_ang_grad_phi_data_.reserveNg(parent_->ng_max_);
         }
     }
 }
@@ -227,8 +227,8 @@ void Hamiltonian::Gradient::Callable::operator()(
             for (const auto& bc : beta_cache) {
                 for (int m = -bc.l; m <= bc.l; ++m) {
                     const auto& ylm         = ylm_data_.get(*engine_, bc.l, m);
-                    const auto& ylm_grad_theta  = ylm_grad_theta_data_.get(*engine_, bc.l, m);
-                    const auto& ylm_grad_phi    = ylm_grad_phi_data_.get(*engine_, bc.l, m);
+                    const auto& ylm_ang_grad_theta  = ylm_ang_grad_theta_data_.get(*engine_, bc.l, m);
+                    const auto& ylm_ang_grad_phi    = ylm_ang_grad_phi_data_.get(*engine_, bc.l, m);
 
                     // ------------------------------------------------------------------
                     //  Per-G-vector shared computation (inlined by compiler at the
@@ -249,8 +249,8 @@ void Hamiltonian::Gradient::Callable::operator()(
 
                         // Spherical gradient components of β·Y_lm
                         double grad_q     = dbeta_q * ylm[ig];
-                        double grad_theta = beta_over_q * ylm_grad_theta[ig];
-                        double grad_phi   = beta_over_q * ylm_grad_phi[ig];
+                        double grad_theta = beta_over_q * ylm_ang_grad_theta[ig];
+                        double grad_phi   = beta_over_q * ylm_ang_grad_phi[ig];
 
                         // Trig lookups for spherical→Cartesian rotation
                         double s_th = sin_theta[ig], c_th = cos_theta[ig];

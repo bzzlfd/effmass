@@ -246,8 +246,8 @@ struct HessHPsi {
                 // Ylm engine and lazy data caches (shared across directions)
                 mutable std::optional<RealSphericalHarmonicsEngine> engine_;
                 mutable RealSphericalHarmonicsData ylm_data_;
-                mutable RealSphericalHarmonicsData ylm_grad_theta_data_{RealSphericalHarmonicsData::Quantity::GradTheta};
-                mutable RealSphericalHarmonicsData ylm_grad_phi_data_{RealSphericalHarmonicsData::Quantity::GradPhi};
+                mutable RealSphericalHarmonicsData ylm_ang_grad_theta_data_{RealSphericalHarmonicsData::Quantity::AngGradTheta};
+                mutable RealSphericalHarmonicsData ylm_ang_grad_phi_data_{RealSphericalHarmonicsData::Quantity::AngGradPhi};
 
                 // Trig arrays live in RealSphericalHarmonicsEngine;
                 // accessed via sinTheta()/cosTheta()/sinPhi()/cosPhi().

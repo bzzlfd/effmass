@@ -155,48 +155,58 @@ auto reinit(theta, phi, l_max_resident) -> void;
 
 ---
 
-## Q_lm_grad_phi_ 缓存设计
+## 命名说明：`get_ang_grad_phi` / `get_ang_grad_theta`
 
-`Q_lm_grad_phi_` 是 `get_grad_phi()` 的惰性缓存，存储 `R_l^m = Q_l^m / sinθ`，用于计算 `(1/sinθ)·∂Y_lm/∂φ`。
+`ang_grad` = angular gradient on the unit sphere（单位球面角梯度），即表面梯度 `∇_Ω`。
+在球坐标中，完整 3D 梯度算子为 `∇ = (∂/∂r, (1/r)∂/∂θ, (1/(r sinθ))∂/∂φ)`。
+球谐函数 Y_lm 只含角度部分，不含径向 `1/r` 因子，因此：
+- `get_ang_grad_theta(l,m) = ∂Y_lm/∂θ`（球面梯度 θ 分量，r=1 时度量因子为 1）
+- `get_ang_grad_phi(l,m)   = (1/sinθ)·∂Y_lm/∂φ`（球面梯度 φ 分量，含 sinθ 度量因子）
+
+`1/q` 径向因子由调用方处理（记为 `β(q)/q`，q→0 时取 `β'(0)` 极限）。
+
+## Q_lm_ang_grad_phi_ 缓存设计
+
+`Q_lm_ang_grad_phi_` 是 `get_ang_grad_phi()` 的惰性缓存，存储 `R_l^m = Q_l^m / sinθ`，用于计算 `(1/sinθ)·∂Y_lm/∂φ`。
 
 ### 存储格式
 
 ```cpp
-mutable std::optional<std::vector<std::vector<double>>> Q_lm_grad_phi_;
+mutable std::optional<std::vector<std::vector<double>>> Q_lm_ang_grad_phi_;
 ```
 
 - **`optional` 作为有效性标志**：`std::nullopt` 表示未初始化或已失效；engaged 状态表示缓存数据就绪。
 - **索引方案**：与 `Q_lm_` 相同，`l*(l+1)/2 + m_abs`。
-- **m=0 条目**：空 `vector`（默认构造，无堆分配），`fillGradPhiCache()` 跳过不填充。
+- **m=0 条目**：空 `vector`（默认构造，无堆分配），`fillAngGradPhiCache()` 跳过不填充。
 - 没有单独的 `valid_` 布尔标志——`optional` 的 engaged/disengaged 状态就是有效性指示器。
 
 ### 生命周期
 
-| 函数 | Q_lm_grad_phi_ 操作 | 原因 |
+| 函数 | Q_lm_ang_grad_phi_ 操作 | 原因 |
 |------|---------------------|------|
 | `reinit()` | `.reset()` |  θ/φ 数据改变，缓存内容全部失效 |
 | `reserveNg()` | 如果缓存已填充，对 inner vectors 做 `reserve()`；否则 no-op | 只影响 capacity，不影响数据 |
-| `setLMax()` 扩展 | **no-op**（惰性） | 下次 `get_grad_phi()` 发现 `optional` size 与 Q_lm_ 不匹配 → 自动填充 |
+| `setLMax()` 扩展 | **no-op**（惰性） | 下次 `get_ang_grad_phi()` 发现 `optional` size 与 Q_lm_ 不匹配 → 自动填充 |
 | `setLMax()` 收缩 | **outer vector resize 至新大小**（inner vectors 数据保留） | 与 Q_lm_ 设计一致——低 l/m 的 R_l^m 数据保留，避免惰性重建误判 size 不匹配而触发全量重建 |
 
-`get_grad_phi()` 首次调用或检测到 size 不匹配时，调用 `fillGradPhiCache()`：
+`get_ang_grad_phi()` 首次调用或检测到 size 不匹配时，调用 `fillAngGradPhiCache()`：
 
 ```
-fillGradPhiCache()
-  ├── Q_lm_grad_phi_.emplace(total_size)   ← 分配 outer vector
+fillAngGradPhiCache()
+  ├── Q_lm_ang_grad_phi_.emplace(total_size)   ← 分配 outer vector
   ├── m_abs=0 的 inner vector 保持空（无堆分配）
   ├── for l = 1..l_max_resident_:
   │     for m_abs = 1..l:
   │       reserve(ng_capacity) + resize(ng_)  ← 只为 m≥1 预分配
   └── for m = 1..l_max_resident_:
-        └── GradPhiRecurrence::seed → step1 → advance 填充整列
+        └── AngGradPhiRecurrence::seed → step1 → advance 填充整列
 ```
 
-### GradPhiRecurrence 结构体
+### AngGradPhiRecurrence 结构体
 
 与 `QRecurrence` 接口相同，`step1`/`advance` 代码相同，仅有 `seed` 不同：
 
-| | QRecurrence::seed | GradPhiRecurrence::seed |
+| | QRecurrence::seed | AngGradPhiRecurrence::seed |
 |---|---|---|
 | m=0 | `1/(2√π)` | `0`（结果始终为 0） |
 | m=1 | `-1/(2√π) · √(3/2) · sinθ` | `-1/(2√π) · √(3/2)`（常数，θ=0 处有限） |
@@ -204,11 +214,11 @@ fillGradPhiCache()
 
 ### 与纯 ∂Y/∂φ 的比较
 
-| | ∂Y/∂φ (`get_dphi`，已移除) | (1/sinθ)·∂Y/∂φ (`get_grad_phi`) |
+| | ∂Y/∂φ (`get_dphi`，已移除) | (1/sinθ)·∂Y/∂φ (`get_ang_grad_phi`) |
 |---|---|---|
 | 需要的数据 | Q_l^m | R_l^m = Q_l^m / sinθ |
-| 缓存 | 无（可直接用 Q_lm_） | 有（Q_lm_grad_phi_，惰性分配） |
-| 递推 | 无 | GradPhiRecurrence（seed 少一个 sinθ） |
+| 缓存 | 无（可直接用 Q_lm_） | 有（Q_lm_ang_grad_phi_，惰性分配） |
+| 递推 | 无 | AngGradPhiRecurrence（seed 少一个 sinθ） |
 | θ=0，m=0 | 0 | 0 |
 | θ=0，|m|=1 | 0 | **有限非零** |
 | θ=0，|m|>=2 | 0 | 0 |

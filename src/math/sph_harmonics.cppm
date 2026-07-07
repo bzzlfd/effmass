@@ -171,18 +171,21 @@ struct QRecurrence {
 
 
 // =============================================================================
-//  GradPhiRecurrence — normalized Legendre divided by sinθ (R_l^m = Q_l^m/sinθ)
+//  AngGradPhiRecurrence — angular gradient Legendre (divided by sinθ)
+//  (R_l^m = Q_l^m / sinθ), the θ-normalised associated Legendre for
+//  the φ-component of the surface gradient ∇_Ω = (∂/∂θ, (1/sinθ)·∂/∂φ).
+//  R_l^m = Q_l^m / sinθ
 //
-//  Used by RealSphericalHarmonicsEngine::get_grad_phi, which computes
+//  Used by RealSphericalHarmonicsEngine::get_ang_grad_phi, which computes
 //  (1/sinθ)·∂Y_lm/∂φ.  The recurrence (step1, advance) is identical to that
 //  for Q_l^m — only the seed differs: one power of sinθ less.
 //
 //  seed for R_m^m:
-//    m=0:  0  (unused — get_grad_phi returns 0 for m=0)
+//    m=0:  0  (unused — get_ang_grad_phi returns 0 for m=0)
 //    m=1:  (-1)^m / (2√π) · √((2m+1)/(2m))  (constant, finite at θ=0)
 //    m≥2:  (-1)^m / (2√π) · ∏_{k=1}^{m} √((2k+1)/(2k)) · sin^{m-1}(θ)
 // =============================================================================
-struct GradPhiRecurrence {
+struct AngGradPhiRecurrence {
     std::span<const double> cos_theta;
     std::span<const double> sin_theta;
 
@@ -241,9 +244,9 @@ struct GradPhiRecurrence {
 
 
 // =============================================================================
-//  GradThetaRecurrence — dQ_l^m/dθ via QRecurrence differentiation
+//  AngGradThetaRecurrence — dQ_l^m/dθ via QRecurrence differentiation
 //
-//  Used by RealSphericalHarmonicsEngine::get_grad_theta to compute
+//  Used by RealSphericalHarmonicsEngine::get_ang_grad_theta to compute
 //  ∂Y_lm/∂θ.  dQ_l^m/dθ is obtained by differentiating the QRecurrence
 //  seed / step1 / advance formulas column-wise with respect to θ:
 //
@@ -260,9 +263,9 @@ struct GradPhiRecurrence {
 //                          - r2·dQ_{l-2}^m/dθ) / (l-m)
 //
 //  Requires only Q_lm_ (the permanent resident Legendre cache).
-//  No dependence on the lazy Q_lm_grad_phi_ cache.
+//  No dependence on the lazy Q_lm_ang_grad_phi_ cache.
 // =============================================================================
-struct GradThetaRecurrence {
+struct AngGradThetaRecurrence {
     std::span<const double> cos_theta;
     std::span<const double> sin_theta;
     const std::vector<std::vector<double>>& Q_lm_;
@@ -366,25 +369,35 @@ public:
     /// Requires CacheMode::Full and l <= l_max_resident.
     auto get(int l, int m) const -> std::vector<double>;
 
-    /// Return (1/sinθ) · ∂Y_lm/∂φ for all G-vectors.
-    /// Lazy-fills the Q_lm_grad_phi_ cache on first call.
+    /// Return the φ-component of the angular gradient on the unit sphere,
+    /// i.e. the surface gradient ∇_Ω = (∂/∂θ, (1/sinθ)·∂/∂φ).
+    ///
+    ///   get_ang_grad_phi(l,m) = (1/sinθ) · ∂Y_lm/∂φ
+    ///
+    /// The 1/q radial factor is handled externally by the caller.
+    /// Lazy-fills the Q_lm_ang_grad_phi_ cache on first call.
     /// Requires CacheMode::Full and l <= l_max_resident.
     ///
     /// Formula (R_l^m = Q_l^m / sinθ):
     ///   m=0  →  0
     ///   m>0  →  -m · √2 · R_l^m · sin(mφ)
     ///   m<0  →  |m| · √2 · R_l^{|m|} · cos(|m|φ)
-    auto get_grad_phi(int l, int m) const -> std::vector<double>;
+    auto get_ang_grad_phi(int l, int m) const -> std::vector<double>;
 
-    /// Return ∂Y_lm/∂θ for all G-vectors.
-    /// Lazy-fills the Q_lm_grad_theta_ cache on first call.
+    /// Return the θ-component of the angular gradient on the unit sphere,
+    /// i.e. the surface gradient ∇_Ω = (∂/∂θ, (1/sinθ)·∂/∂φ).
+    ///
+    ///   get_ang_grad_theta(l,m) = ∂Y_lm/∂θ
+    ///
+    /// The 1/q radial factor is handled externally by the caller.
+    /// Lazy-fills the Q_lm_ang_grad_theta_ cache on first call.
     /// Requires CacheMode::Full and l <= l_max_resident.
     ///
     /// Formula (dQ_l^m/dθ via analytic differentiation):
     ///   m=0  →  dQ_l^0/dθ = sqrt(l(l+1)) · Q_l^1
     ///   m>0  →  √2 · dQ_l^m/dθ · cos(mφ)
     ///   m<0  →  √2 · dQ_l^{|m|}/dθ · sin(|m|φ)
-    auto get_grad_theta(int l, int m) const -> std::vector<double>;
+    auto get_ang_grad_theta(int l, int m) const -> std::vector<double>;
 
     /// Compute Y_lm on the fly. Works in any mode, for any (l,m).
     /// Returns by value (no persistent cache).
@@ -437,24 +450,24 @@ private:
     std::vector<std::vector<double>> cos_mphi_;
     std::vector<std::vector<double>> sin_mphi_;
 
-    // === Q_lm_grad_phi_ cache for (1/sinθ)·∂Y/∂φ ===
-    // Lazy-filled by get_grad_phi() on first call.
+    // === Q_lm_ang_grad_phi_ cache for (1/sinθ)·∂Y/∂φ ===
+    // Lazy-filled by get_ang_grad_phi() on first call.
     // Same triangular index as Q_lm_ (l*(l+1)/2 + m_abs).
     // m_abs=0 entries are default-constructed (empty vectors, no heap alloc)
-    // — get_grad_phi(l,0) returns 0 directly, never touches the cache.
-    mutable std::optional<std::vector<std::vector<double>>> Q_lm_grad_phi_;
+    // — get_ang_grad_phi(l,0) returns 0 directly, never touches the cache.
+    mutable std::optional<std::vector<std::vector<double>>> Q_lm_ang_grad_phi_;
 
-    // Fill Q_lm_grad_phi_ from scratch using GradPhiRecurrence.
-    void fillGradPhiCache() const;
+    // Fill Q_lm_ang_grad_phi_ from scratch using AngGradPhiRecurrence.
+    void fillAngGradPhiCache() const;
 
-    // === Q_lm_grad_theta_ cache for ∂Y/∂θ ===
-    // Lazy-filled by get_grad_theta() on first call.
+    // === Q_lm_ang_grad_theta_ cache for ∂Y/∂θ ===
+    // Lazy-filled by get_ang_grad_theta() on first call.
     // Same triangular index as Q_lm_ (l*(l+1)/2 + m_abs).
     // All entries (m_abs ≥ 0) are filled — dQ_l^0/dθ is non-zero for l ≥ 1.
-    mutable std::optional<std::vector<std::vector<double>>> Q_lm_grad_theta_;
+    mutable std::optional<std::vector<std::vector<double>>> Q_lm_ang_grad_theta_;
 
-    // Fill Q_lm_grad_theta_ from scratch using GradThetaRecurrence.
-    void fillGradThetaCache() const;
+    // Fill Q_lm_ang_grad_theta_ from scratch using AngGradThetaRecurrence.
+    void fillAngGradThetaCache() const;
 
 };
 
@@ -532,11 +545,11 @@ auto RealSphericalHarmonicsEngine::reinit(
     // Rebind recurrence engine to trig arrays (data ptr may have moved).
     q_recur_ = QRecurrence{cos_theta_, sin_theta_};
 
-    // Invalidate Q, cos/sin, and grad_phi caches — they are no longer
+    // Invalidate Q, cos/sin, and ang_grad_phi caches — they are no longer
     // consistent with the new trig data.
     l_max_resident_ = -1;
-    Q_lm_grad_phi_.reset();
-    Q_lm_grad_theta_.reset();
+    Q_lm_ang_grad_phi_.reset();
+    Q_lm_ang_grad_theta_.reset();
     ++revision_;
 }
 
@@ -550,11 +563,11 @@ auto RealSphericalHarmonicsEngine::reserveNg(int max_ng) -> void {
         for (auto& v : Q_lm_) v.reserve(n);
         for (auto& v : cos_mphi_) v.reserve(n);
         for (auto& v : sin_mphi_) v.reserve(n);
-        if (Q_lm_grad_phi_) {
-            for (auto& v : *Q_lm_grad_phi_) v.reserve(n);
+        if (Q_lm_ang_grad_phi_) {
+            for (auto& v : *Q_lm_ang_grad_phi_) v.reserve(n);
         }
-        if (Q_lm_grad_theta_) {
-            for (auto& v : *Q_lm_grad_theta_) v.reserve(n);
+        if (Q_lm_ang_grad_theta_) {
+            for (auto& v : *Q_lm_ang_grad_theta_) v.reserve(n);
         }
     }
 }
@@ -574,16 +587,16 @@ auto RealSphericalHarmonicsEngine::setLMax(int l_max_new) -> void {
 
     // -- Shrink: keep Q_lm_, cos_mphi_ and sin_mphi_ for zero-cost re-expansion. --
     if (l_max_new < l_max_resident_) {
-        // Also shrink Q_lm_grad_phi_ outer vector so its size matches the
-        // new l_max, avoiding a spurious full rebuild in get_grad_phi().
-        if (Q_lm_grad_phi_) {
+        // Also shrink Q_lm_ang_grad_phi_ outer vector so its size matches the
+        // new l_max, avoiding a spurious full rebuild in get_ang_grad_phi().
+        if (Q_lm_ang_grad_phi_) {
             // Same triangular total as Q_lm_: (L+1)(L+2)/2.
             std::size_t new_total = static_cast<std::size_t>(l_max_new + 1) * (l_max_new + 2) / 2;
-            Q_lm_grad_phi_->resize(new_total);
+            Q_lm_ang_grad_phi_->resize(new_total);
         }
-        if (Q_lm_grad_theta_) {
+        if (Q_lm_ang_grad_theta_) {
             std::size_t new_total = static_cast<std::size_t>(l_max_new + 1) * (l_max_new + 2) / 2;
-            Q_lm_grad_theta_->resize(new_total);
+            Q_lm_ang_grad_theta_->resize(new_total);
         }
         l_max_resident_ = l_max_new;
         ++revision_;
@@ -721,18 +734,18 @@ auto RealSphericalHarmonicsEngine::get(int l, int m) const -> std::vector<double
     return result;
 }
 
-auto RealSphericalHarmonicsEngine::get_grad_phi(int l, int m) const -> std::vector<double> {
+auto RealSphericalHarmonicsEngine::get_ang_grad_phi(int l, int m) const -> std::vector<double> {
     if (l < 0 || std::abs(m) > l) {
         throw std::invalid_argument(
-            std::format("RealSphericalHarmonicsEngine::get_grad_phi(): invalid quantum numbers (l={}, m={})", l, m));
+            std::format("RealSphericalHarmonicsEngine::get_ang_grad_phi(): invalid quantum numbers (l={}, m={})", l, m));
     }
     if (mode_ == CacheMode::None) {
         throw std::runtime_error(
-            "RealSphericalHarmonicsEngine::get_grad_phi(): not available in CacheMode::None, use compute()");
+            "RealSphericalHarmonicsEngine::get_ang_grad_phi(): not available in CacheMode::None, use compute()");
     }
     if (l > l_max_resident_) {
         throw std::runtime_error(
-            std::format("RealSphericalHarmonicsEngine::get_grad_phi(): l={} > l_max_resident_={}, call setLMax({}) first, or use compute()", l, l_max_resident_, l));
+            std::format("RealSphericalHarmonicsEngine::get_ang_grad_phi(): l={} > l_max_resident_={}, call setLMax({}) first, or use compute()", l, l_max_resident_, l));
     }
 
     // (1/sinθ)·∂Y_lm/∂φ = 0  when m = 0
@@ -743,14 +756,14 @@ auto RealSphericalHarmonicsEngine::get_grad_phi(int l, int m) const -> std::vect
     // Lazy-fill entire cache on first call (or after invalidation).
     // Same triangular size as Q_lm_; m_abs=0 entries stay empty.
     std::size_t expected_total = static_cast<std::size_t>((l_max_resident_ + 1) * (l_max_resident_ + 2) / 2);
-    if (!Q_lm_grad_phi_ || Q_lm_grad_phi_->size() != expected_total) {
-        fillGradPhiCache();
+    if (!Q_lm_ang_grad_phi_ || Q_lm_ang_grad_phi_->size() != expected_total) {
+        fillAngGradPhiCache();
     }
 
     int m_abs = std::abs(m);   // m_abs ≥ 1 here (m=0 returned early above)
     // Same triangular index as Q_lm_.
     std::size_t idx = static_cast<std::size_t>(l * (l + 1) / 2 + m_abs);
-    const auto& R = (*Q_lm_grad_phi_)[idx];   // R_l^m = Q_l^m / sinθ
+    const auto& R = (*Q_lm_ang_grad_phi_)[idx];   // R_l^m = Q_l^m / sinθ
 
     double sf = std::sqrt(2.0);
     const auto& cm = cos_mphi_[static_cast<std::size_t>(m_abs)];
@@ -773,12 +786,12 @@ auto RealSphericalHarmonicsEngine::get_grad_phi(int l, int m) const -> std::vect
     return result;
 }
 
-void RealSphericalHarmonicsEngine::fillGradPhiCache() const {
-    GradPhiRecurrence grad_recur{cos_theta_, sin_theta_};
+void RealSphericalHarmonicsEngine::fillAngGradPhiCache() const {
+    AngGradPhiRecurrence grad_recur{cos_theta_, sin_theta_};
 
     // Same triangular total as Q_lm_: (L+1)(L+2)/2.
     std::size_t total = static_cast<std::size_t>((l_max_resident_ + 1) * (l_max_resident_ + 2) / 2);
-    auto& cache = Q_lm_grad_phi_.emplace(total);
+    auto& cache = Q_lm_ang_grad_phi_.emplace(total);
     auto ng = ng_;
     auto ng_cap = cos_theta_.capacity();
 
@@ -796,7 +809,7 @@ void RealSphericalHarmonicsEngine::fillGradPhiCache() const {
         }
     }
 
-    // Fill R_l^m for m_abs ≥ 1 (m=0 skipped — get_grad_phi(l,0) returns 0).
+    // Fill R_l^m for m_abs ≥ 1 (m=0 skipped — get_ang_grad_phi(l,0) returns 0).
     for (int m = 1; m <= l_max_resident_; ++m) {
         // seed → step1 → advance loop (same pattern as setLMax for Q_lm_)
         std::vector<double> prev(ng), curr(ng);
@@ -814,30 +827,30 @@ void RealSphericalHarmonicsEngine::fillGradPhiCache() const {
     }
 }
 
-auto RealSphericalHarmonicsEngine::get_grad_theta(int l, int m) const -> std::vector<double> {
+auto RealSphericalHarmonicsEngine::get_ang_grad_theta(int l, int m) const -> std::vector<double> {
     if (l < 0 || std::abs(m) > l) {
         throw std::invalid_argument(
-            std::format("RealSphericalHarmonicsEngine::get_grad_theta(): invalid quantum numbers (l={}, m={})", l, m));
+            std::format("RealSphericalHarmonicsEngine::get_ang_grad_theta(): invalid quantum numbers (l={}, m={})", l, m));
     }
     if (mode_ == CacheMode::None) {
         throw std::runtime_error(
-            "RealSphericalHarmonicsEngine::get_grad_theta(): not available in CacheMode::None, use compute()");
+            "RealSphericalHarmonicsEngine::get_ang_grad_theta(): not available in CacheMode::None, use compute()");
     }
     if (l > l_max_resident_) {
         throw std::runtime_error(
-            std::format("RealSphericalHarmonicsEngine::get_grad_theta(): l={} > l_max_resident_={}, call setLMax({}) first, or use compute()", l, l_max_resident_, l));
+            std::format("RealSphericalHarmonicsEngine::get_ang_grad_theta(): l={} > l_max_resident_={}, call setLMax({}) first, or use compute()", l, l_max_resident_, l));
     }
 
     // Lazy-fill entire cache on first call (or after invalidation).
     // Same triangular size as Q_lm_.
     std::size_t expected_total = static_cast<std::size_t>((l_max_resident_ + 1) * (l_max_resident_ + 2) / 2);
-    if (!Q_lm_grad_theta_ || Q_lm_grad_theta_->size() != expected_total) {
-        fillGradThetaCache();
+    if (!Q_lm_ang_grad_theta_ || Q_lm_ang_grad_theta_->size() != expected_total) {
+        fillAngGradThetaCache();
     }
 
     int m_abs = std::abs(m);
     std::size_t idx = static_cast<std::size_t>(l * (l + 1) / 2 + m_abs);
-    const auto& dQ = (*Q_lm_grad_theta_)[idx];   // dQ_l^{m_abs}/dθ
+    const auto& dQ = (*Q_lm_ang_grad_theta_)[idx];   // dQ_l^{m_abs}/dθ
 
     double sf = std::sqrt(2.0);
     const auto& cm = cos_mphi_[static_cast<std::size_t>(m_abs)];
@@ -861,13 +874,13 @@ auto RealSphericalHarmonicsEngine::get_grad_theta(int l, int m) const -> std::ve
     return result;
 }
 
-void RealSphericalHarmonicsEngine::fillGradThetaCache() const {
-    // Only depends on Q_lm_ (resident cache) — no dependency on grad_phi.
-    GradThetaRecurrence grad_recur{cos_theta_, sin_theta_, Q_lm_};
+void RealSphericalHarmonicsEngine::fillAngGradThetaCache() const {
+    // Only depends on Q_lm_ (resident cache) — no dependency on ang_grad_phi.
+    AngGradThetaRecurrence grad_recur{cos_theta_, sin_theta_, Q_lm_};
 
     // Same triangular total as Q_lm_: (L+1)(L+2)/2.
     std::size_t total = static_cast<std::size_t>((l_max_resident_ + 1) * (l_max_resident_ + 2) / 2);
-    auto& cache = Q_lm_grad_theta_.emplace(total);
+    auto& cache = Q_lm_ang_grad_theta_.emplace(total);
     auto ng = ng_;
     auto ng_cap = cos_theta_.capacity();
 
@@ -885,7 +898,7 @@ void RealSphericalHarmonicsEngine::fillGradThetaCache() const {
         }
     }
 
-    // Column-wise recurrence: same pattern as fillGradPhiCache.
+    // Column-wise recurrence: same pattern as fillAngGradPhiCache.
     for (int m = 0; m <= l_max_resident_; ++m) {
         std::vector<double> prev(ng), curr(ng);
         grad_recur.seed(m, curr);
@@ -949,18 +962,18 @@ auto RealSphericalHarmonicsEngine::compute(int l, int m) const -> std::vector<do
 //  pointer (decayed from a captureless lambda).
 // =============================================================================
 
-/// Lazy cache of Engine-derived values (Y_lm, grad_phi, …).
+/// Lazy cache of Engine-derived values (Y_lm, ang_grad_phi, …).
 ///
 /// Usage:
 ///   RealSphericalHarmonicsData ylm_data;                              // Ylm (default)
-///   RealSphericalHarmonicsData gphi_data{Quantity::GradPhi};         // grad_phi
+///   RealSphericalHarmonicsData gphi_data{Quantity::AngGradPhi};         // ang_grad_phi
 ///
 ///   const auto& y = ylm_data.get(engine, 2, 1);                      // same get() API
 ///   const auto& g = gphi_data.get(engine, 2, 1);
 class RealSphericalHarmonicsData {
 public:
     /// Which quantity to cache.  Extend with new entries as needed.
-    enum class Quantity { Ylm, GradPhi, GradTheta };
+    enum class Quantity { Ylm, AngGradPhi, AngGradTheta };
 
     explicit RealSphericalHarmonicsData(Quantity q = Quantity::Ylm)
         : filler_(makeFiller(q)) {}
@@ -1057,15 +1070,15 @@ private:
                 }
                 return e.compute(l, m);
             };
-        case Quantity::GradPhi:
+        case Quantity::AngGradPhi:
             return [](const RealSphericalHarmonicsEngine& e, int l, int m) -> std::vector<double> {
-                // get_grad_phi validates mode and l-range itself,
+                // get_ang_grad_phi validates mode and l-range itself,
                 // throwing std::runtime_error on failure.
-                return e.get_grad_phi(l, m);
+                return e.get_ang_grad_phi(l, m);
             };
-        case Quantity::GradTheta:
+        case Quantity::AngGradTheta:
             return [](const RealSphericalHarmonicsEngine& e, int l, int m) -> std::vector<double> {
-                return e.get_grad_theta(l, m);
+                return e.get_ang_grad_theta(l, m);
             };
         }
     }
