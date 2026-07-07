@@ -6,7 +6,7 @@ constexpr double HARTREE_TO_EV = 27.211386245988;
 
 auto main() -> int {
     try {
-        EIGEN eig("test/data_io-local/OUT.EIGEN");
+        EIGEN eig("test/data_scf/OUT.EIGEN");
 
         const auto& m = eig.meta;
 
@@ -26,8 +26,8 @@ auto main() -> int {
         if (m.natom != 4) {
             throw std::runtime_error("natom mismatch: expected 4, got " + std::to_string(m.natom));
         }
-        if (m.nnode != 2) {
-            throw std::runtime_error("nnode mismatch: expected 2, got " + std::to_string(m.nnode));
+        if (m.nnode != 1) {
+            throw std::runtime_error("nnode mismatch: expected 1, got " + std::to_string(m.nnode));
         }
         if (m.is_SO != 0) {
             throw std::runtime_error("is_SO mismatch: expected 0, got " + std::to_string(m.is_SO));
@@ -86,8 +86,8 @@ auto main() -> int {
         // Part 2: Cross-validate EIGEN against OUT.OCC (same k-mesh)
         // ================================================================
 
-        EIGEN eig_nonlocal("test/data_io-nonlocal/OUT.EIGEN");
-        OCC occ("test/data_io-nonlocal/OUT.OCC");
+        EIGEN eig_nonlocal("test/data_scf/OUT.EIGEN");
+        OCC occ("test/data_scf/OUT.OCC");
 
         if (occ.meta.nkpt != eig_nonlocal.meta.nkpt) {
             throw std::runtime_error(
@@ -191,7 +191,7 @@ auto main() -> int {
         // Part 4: Spin=2 OCC test
         // ================================================================
         {
-            OCC occ_spin2("test/data_io-nonlocal/OUT.OCC_SPIN2");
+            OCC occ_spin2("test/data_scf/OUT.OCC_SPIN2");
 
             if (occ_spin2.meta.islda != 2) {
                 throw std::runtime_error(

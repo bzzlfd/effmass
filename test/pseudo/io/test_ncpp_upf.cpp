@@ -4,7 +4,7 @@ import std;
 
 auto main() -> int {
     try {
-        UPF upf("test/data_io_upf/Ge-spd-high.PD04.PBE.UPF");
+        UPF upf("test/data_upf/Ge-spd-high.PD04.PBE.UPF");
         NCPP ncpp(upf);
 
         const int meshSize = ncpp.meta.mesh_size;

@@ -188,8 +188,7 @@ auto main() -> int {
             std::println("  print_info() [OK]");
         };
 
-        test("test ATOM (nonlocal)", "test/data_io-nonlocal/atom.config");
-        test("test ATOM (local)",    "test/data_io-local/atom.config");
+        test("test ATOM (nonlocal)", "test/data_scf/atom.config");
 
         std::println("\nall tests passed");
         return 0;

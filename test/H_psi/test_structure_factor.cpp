@@ -1,7 +1,7 @@
 // Test: StructureFactor — None and Separable modes.
 //
 // WORKING_DIRECTORY: ${CMAKE_SOURCE_DIR} (project root)
-// Uses test data under test/data_io-nonlocal/
+// Uses test data under test/data_scf/
 
 import std;
 import io;
@@ -13,7 +13,7 @@ auto main() -> int {
     //  StructureFactor — None and Separable modes
     // =====================================================================
     {
-        Hamiltonian h("test/data_io-nonlocal");
+        Hamiltonian h("test/data_scf");
         h.loadFromDirectory();
         auto& gkk = h.gkk();
         gkk.setDataView(KVecsView::Cartesian | KVecsView::Integer);

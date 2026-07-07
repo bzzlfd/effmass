@@ -258,7 +258,7 @@ if (soc) {
 ```
 test/
 ├── CMakeLists.txt
-test/data_io_upf/
+test/data_upf/
     ├── Ge-spd-high.PD04.PBE.UPF          # NC 测试数据
     ├── Si.pbe-n-kjpaw_psl.1.0.0.UPF      # PAW 测试数据
     └── Si.pbe-nl-rrkjus_psl.1.0.0.UPF    # USPP 测试数据

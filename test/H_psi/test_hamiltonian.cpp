@@ -1,7 +1,7 @@
 // Test: Hamiltonian step-by-step loading + loadFromDirectory + error handling.
 //
 // WORKING_DIRECTORY: ${CMAKE_SOURCE_DIR} (project root)
-// Uses test data under test/data_io-nonlocal/
+// Uses test data under test/data_scf/
 
 import std;
 import io;
@@ -27,7 +27,7 @@ auto main() -> int {
     //  2. Step-by-step load — nonlocal AlN data
     // =====================================================================
     {
-        Hamiltonian h("test/data_io-nonlocal");
+        Hamiltonian h("test/data_scf");
         h.loadATOM("atom.config");
         if (!h.hasATOM()) { std::println("FAIL: ATOM not loaded"); return 1; }
         if (h.hasGKK())  { std::println("FAIL: GKK should not be loaded yet"); return 1; }
@@ -35,7 +35,7 @@ auto main() -> int {
     }
 
     {
-        Hamiltonian h("test/data_io-nonlocal");
+        Hamiltonian h("test/data_scf");
         h.loadATOM("atom.config");
         h.loadNCPP("Al.SG15.PBE.UPF");
         h.loadNCPP("N.SG15.PBE.UPF");
@@ -52,7 +52,7 @@ auto main() -> int {
 
     {
         // Duplicate element → should throw with both file paths.
-        Hamiltonian h("test/data_io-nonlocal");
+        Hamiltonian h("test/data_scf");
         h.loadNCPP("Al.SG15.PBE.UPF");
         bool threw = false;
         try {
@@ -74,7 +74,7 @@ auto main() -> int {
     }
 
     {
-        Hamiltonian h("test/data_io-nonlocal");
+        Hamiltonian h("test/data_scf");
         h.loadATOM ("atom.config");
         h.loadNCPP("Al.SG15.PBE.UPF");
         h.loadNCPP("N.SG15.PBE.UPF");
@@ -102,7 +102,7 @@ auto main() -> int {
     //  3. loadFromDirectory convenience
     // =====================================================================
     {
-        Hamiltonian h("test/data_io-nonlocal");
+        Hamiltonian h("test/data_scf");
         h.loadFromDirectory();
 
         if (!h.hasGKK() || !h.hasWG() || !h.hasVR() ||
@@ -136,7 +136,7 @@ auto main() -> int {
         if (!threw) { std::println("FAIL: wg() should throw when not loaded"); return 1; }
 
         // ncpp with missing element
-        Hamiltonian h2("test/data_io-nonlocal");
+        Hamiltonian h2("test/data_scf");
         h2.loadATOM("atom.config");
         h2.loadNCPP("Al.SG15.PBE.UPF");
         h2.loadNCPP("N.SG15.PBE.UPF");
@@ -152,7 +152,7 @@ auto main() -> int {
     //  5. EIGEN is truly optional — H|ψ⟩ does not require it
     // =====================================================================
     {
-        Hamiltonian h("test/data_io-nonlocal");
+        Hamiltonian h("test/data_scf");
         h.loadFromDirectory();
 
         // at_k should succeed even though eigen is loaded — it's optional (extra)
@@ -162,7 +162,7 @@ auto main() -> int {
         std::println("PASS: at_k() works with EIGEN present (optional)");
 
         // H without EIGEN
-        Hamiltonian h2("test/data_io-nonlocal");
+        Hamiltonian h2("test/data_scf");
         h2.loadATOM ("atom.config");
         h2.loadNCPP("Al.SG15.PBE.UPF");
         h2.loadNCPP("N.SG15.PBE.UPF");
@@ -194,7 +194,7 @@ auto main() -> int {
     //  7. checkConsistencyExtended  —  Part 3 heavy checks
     // =====================================================================
     {
-        Hamiltonian h("test/data_io-nonlocal");
+        Hamiltonian h("test/data_scf");
         h.loadFromDirectory();
 
         // All checks
@@ -215,7 +215,7 @@ auto main() -> int {
 
     {
         // Partial data — checks that can't run should skip gracefully
-        Hamiltonian h("test/data_io-nonlocal");
+        Hamiltonian h("test/data_scf");
         h.loadATOM("atom.config");
         h.loadGKK("OUT.GKK");
         h.checkConsistencyExtended();   // all skip (no WG/OCC/RHO/NCPPs)

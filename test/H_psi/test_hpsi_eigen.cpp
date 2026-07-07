@@ -12,14 +12,14 @@
 // Tests k-points 0 and 1 (52 pairs total).
 //
 // WORKING_DIRECTORY: ${CMAKE_SOURCE_DIR} (project root)
-// Uses test data under test/data_io-nonlocal/
+// Uses test data under test/data_scf/
 
 import std;
 import io;
 import H_psi;
 
 auto main() -> int {
-    Hamiltonian h("test/data_io-nonlocal");
+    Hamiltonian h("test/data_scf");
     h.loadFromDirectory();
 
     auto& gkk   = h.gkk();

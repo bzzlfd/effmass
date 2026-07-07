@@ -3,7 +3,7 @@ import std;
 
 
 auto testVR() -> void {
-    RHO vr("test/data_io-local/OUT.VR");
+    RHO vr("test/data_scf/OUT.VR");
 
     const auto& m = vr.meta;
 
@@ -17,26 +17,26 @@ auto testVR() -> void {
     if (m.n3 != 32) {
         throw std::runtime_error("VR n3 mismatch: expected 32, got " + std::to_string(m.n3));
     }
-    if (m.nnode != 2) {
-        throw std::runtime_error("VR nnodes mismatch: expected 2, got " + std::to_string(m.nnode));
+    if (m.nnode != 1) {
+        throw std::runtime_error("VR nnodes mismatch: expected 1, got " + std::to_string(m.nnode));
     }
     if (m.nstate != 1) {
         throw std::runtime_error("VR nstate mismatch: expected 1, got " + std::to_string(m.nstate));
     }
 
     // Spot-check first value
-    if (std::abs(vr[0, 0, 0] - 0.1545698540504107) > 1e-9) {
-        throw std::runtime_error("VR[0,0,0] mismatch: expected ~0.1545698540504107, got " +
+    if (std::abs(vr[0, 0, 0] - 0.0932307015284446) > 1e-9) {
+        throw std::runtime_error("VR[0,0,0] mismatch: expected ~0.0932307015284446, got " +
             std::to_string(vr[0, 0, 0]));
     }
 
     // Spot-check some other values
-    if (std::abs(vr[0, 0, 1] - 0.1682704177691634) > 1e-9) {
-        throw std::runtime_error("VR[0,0,1] mismatch: expected ~0.1682704177691634, got " +
+    if (std::abs(vr[0, 0, 1] - 0.1119047176083688) > 1e-9) {
+        throw std::runtime_error("VR[0,0,1] mismatch: expected ~0.1119047176083688, got " +
             std::to_string(vr[0, 0, 1]));
     }
-    if (std::abs(vr[0, 0, 2] - 0.2065417110366990) > 1e-9) {
-        throw std::runtime_error("VR[0,0,2] mismatch: expected ~0.2065417110366990, got " +
+    if (std::abs(vr[0, 0, 2] - 0.0997147037619031) > 1e-9) {
+        throw std::runtime_error("VR[0,0,2] mismatch: expected ~0.0997147037619031, got " +
             std::to_string(vr[0, 0, 2]));
     }
 
@@ -50,7 +50,7 @@ auto testVR() -> void {
 
 
 auto testRHO() -> void {
-    RHO rho("test/data_io-local/OUT.RHO");
+    RHO rho("test/data_scf/OUT.RHO");
 
     const auto& m = rho.meta;
 
@@ -63,16 +63,16 @@ auto testRHO() -> void {
     if (m.n3 != 32) {
         throw std::runtime_error("RHO n3 mismatch: expected 32, got " + std::to_string(m.n3));
     }
-    if (m.nnode != 2) {
-        throw std::runtime_error("RHO nnodes mismatch: expected 2, got " + std::to_string(m.nnode));
+    if (m.nnode != 1) {
+        throw std::runtime_error("RHO nnodes mismatch: expected 1, got " + std::to_string(m.nnode));
     }
     if (m.nstate != 1) {
         throw std::runtime_error("RHO nstate mismatch: expected 1, got " + std::to_string(m.nstate));
     }
 
     // RHO has different values from VR
-    if (std::abs(rho[0, 0, 0] - 0.01370603011048329) > 1e-12) {
-        throw std::runtime_error("RHO[0,0,0] mismatch: expected ~0.01370603011048329, got " +
+    if (std::abs(rho[0, 0, 0] - 0.0100012293618305) > 1e-12) {
+        throw std::runtime_error("RHO[0,0,0] mismatch: expected ~0.0100012293618305, got " +
             std::to_string(rho[0, 0, 0]));
     }
 

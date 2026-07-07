@@ -311,7 +311,7 @@ auto test_dbeta_boundary_errors() -> void {
 auto test_dbeta_analytical_vs_numerical() -> void {
     std::println("\n=== β(q) derivative comparison: analytical vs numerical ===");
 
-    std::string upf_path = "test/data_io_upf/Ge-spd-high.PD04.PBE.UPF";
+    std::string upf_path = "test/data_upf/Ge-spd-high.PD04.PBE.UPF";
     std::println("Reading: {}\n", upf_path);
 
     UPF upf(upf_path);

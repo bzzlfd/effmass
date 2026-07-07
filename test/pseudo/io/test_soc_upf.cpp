@@ -4,7 +4,7 @@ import std;
 
 auto main() -> int {
     try {
-        UPF upf("test/data_io_upf/Si-PD04-FR.upf");
+        UPF upf("test/data_upf/Si-PD04-FR.upf");
 
         const auto& h = upf.header();
         if (h.element != "Si") throw std::runtime_error("element mismatch");
@@ -57,7 +57,7 @@ auto main() -> int {
         }
 
         // Non-SOC file should have no SOC data
-        UPF ncsoc("test/data_io_upf/Ge-spd-high.PD04.PBE.UPF");
+        UPF ncsoc("test/data_upf/Ge-spd-high.PD04.PBE.UPF");
         if (ncsoc.socData() != nullptr) {
             throw std::runtime_error("non-SOC file should have null socData");
         }

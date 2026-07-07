@@ -4,7 +4,7 @@ import std;
 
 auto main() -> int {
     try {
-        GKK gkk("test/data_io-local/OUT.GKK");
+        GKK gkk("test/data_scf/OUT.GKK");
 
         const auto& m = gkk.meta;
 
@@ -12,8 +12,8 @@ auto main() -> int {
         if (m.n1 != 20)     throw std::runtime_error("n1 mismatch: expected 20");
         if (m.n2 != 20)     throw std::runtime_error("n2 mismatch: expected 20");
         if (m.n3 != 32)     throw std::runtime_error("n3 mismatch: expected 32");
-        if (m.mg_nx != 1042) throw std::runtime_error("mg_nx mismatch: expected 1042");
-        if (m.nnode != 2)  throw std::runtime_error("nnode mismatch: expected 2");
+        if (m.mg_nx != 1984) throw std::runtime_error("mg_nx mismatch: expected 1984");
+        if (m.nnode != 1)  throw std::runtime_error("nnode mismatch: expected 1");
         if (m.nkpt != 10)   throw std::runtime_error("nkpt mismatch: expected 10");
         if (m.is_SO != 0)   throw std::runtime_error("is_SO mismatch: expected 0");
         if (m.islda != 1)   throw std::runtime_error("islda mismatch: expected 1");
@@ -77,13 +77,7 @@ auto main() -> int {
             throw std::runtime_error("Kz[0] mismatch: expected 0.0");
         }
 
-        // Verify merge across nodes: last of node 0, first of node 1
-        if (std::abs(kv0.kinetic[873] - 0.7529635525206351) > 1e-12) {
-            throw std::runtime_error("kinetic[873] (last of node 0) mismatch");
-        }
-        if (std::abs(kv0.kinetic[874] - 1.631402507680678) > 1e-12) {
-            throw std::runtime_error("kinetic[874] (first of node 1) mismatch");
-        }
+        // No node-merge test (data_scf has nnode=1)
 
         // Spherical and Integer views should not be available yet
         if (!kv0.q.empty() || !kv0.theta.empty() || !kv0.phi.empty()) {

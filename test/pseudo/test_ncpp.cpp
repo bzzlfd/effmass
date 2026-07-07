@@ -5,7 +5,7 @@ import std;
 auto main() -> int {
     try {
         // Load UPF data first
-        UPF upf("test/data_io_upf/Ge-spd-high.PD04.PBE.UPF");
+        UPF upf("test/data_upf/Ge-spd-high.PD04.PBE.UPF");
 
         // Construct NCPP potential operator from UPF data
         NCPP pot(upf);

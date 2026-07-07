@@ -26,10 +26,10 @@ auto main() -> int {
         // =========================================================================
         // 0. Open data files
         // =========================================================================
-        WG   wg("test/data_io-nonlocal/OUT.WG");
-        GKK  gkk("test/data_io-nonlocal/OUT.GKK");
-        RHO  rho("test/data_io-nonlocal/OUT.RHO");
-        EIGEN eigen("test/data_io-nonlocal/OUT.EIGEN");
+        WG   wg("test/data_scf/OUT.WG");
+        GKK  gkk("test/data_scf/OUT.GKK");
+        RHO  rho("test/data_scf/OUT.RHO");
+        EIGEN eigen("test/data_scf/OUT.EIGEN");
 
         // --- grid & volume consistency ---
         check(wg.meta.n1 == gkk.meta.n1 && gkk.meta.n1 == rho.meta.n1, "n1 consistency");
@@ -165,7 +165,7 @@ auto main() -> int {
         std::vector<double> rho_gamma(static_cast<std::size_t>(n123));
         for (int i = 0; i < n123; ++i) rho_gamma[i] = std::norm(gr_gamma[i]);
 
-        RHO rho_gamma_ref("test/data_io-nonlocal/OUT.WG2RHO_1_16");
+        RHO rho_gamma_ref("test/data_scf/OUT.WG2RHO_1_16");
         check(rho_gamma_ref.meta.n1 == n1 && rho_gamma_ref.meta.n2 == n2 && rho_gamma_ref.meta.n3 == n3,
               "OUT.WG2RHO_1_16 grid match");
         check(rho_gamma_ref.meta.nstate == 1, "OUT.WG2RHO_1_16 nstate == 1");
@@ -208,7 +208,7 @@ auto main() -> int {
         std::vector<double> rho_k7(static_cast<std::size_t>(n123));
         for (int i = 0; i < n123; ++i) rho_k7[i] = std::norm(gr_k7[i]);
 
-        RHO rho_k7_ref("test/data_io-nonlocal/OUT.WG2RHO_8_17");
+        RHO rho_k7_ref("test/data_scf/OUT.WG2RHO_8_17");
         check(rho_k7_ref.meta.n1 == n1 && rho_k7_ref.meta.n2 == n2 && rho_k7_ref.meta.n3 == n3,
               "OUT.WG2RHO_8_17 grid match");
         check(rho_k7_ref.meta.nstate == 1, "OUT.WG2RHO_8_17 nstate == 1");
@@ -231,7 +231,7 @@ auto main() -> int {
         // =========================================================================
         std::println("\n--- Charge density  Σ occ·|ψ|²  vs  OUT.RHO ---");
 
-        OCC occ("test/data_io-nonlocal/OUT.OCC");
+        OCC occ("test/data_scf/OUT.OCC");
         check(occ.meta.nkpt == wg.meta.nkpt, "OCC/WG nkpt consistency");
         check(occ.meta.nband == wg.meta.nband, "OCC/WG nband consistency");
 

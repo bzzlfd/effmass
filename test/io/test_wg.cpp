@@ -4,7 +4,7 @@ import std;
 
 auto main() -> int {
     try {
-        WG wg("test/data_io-local/OUT.WG");
+        WG wg("test/data_scf/OUT.WG");
 
         const auto& m = wg.meta;
 
@@ -13,8 +13,8 @@ auto main() -> int {
         if (m.n2 != 20)     throw std::runtime_error("n2 mismatch: expected 20");
         if (m.n3 != 32)     throw std::runtime_error("n3 mismatch: expected 32");
         if (m.nband != 26)     throw std::runtime_error("nband mismatch: expected 26");
-        if (m.mg_nx != 1042) throw std::runtime_error("mg_nx mismatch: expected 1042");
-        if (m.nnode != 2)  throw std::runtime_error("nnode mismatch: expected 2");
+        if (m.mg_nx != 1984) throw std::runtime_error("mg_nx mismatch: expected 1984");
+        if (m.nnode != 1)  throw std::runtime_error("nnode mismatch: expected 1");
         if (m.nkpt != 10)   throw std::runtime_error("nkpt mismatch: expected 10");
         if (m.is_SO != 0)   throw std::runtime_error("is_SO mismatch: expected 0");
         if (m.islda != 1)   throw std::runtime_error("islda mismatch: expected 1");
@@ -62,10 +62,10 @@ auto main() -> int {
             }
         };
 
-        check_cplx(wfc00.up[0],   std::complex<double>(5.192385287955403e-04,  5.399459972977638e-03), 1e-15, "wfc[0]");
-        check_cplx(wfc00.up[1],   std::complex<double>(-6.130161928012967e-04, -6.359556224197149e-03), 1e-15, "wfc[1]");
-        check_cplx(wfc00.up[2],   std::complex<double>(1.313827087869868e-04,  1.359764137305319e-03), 1e-15, "wfc[2]");
-        check_cplx(wfc00.up[100], std::complex<double>(1.333363979938440e-05,  1.674602390266955e-04), 1e-15, "wfc[100]");
+        check_cplx(wfc00.up[0],   std::complex<double>(-4.065623041242361e-03, -3.809586400166154e-03), 1e-15, "wfc[0]");
+        check_cplx(wfc00.up[1],   std::complex<double>(4.679061006754637e-03,  4.376962315291166e-03), 1e-15, "wfc[1]");
+        check_cplx(wfc00.up[2],   std::complex<double>(-9.637266630306840e-04, -8.999732672236860e-04), 1e-15, "wfc[2]");
+        check_cplx(wfc00.up[100], std::complex<double>(5.078330868855119e-04, -5.376931512728334e-04), 1e-15, "wfc[100]");
 
         // Cache test: loading same band again should return identical data
         // Note: loadBand returns a reference; subsequent calls invalidate prior references
