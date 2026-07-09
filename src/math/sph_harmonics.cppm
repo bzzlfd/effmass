@@ -406,6 +406,12 @@ public:
     auto ngCapacity() const -> std::size_t { return cos_theta_.capacity(); }
     auto mode() const -> CacheMode { return mode_; }
 
+    // -- trig array views (returned as const ref to match RealSphericalHarmonicsData style) --
+    auto sinTheta() const -> const std::vector<double>& { return sin_theta_; }
+    auto cosTheta() const -> const std::vector<double>& { return cos_theta_; }
+    auto sinPhi()   const -> const std::vector<double>& { return sin_phi_; }
+    auto cosPhi()   const -> const std::vector<double>& { return cos_phi_; }
+
 private:
     std::span<const double> theta_;
     std::span<const double> phi_;

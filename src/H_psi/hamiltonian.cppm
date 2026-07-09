@@ -8,16 +8,28 @@ import pseudo;
 import math;
 
 // ===================================================================
+//  Public API of module H_psi.hamiltonian — all exported names.
+//  Full definitions follow the export block.
+// ===================================================================
+export {
+    enum class ExtendedCheck : std::uint64_t;
+    enum class PSPFeature : std::uint64_t;
+    struct GradHPsi;
+    struct HessHPsi;
+    class Hamiltonian;
+}
+
+
+// ===================================================================
 //  ExtendedCheck  —  select which heavyweight checks to run in
 //                    checkConsistencyExtended()
 // ===================================================================
-export {
-    enum class ExtendedCheck : std::uint64_t {
-        RHOReconstruct   = 1ull << 0,  // Σ occ·|WG|² → FFT → RHO'  vs  file RHO
-        ValenceCount     = 1ull << 1,  // Σ(NCPP.z_valence × count)  ≈  ∫RHO d³r
-        NCPPAtomCoverage = 1ull << 2,  // every ATOM species has a matching NCPP
-    };
-}
+enum class ExtendedCheck : std::uint64_t {
+    RHOReconstruct   = 1ull << 0,  // Σ occ·|WG|² → FFT → RHO'  vs  file RHO
+    ValenceCount     = 1ull << 1,  // Σ(NCPP.z_valence × count)  ≈  ∫RHO d³r
+    NCPPAtomCoverage = 1ull << 2,  // every ATOM species has a matching NCPP
+};
+
 
 // ===================================================================
 //  PSPFeature  —  controls how many q-derivative orders of the atomic
@@ -31,24 +43,53 @@ export {
 //  D2Betaq implies DBetaq, DBetaq implies Nonlocal; validated at
 //  runtime in finalize().
 // ===================================================================
-export {
-    enum class PSPFeature : std::uint64_t {
-        Nonlocal = 1ull << 0,  // build BetaqTables    —  β(q)           required by H|ψ⟩
-        DBetaq   = 1ull << 1,  // build DBetaqTables   —  ∂β/∂q           required by gradient
-        D2Betaq  = 1ull << 2,  // build D2BetaqTables  —  ∂²β/∂q²         required by Hessian
-    };
-}
+enum class PSPFeature : std::uint64_t {
+    Nonlocal = 1ull << 0,  // build BetaqTables    —  β(q)           required by H|ψ⟩
+    DBetaq   = 1ull << 1,  // build DBetaqTables   —  ∂β/∂q           required by gradient
+    D2Betaq  = 1ull << 2,  // build D2BetaqTables  —  ∂²β/∂q²         required by Hessian
+};
+
 
 // ===================================================================
-//  KDir — Cartesian direction specifier for gradient/hessian
+//  GradHPsi  —  output container for  ∂H/∂k_α|ψ⟩ batch result
+//
+//  An empty span (default-constructed) means "do not compute this
+//  Cartesian direction".  Pass a pre-allocated span for each
+//  direction you need.
+//
+//  Usage patterns:
+//
+//    std::vector<std::complex<double>> dx(ng), dy(ng), dz(ng);
+//    grad(psi, {dx, dy, dz});
+//    grad(psi, {.x = dx, .z = {dy.data(), ng}});
 // ===================================================================
-export {
-    enum class KDir : int {
-        X = 0,
-        Y = 1,
-        Z = 2,
-    };
-}
+struct GradHPsi {
+    std::span<std::complex<double>> x;
+    std::span<std::complex<double>> y;
+    std::span<std::complex<double>> z;
+};
+
+// ===================================================================
+//  HessHPsi  —  output container for  ∂²H/∂k_α∂k_β|ψ⟩ batch result
+//
+//  An empty span (default-constructed) means "do not compute this
+//  component".  Pass a pre-allocated span for each component you need.
+//
+//  Usage:
+//    std::vector<std::complex<double>> d2xx(ng);
+//    std::vector<std::complex<double>> d2yy(ng), d2zz(ng);
+//    std::vector<std::complex<double>> d2xy(ng), d2xz(ng), d2yz(ng);
+//    hes(psi, {d2xx, d2yy, d2zz, d2xy, d2xz, d2yz});
+// ===================================================================
+struct HessHPsi {
+    std::span<std::complex<double>> xx;  // ∂²/∂k_x²
+    std::span<std::complex<double>> yy;  // ∂²/∂k_y²
+    std::span<std::complex<double>> zz;  // ∂²/∂k_z²
+    std::span<std::complex<double>> xy;  // ∂²/∂k_x∂k_y
+    std::span<std::complex<double>> xz;  // ∂²/∂k_x∂k_z
+    std::span<std::complex<double>> yz;  // ∂²/∂k_y∂k_z
+};
+
 
 // ===========================================================================
 //  Hamiltonian  —  owns input data files for H|ψ⟩ / gradient / hessian
@@ -65,13 +106,12 @@ export {
 //  Three groups (peers at the Hamiltonian level):
 //    1.  Callable          —  H|ψ⟩             H.at_k()
 //    2.  Gradient                              H.gradient
-//        2.1.  Callable    —  ∂H/∂k_α|ψ⟩       H.gradient.at_k_a()
+//        2.1.  Callable    —  ∂H/∂k_α|ψ⟩       H.gradient.at_k()
 //    3.  Hessian                               H.hessian
-//        3.1.  Callable    —  ∂²H/∂k_α∂k_β|ψ⟩  H.hessian.at_k_ab()
+//        3.1.  Callable    —  ∂²H/∂k_α∂k_β|ψ⟩  H.hessian.at_k()
 //
 //  Implementations live in sibling .cpp files (module implementation units).
 // ===========================================================================
-export {
     class Hamiltonian {
     public:
         /// Construct with a base directory (default: current working directory).
@@ -167,8 +207,13 @@ export {
 
         // ===================================================================
         //  2.  Gradient  —  ∂H/∂k_α|ψ⟩ at fixed k
-        //      H.gradient.at_k_a(ikpt, dir) → Callable
-        //      callable(psi, out)
+        //      H.gradient.at_k(ikpt) → Callable
+        //      callable(psi, GradHPsi out)
+        //
+        //  The operator() computes all three Cartesian gradient directions
+        //  (X/Y/Z) in one batch, because the nonlocal pseudopotential term
+        //  shares spherical-gradient computation across directions.  Pass
+        //  a GradHPsi to select which direction(s) to compute.
         // ===================================================================
         class Gradient {
         public:
@@ -178,20 +223,36 @@ export {
             public:
                 Callable() = default;
 
+                /// Compute ∂H/∂k_x|ψ⟩, ∂H/∂k_y|ψ⟩, ∂H/∂k_z|ψ⟩ in one batch.
+                /// Only directions with non-empty spans in `out` are computed.
                 void operator()(std::span<const std::complex<double>> psi,
-                                std::span<std::complex<double>> out) const;
+                                GradHPsi out) const;
 
                 auto dim() const -> int;
 
             private:
                 friend class Gradient;
-                Callable(const Hamiltonian* parent, int ikpt, KDir dir);
+                explicit Callable(const Hamiltonian* parent, int ikpt);
+
+                /// Rebind to a different k-point.
+                /// Reloads k-point data and reconstructs Ylm.
+                auto set_ikpt(int ikpt) -> void;
 
                 const Hamiltonian* parent_{nullptr};
                 int ikpt_{0};
-                KDir dir_{KDir::X};
+                int ng_{0};
+                int n1_{0}, n2_{0}, n3_{0};             // FFT grid dimensions
+
+                // Ylm engine and lazy data caches (shared across directions)
+                mutable std::optional<RealSphericalHarmonicsEngine> engine_;
+                mutable RealSphericalHarmonicsData ylm_data_;
+                mutable RealSphericalHarmonicsData ylm_grad_theta_data_{RealSphericalHarmonicsData::Quantity::GradTheta};
+                mutable RealSphericalHarmonicsData ylm_grad_phi_data_{RealSphericalHarmonicsData::Quantity::GradPhi};
+
+                // Trig arrays live in RealSphericalHarmonicsEngine;
+                // accessed via sinTheta()/cosTheta()/sinPhi()/cosPhi().
             };
-            auto at_k_a(int ikpt, KDir dir) const -> Callable { return Callable(parent_, ikpt, dir); }
+            auto at_k(int ikpt) const -> Callable { return Callable(parent_, ikpt); }
 
         private:
             friend class Hamiltonian;
@@ -204,8 +265,12 @@ export {
 
         // ===================================================================
         //  3.  Hessian  —  ∂²H/∂k_α∂k_β|ψ⟩ at fixed k
-        //      H.hessian.at_k_ab(ikpt, d1, d2) → Callable
-        //      callable(psi, out)
+        //      H.hessian.at_k(ikpt) → Callable
+        //      callable(psi, HessHPsi out)
+        //
+        //  The operator() computes all six unique Hessian components
+        //  (XX, YY, ZZ, XY, XZ, YZ) in one batch when requested via
+        //  HessHPsi output.  Pass a HessHPsi to select which component(s).
         // ===================================================================
         class Hessian {
         public:
@@ -215,22 +280,26 @@ export {
             public:
                 Callable() = default;
 
+                /// Compute ∂²H/∂k_α∂k_β|ψ⟩ for the requested components.
+                /// Only components with non-empty spans in `out` are computed.
                 void operator()(std::span<const std::complex<double>> psi,
-                                std::span<std::complex<double>> out) const;
+                                HessHPsi out) const;
 
                 auto dim() const -> int;
 
             private:
                 friend class Hessian;
-                Callable(const Hamiltonian* parent, int ikpt,
-                         KDir d1, KDir d2);
+                explicit Callable(const Hamiltonian* parent, int ikpt);
+
+                /// Rebind to a different k-point.
+                /// Reloads k-point data.
+                auto set_ikpt(int ikpt) -> void;
 
                 const Hamiltonian* parent_{nullptr};
                 int ikpt_{0};
-                KDir d1_{KDir::X};
-                KDir d2_{KDir::X};
+                int ng_{0};
             };
-            auto at_k_ab(int ikpt, KDir d1, KDir d2) const -> Callable { return Callable(parent_, ikpt, d1, d2); }
+            auto at_k(int ikpt) const -> Callable { return Callable(parent_, ikpt); }
 
         private:
             friend class Hamiltonian;
@@ -292,4 +361,3 @@ export {
         auto checkPart1() -> void;
         auto checkPart2() -> void;
     };
-}
