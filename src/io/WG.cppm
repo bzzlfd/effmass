@@ -44,6 +44,7 @@ public:
     auto operator=(WG&& other) noexcept -> WG&;
 
     auto loadBand(int ikpt, int iband) -> const WGCoeffsView&;        // load band data (with cache)
+    auto seekTo(int ikpt, int inode, int iband) -> void;             // seek to (ikpt, inode, iband) record
     auto current_ikpt() const -> int { return current_ikpt_; }     // current k-point index
     auto current_iband() const -> int { return current_iband_; }      // current band index
     auto currentData() const -> const WGCoeffsView& { return current_data_view_; }  // current data
@@ -67,13 +68,12 @@ private:
     auto readMetadata() -> void;                        // read file metadata
     auto readNgtotnod(int record_len) -> void;          // read ngtotnod array
     auto skipRecord() -> void;                          // skip one Fortran record
-    auto computeOffsets() -> void;                      // compute file offset per (k-point, band)
-    auto seekToBand(int ikpt, int iband) -> void;       // seek to band data
+    auto computeOffsets() -> void;                      // compute file offset per k-point
 
     std::string filename_;                      // file name
     std::FILE* fp_;                             // file handle
     std::vector<std::vector<int>> ngtotnod_;    // G-vector count per k-point per node
-    std::vector<long> band_offsets_;            // file offset per band per k-point
+    std::vector<std::vector<long>> band_offsets_;  // file offset per k-point [ikpt][inode * nband + iband]
 
     // multi-band cache
     std::vector<std::unique_ptr<CachedState>> cache_;  // cache entries (stable addresses via unique_ptr)
@@ -308,14 +308,16 @@ auto WG::skipRecord() -> void {
 
 
 auto WG::computeOffsets() -> void {
-    // record the starting file offset for each (k-point, band) pair
+    // record the starting file offset for each (inode, iband) record per k-point.
     // File layout per kpt: node=0 band=0..nband-1, node=1 band=0..nband-1, ...
-    band_offsets_.resize(static_cast<std::size_t>(meta.nkpt) * meta.nband);
+    // Offsets are stored as band_offsets_[ikpt][inode * nband + iband].
+    band_offsets_.resize(meta.nkpt);
 
     for (int ikpt = 0; ikpt < meta.nkpt; ++ikpt) {
-        for (int b = 0; b < meta.nband; ++b) {
-            band_offsets_[static_cast<std::size_t>(ikpt) * meta.nband + b] = std::ftell(fp_);
-            for (int n = 0; n < meta.nnode; ++n) {
+        band_offsets_[ikpt].resize(meta.nnode * meta.nband);
+        for (int inode = 0; inode < meta.nnode; ++inode) {
+            for (int iband = 0; iband < meta.nband; ++iband) {
+                band_offsets_[ikpt][inode * meta.nband + iband] = std::ftell(fp_);
                 skipRecord();
             }
         }
@@ -323,17 +325,20 @@ auto WG::computeOffsets() -> void {
 }
 
 
-auto WG::seekToBand(int ikpt, int iband) -> void {
+auto WG::seekTo(int ikpt, int inode, int iband) -> void {
     if (ikpt < 0 || ikpt >= meta.nkpt) {
-        throw std::out_of_range("Invalid k-point index");
+        throw std::out_of_range("Invalid k-point index: " + std::to_string(ikpt));
+    }
+    if (inode < 0 || inode >= meta.nnode) {
+        throw std::out_of_range("Invalid node index: " + std::to_string(inode));
     }
     if (iband < 0 || iband >= meta.nband) {
-        throw std::out_of_range("Invalid band index");
+        throw std::out_of_range("Invalid band index: " + std::to_string(iband));
     }
 
-    long offset = band_offsets_[static_cast<std::size_t>(ikpt) * meta.nband + iband];
+    long offset = band_offsets_[ikpt][inode * meta.nband + iband];
     if (std::fseek(fp_, offset, SEEK_SET) != 0) {
-        throw std::runtime_error("Failed to seek to band");
+        throw std::runtime_error("Failed to seek to (ikpt, inode, iband) record");
     }
 }
 
@@ -357,7 +362,6 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffsView& {
     }
 
     // cache miss: read from file
-    seekToBand(ikpt, iband);
 
     CachedState* entry = nullptr;
     if (cache_.size() < cache_capacity_) {
@@ -381,6 +385,8 @@ auto WG::loadBand(int ikpt, int iband) -> const WGCoeffsView& {
     for (int inode = 0; inode < meta.nnode; ++inode) {
         int ng = ngtotnod_[ikpt][inode];
         if (ng == 0) continue;
+
+        seekTo(ikpt, inode, iband);
 
         if (meta.is_SO == 1) {
             readRecordSOC(entry->up.data() + pos, entry->down.data() + pos, ng, "wg");
