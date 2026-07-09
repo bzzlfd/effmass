@@ -80,3 +80,8 @@ add_test(NAME test-structure-factor COMMAND test-structure-factor WORKING_DIRECT
 add_executable(test-hpsi-eigen H_psi/test_hpsi_eigen.cpp)
 target_link_libraries(test-hpsi-eigen PRIVATE H_psi)
 add_test(NAME test-hpsi-eigen COMMAND test-hpsi-eigen WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# H|ψ⟩ gradient eigenstate check (Hellmann-Feynman via finite difference)
+add_executable(test-hgrad-eigen-fd H_psi/test_hgrad_eigen_fd.cpp)
+target_link_libraries(test-hgrad-eigen-fd PRIVATE H_psi)
+add_test(NAME test-hgrad-eigen-fd COMMAND test-hgrad-eigen-fd WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
