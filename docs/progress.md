@@ -1,3 +1,16 @@
+# GKK K 矢量符号约定修正
+
+PWmat 文件存储 `Kx/Ky/Kz = -(G+k)`，此前各消费者通过 `const double Kx = -Kx_[ig]` 在使用点取反。本次修改：
+1. 将取反移至加载时：`GKK::loadKPoint()` 中读完原始数据后做 `Kx_[i] = -Kx_[i]`
+2. 消除了 `computeIntegerIndices()` 和 `inferCurrent_k()` 中的使用点取反
+3. `KVecs::Kx/Ky/Kz` 现在直接表示物理 `+(G+k)`（含注释更新）
+4. 梯度动能项直接使用 `kv.Kx[ig]`（无需负号）
+5. `docs/note/plane_wave_sign_conventions.md` 同步更新
+
+修复了 `inferCurrent_k()` 在 `k=0.5` 处因浮点噪声误触 wrap 的问题。
+
+验证：全部 19 个测试通过（含 test-wg-fft 的 GKK↔EIGEN k‑点比对、test-hpsi-eigen 的 H|ψ⟩ 验证）。
+
 # d Ylm
 
 对于以球坐标为自变量的函数 函数 f(q, θ, φ) := β(q) Y_lm(θ, φ), 它的梯度为
@@ -82,4 +95,78 @@ get 时对 Qlm 的缓存计算已经完成。
     - 等等，l=1,m=±1 时岂不是 grad_theta/phi 的奇点，沿着不同经线趋向于 0/π 有不同的结果？
         1. 毛球定理。有奇点就对了。
         2. 它们组合出的笛卡尔坐标系下的梯度向量是确定的。
+
+
+# H^alpha psi
+
+即 H_psi hamiltonian_gradient.cpp 中的 Hamiltonian.gradient.Callalble
+
+## 动能项
+$$
+\bra{K'} T^\alpha_{nn'} \ket{K} 
+               =  \delta_{K'K} \braket{\psi_{nk}|K'} K^\alpha \braket{K|\psi_{n'k}}
+$$
+
+## 赝势项
+
+1. 先学习 Hamiltonian.Callalble 中 pseudo potential nonlocal term 的计算过程
+1. 对于其中的一个 rank-1 matrix:
+
+$$
+\braket{\beta(K'_q,K'_\theta,K'_\phi)}^* \lambda \braket{\beta(K_q,K_\theta,K_\phi)}
+$$
+
+$$
+\braket{\beta(K_q,K_\theta,K_\phi)} := \beta(q)Y_{lm}(\theta, \phi)
+$$
+
+先在球坐标下计算梯度，
+
+$$
+\begin{align*}
+ & \nabla \braket{\beta(K'_q,K'_\theta,K'_\phi)}^* \lambda \braket{\beta(K_q,K_\theta,K_\phi)} \\
+= & \braket{\nabla \beta(K'_q,K'_\theta,K'_\phi)}^* \lambda \braket{\beta(K_q,K_\theta,K_\phi)} + \braket{\beta(K'_q,K'_\theta,K'_\phi)}^* \lambda \braket{\nabla \beta(K_q,K_\theta,K_\phi)} \\
+\end{align*}
+$$
+
+$
+\nabla \beta(K_q,K_\theta,K_\phi)
+$ 的相关计算已经在过去被实现：
+
+2.1. $\nabla_q$：我们实现了 DBetaqTable。
+相关文件为 sph_bessel.cppm, fourier_bessel.cppm, ncpp_advance.cppm, hamiltonian.cppm
+
+2.2. $\nabla_\theta$: 我们在 RealSphericalHarmonicsEngine 中实现了 get_grad_theta, 在RealSphericalHarmonicsData 中提供了对该数据的缓存。其中没有 $1/q$ 项，我们把它放到 $beta(q)/q$ 中，当 q 很小时，应该取 $\beta'(0)$ 极限。
+相关文件为 sph_harmonics.cppm。
+
+2.3. $\nabla_\phi$: 我们在 RealSphericalHarmonicsEngine 中实现了 get_grad_phi, 在RealSphericalHarmonicsData 中提供了对该数据的缓存。其中包含 $1/sin\theta$ ；但没有 $1/q$ 项，我们把它放到 $\beta(q)/q$ 中
+相关文件为 sph_harmonics.cppm。
+
+3. 再转换到直角坐标
+
+利用旋转矩阵 
+$$
+\begin{pmatrix}
+\frac{\partial f}{\partial x} \\
+\frac{\partial f}{\partial y} \\
+\frac{\partial f}{\partial z}
+\end{pmatrix}
+=
+\begin{pmatrix}
+\sin\theta \cos\varphi & \cos\theta \cos\varphi & -\sin\varphi \\
+\sin\theta \sin\varphi & \cos\theta \sin\varphi & \cos\varphi \\
+\cos\theta             & -\sin\theta            & 0
+\end{pmatrix}
+\begin{pmatrix}
+\frac{\partial \beta}{\partial q} Y_{lm}(\theta, \varphi) \\
+\frac{\beta}{q} \frac{\partial Y_{lm}}{\partial \theta} \\
+\frac{\beta}{q} \frac{1}{\sin\theta} \frac{\partial Y_{lm}}{\partial \varphi}
+\end{pmatrix}
+$$
+
+这样，就可以得知非局域项对 
+$
+{\partial \varepsilon_{nk}}/{\partial k_\alpha}
+$
+的贡献
 

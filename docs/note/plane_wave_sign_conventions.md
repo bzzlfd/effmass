@@ -1,6 +1,6 @@
 # TL;DR
 
-PWmat 大概有约定，WG ($W_G$) 与 GKK ($K=G+k$) 中的数据如何还原成平面波：
+PWmat 大概有约定，WG ($W_G$) 与 GKK ($GKK:=K=-k+G$) 中的数据如何还原成平面波：
 
 $$
 \psi(r) = \sum_G W_G \exp(-i K \cdot r)
@@ -8,22 +8,50 @@ $$
 
 PWmat `convert_wg2rho` 使用 forward FFT 做 G→R 变换。
 
-**约定错误的典型症状**：如果 GKK 解释或 FFT 方向设反了，算出的 |ψ(r)|² 会与 PWmat reference 呈中心反演关系，即
+---
+
+正确处理此符号约定问题，涉及
+1. 本程序解析数据与 PWmat `RHO`和 `VR` 文件对应。
+如果 GKK 解释或 FFT 方向设反了，算出的 |ψ(r)|² 会与 PWmat reference 呈中心反演关系，即
 
 ```
 my_WG2RHO[i, j, k] == PWmat_WG2RHO[-i, -j, -k]
 ```
+2. 通过 Hellmann–Feynman theorem 计算群速度与通过对 `EIGEN` 通过有限差分计算群速度之间相差符号。
 
-看到这个 pattern 就说明 GKK 符号约定与 FFT 方向不匹配。
+## PWmat 平面波符号约定分析
+1. 当我在 `IN.KPT` 输入 k 后， gen_G_comp 会选取截断平面波基组 $\{\tilde{+}K=\tilde{+}k\tilde{+}G\}$ 。在这一步中，截断标准实际上是 $\{(i,j,k)\,|\, (-k+(i,j,k)B)^2 < \text{Ecut} \}$ 。
+2. `OUT.GKK` 中 $\{K\}$ 可以认为是以 $-k$ 为中心的球内
+3. 想要得到实空间 `OUT.RHO` ，需对倒空间 GKK&WG 获得的数据进行 FFT.FORWARD：直接对K约化成分数坐标，然后取模得格点坐标 $(i,j,k)$，此坐标的系数对应实空间平面波 $\exp(-i \vec{(i,j,k)}\cdot r)$。
+即约定
+
+$$
+\{(i,j,k) := reduce\&mod(GKK)\}
+$$ 
+
+
+$$
+\{G:=(i,j,k)B \}
+$$ 
+
+$$
+u(r) = \sum_G W_G \exp(-i G \cdot r)
+$$。
+
+对于以上观察，一个好的理解是，PWmat 约定对于一个平面波波矢 $K:=-k+G$（$K$ 直接对应 GKK 中所存储的数据），它代表平面波：
+$
+\exp(-i K \cdot r)
+$。
+
+
 
 ## 本代码的处理方式
 
-1. `io.GKK` 读到文件数据后，将其**语义解释**为 $-K = -(G+k)$
-    - 数据字节不变，仅改变解释
-    - `KVecs::Cartesian` / `Spherical` 维持原样（表示 $-K$）
-    - `IntegerView` 求整数索引时，使用点取反恢复 $G+k$，再计算 `iG = round(A·(G+k)/(2π) - k_frac)`
+1. `io.GKK` 读取文件数据后，Kx/Ky/Kz 直接表示 $K := -(GKK)=k+G$
+    - 本代码约定的 $G$ 与 PWmat 约定的 $G$ 相反；且 $\psi(r) = \sum_G W_G \exp(i K \cdot r)$。
+    - `IntegerView` 求整数索引时，使用 $K = (G+k)$ 计算 `iG = round(A·(G+k)/(2π) - k_frac)`。
 2. `math.fft` 模块采用 `R2G = FORWARD` / `G2R = BACKWARD`
-    - 因为 R2G（实空间→G 空间）与 Forward（时域→频域）语义对应
+    - 与 R2G（实空间→G 空间）- Forward（时域→频域）语义对应
     - `G2R` 即 backward，使用 `exp(+iGr)`
     - 结合第 1 点中对 GKK 数据的语义解释，端到端结果与 PWmat 一致
 3. 测试 `test_wg_fft.cpp` 验证了：
@@ -35,8 +63,6 @@ my_WG2RHO[i, j, k] == PWmat_WG2RHO[-i, -j, -k]
     - 希望 $\sum_r |\psi(r)|^2 \frac{\Omega}{\Pi_i n_i} = 1$ 且 $\sum_g |\psi(g)|^2 \Omega = 1$
     - 所以 `R2G`（forward）系数 $1/n$，`G2R`（backward）系数 $1$
 
-
-目前来看，这个约定只影响 FFT 时与 PWmat 生成数据的比对，其余情况从 GKK 读到 $q$ 平面波就当作 $\exp(iqr)$ 计算，管你正的负的。
 
 
 

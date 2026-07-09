@@ -64,14 +64,14 @@ auto main() -> int {
         if (std::abs(kv0.kinetic[2] - 5.270744861626122) > 1e-12) {
             throw std::runtime_error("kinetic[2] mismatch: expected ~5.270744861626122");
         }
-        if (std::abs(kv0.Kx[0] - 1.062753653146566) > 1e-12) {
-            throw std::runtime_error("Kx[0] mismatch: expected ~1.062753653146566");
+        if (std::abs(kv0.Kx[0] - -1.062753653146566) > 1e-12) {
+            throw std::runtime_error("Kx[0] mismatch: expected ~-1.062753653146566");
         }
-        if (std::abs(kv0.Kx[1] - 2.125507306293132) > 1e-12) {
-            throw std::runtime_error("Kx[1] mismatch: expected ~2.125507306293132");
+        if (std::abs(kv0.Kx[1] - -2.125507306293132) > 1e-12) {
+            throw std::runtime_error("Kx[1] mismatch: expected ~-2.125507306293132");
         }
-        if (std::abs(kv0.Ky[0] - 0.6135811093611817) > 1e-12) {
-            throw std::runtime_error("Ky[0] mismatch: expected ~0.6135811093611817");
+        if (std::abs(kv0.Ky[0] - -0.6135811093611817) > 1e-12) {
+            throw std::runtime_error("Ky[0] mismatch: expected ~-0.6135811093611817");
         }
         if (std::abs(kv0.Kz[0] - 0.0) > 1e-15) {
             throw std::runtime_error("Kz[0] mismatch: expected 0.0");

@@ -67,6 +67,12 @@ auto main() -> int {
             auto ik = kv.kPoint;
             auto& ek = eigen.kpt_vec[ikpt];
             auto ef = cartToFrac(ek.x, ek.y, ek.z);
+            std::println("kpt={}: GKK ik=({:.8f},{:.8f},{:.8f})  "
+                         "ef(frac)=({:.8f},{:.8f},{:.8f})  "
+                         "ek(Cart)=({:.8f},{:.8f},{:.8f})",
+                         ikpt, ik[0], ik[1], ik[2],
+                         ef[0], ef[1], ef[2],
+                         ek.x, ek.y, ek.z);
             double dk = std::sqrt(
                 (ik[0]-ef[0])*(ik[0]-ef[0]) + (ik[1]-ef[1])*(ik[1]-ef[1]) + (ik[2]-ef[2])*(ik[2]-ef[2]));
             check(dk < 1e-12,

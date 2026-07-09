@@ -58,10 +58,10 @@ constexpr auto hasView(KVecsView flags, KVecsView view) -> bool {
 
 // k-point G-vector data view - non-owning spans to contiguous memory
 struct KVecs {
-    // Cartesian: data represents -K = -(G+k), negated at load time vs PWmat file convention
-    std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|²/2, -(G_x+k_x), -(G_y+k_y), -(G_z+k_z)
+    // Cartesian: data represents K = (G+k) = -GKK(stored data)
+    std::span<const double> kinetic, Kx, Ky, Kz;  // |G+k|^2/2, (G_x+k_x), (G_y+k_y), (G_z+k_z)
 
-    // Spherical representation of -K
+    // Spherical representation of K
     std::span<const double> q, theta, phi;        // |K|, polar angle [0,π], azimuthal angle [-π,π]
 
     // Integer indices of G vector in reciprocal lattice basis: G = g_idx.x*b1 + g_idx.y*b2 + g_idx.z*b3
@@ -454,14 +454,14 @@ auto GKK::computeIntegerIndices(std::size_t ng) -> void {
     constexpr double TWO_PI = 2.0 * std::numbers::pi;
     auto A_mat = meta.lattice.A();
     for (std::size_t ig = 0; ig < ng; ++ig) {
-        const double Kx = - Kx_[ig];
-        const double Ky = - Ky_[ig];
-        const double Kz = - Kz_[ig];
+        const double Kx = Kx_[ig];
+        const double Ky = Ky_[ig];
+        const double Kz = Kz_[ig];
 
         // c[n] = A[n][0] * Kx + A[n][1] * Ky + A[n][2] * Kz
         // (iG,jG,kG) = round(c / (2π) + k_frac)
-        // note: Data is read as -K = -(G+k), so A·(-K)/(2π) = -(iG + k_frac).
-        //       iG = round(-A·(-K)/(2π) - k_frac) = round(iG + k_frac - k_frac) = iG.
+        // K = (G+k), so A·K/(2π) = iG + k_frac.
+        // iG = round(A·K/(2π) - k_frac) = round(iG + k_frac - k_frac) = iG.
         double cx = (A_mat[0][0] * Kx + A_mat[0][1] * Ky + A_mat[0][2] * Kz);
         double cy = (A_mat[1][0] * Kx + A_mat[1][1] * Ky + A_mat[1][2] * Kz);
         double cz = (A_mat[2][0] * Kx + A_mat[2][1] * Ky + A_mat[2][2] * Kz);
@@ -540,6 +540,14 @@ auto GKK::loadKPoint(int ikpt) -> const KVecs& {
             total_pos += static_cast<std::size_t>(ng);
         }
 
+        // PVmat file stores -(G+k) for gkk_x/gkk_y/gkk_z. Negate at load time
+        // so that the in-memory convention is K = +(G+k).
+        for (std::size_t i = 0; i < total_pos; ++i) {
+            Kx_[i] = -Kx_[i];
+            Ky_[i] = -Ky_[i];
+            Kz_[i] = -Kz_[i];
+        }
+
         current_ikpt_ = ikpt;
         ready_views_  = KVecsView::Cartesian;  // at minimum Cartesian is now valid
     } else {
@@ -607,12 +615,12 @@ auto GKK::inferCurrent_k() const -> kVec {
         double sum_sin = 0.0;
 
         for (std::size_t ig = 0; ig < ng; ++ig) {
-            // Data is interpreted as -K = -(G+k) in Bohr^-1.
-            const double Kx = - data.Kx[ig];
-            const double Ky = - data.Ky[ig];
-            const double Kz = - data.Kz[ig];
+            // K = (G+k) in Bohr^-1.
+            const double Kx = data.Kx[ig];
+            const double Ky = data.Ky[ig];
+            const double Kz = data.Kz[ig];
 
-            // A·(K) / (2π) = A·(G+k) / (2π) = iG + k_frac  (no leading minus needed)
+            // A·(K) / (2π) = A·(G+k) / (2π) = iG + k_frac
             const double c = (A_mat[dim][0] * Kx + A_mat[dim][1] * Ky + A_mat[dim][2] * Kz) / TWO_PI;
 
             // d = k_frac mod 1 (fractional part of iG + k_frac is just k_frac)
@@ -629,8 +637,11 @@ auto GKK::inferCurrent_k() const -> kVec {
         const double d_avg = avg_theta / TWO_PI;   // [0, 1)
 
         // wrap d_avg into (-0.5, 0.5]
+        // Use a tolerance to guard against floating-point noise around k = 0.5:
+        // when the exact fraction is 0.5, slight numerical errors (< 1e-12) must
+        // not cause a wrap to -0.5.
         double k = d_avg;
-        if (k > 0.5) k -= 1.0;
+        if (k > 0.5 + 1e-12) k -= 1.0;
         k_frac[dim] = k;
     }
 
